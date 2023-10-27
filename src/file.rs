@@ -1,37 +1,10 @@
-use std::{borrow::Cow, num::NonZeroUsize, ops::Range, sync::Arc};
+use std::{borrow::Cow, sync::Arc};
 
 use anyhow::Result;
 use quick_cache::sync::Cache;
-use tokio::{fs::File, sync::mpsc::Receiver};
+use tokio::fs::File;
 
-type FileIndex = Vec<u64>;
-
-struct IndexingTask {
-    sx: tokio::sync::mpsc::Sender<u64>,
-    data: memmap2::Mmap,
-    start: u64,
-}
-
-impl IndexingTask {
-    async fn new(file: &File, start: u64, end: u64) -> Result<(Self, Receiver<u64>)> {
-        let data = unsafe {
-            memmap2::MmapOptions::new()
-                .offset(start)
-                .len((end - start) as usize)
-                .map(file)?
-        };
-        let (sx, rx) = tokio::sync::mpsc::channel(1 << 10);
-        Ok((Self { sx, data, start }, rx))
-    }
-
-    async fn worker(self) -> Result<()> {
-        for i in memchr::memchr_iter(b'\n', &self.data) {
-            self.sx.send(self.start + i as u64).await?;
-        }
-
-        Ok(())
-    }
-}
+mod index;
 
 struct Shard {
     data: memmap2::Mmap,
@@ -92,18 +65,18 @@ impl Shards {
 
 pub struct ShardedFile {
     file: File,
-    index: FileIndex,
+    index: index::FileIndex,
     shards: Shards,
 }
 
 impl ShardedFile {
     pub async fn new(file: File, lines_per_shard: usize, shard_count: usize) -> Result<Self> {
         let len = file.metadata().await?.len();
-        let index = Self::index_file(&file, len).await?;
+        let index = index::index_file(&file, len).await?;
         Ok(Self {
             file,
             index,
-            shards: Shards::new(shard_count, lines_per_shard)
+            shards: Shards::new(shard_count, lines_per_shard),
         })
     }
 
@@ -148,43 +121,6 @@ impl ShardedFile {
             shard.translate_inner_data_range(self.index[line_number], self.index[line_number + 1]);
         let start = if line_number == 0 { 0 } else { start + 1 };
         Ok(shard.get_data(start, end).into_owned())
-    }
-
-    async fn index_file(file: &File, len: u64) -> Result<FileIndex> {
-        let (sx, mut rx) = tokio::sync::mpsc::channel(10);
-
-        let file = file.try_clone().await?;
-
-        let spawner = tokio::task::spawn(async move {
-            const SIZE: u64 = 1 << 20;
-            let mut curr = 0;
-
-            while curr < len {
-                let end = (curr + SIZE).min(len);
-                let (task, task_rx) = IndexingTask::new(&file, curr, end).await?;
-                sx.send(task_rx).await?;
-                tokio::task::spawn(task.worker());
-
-                curr = end;
-            }
-
-            Ok::<(), anyhow::Error>(())
-        });
-
-        let mut result = FileIndex::new();
-        result.push(0);
-
-        while let Some(mut task_rx) = rx.recv().await {
-            while let Some(v) = task_rx.recv().await {
-                result.push(v);
-            }
-        }
-
-        result.push(len);
-
-        spawner.await??;
-
-        Ok(result)
     }
 }
 
