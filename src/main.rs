@@ -1,3 +1,5 @@
+mod command;
+
 use crossterm::{
     event::{
         self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEventKind, KeyModifiers,
@@ -6,47 +8,29 @@ use crossterm::{
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
 use ratatui::{prelude::*, widgets::*};
-use ropey::Rope;
 use std::{error::Error, io};
 
+#[derive(PartialEq)]
 enum InputMode {
     Command,
     Log,
 }
 
-#[derive(Clone, Copy)]
-enum SelectionOrigin {
-    Right,
-    Left,
-}
-
-#[derive(Clone, Copy)]
-enum Selection {
-    Single(usize),
-    Region(usize, usize, SelectionOrigin),
-}
-
 /// App holds the state of the application
 struct App {
-    /// Current value of the input box
-    command_buffer: Rope,
-    /// Position of cursor in the editor area.
-    cursor_selection: Selection,
+    command: command::CommandApp,
     /// Current input mode
     input_mode: InputMode,
-    /// History of recorded messages
-    messages: Vec<String>,
 
     items: Vec<Vec<&'static str>>,
 }
 
-impl Default for App {
-    fn default() -> App {
-        App {
-            command_buffer: Rope::new(),
+impl App {
+    fn new() -> Self {
+        Self {
             input_mode: InputMode::Log,
-            messages: Vec::new(),
-            cursor_selection: Selection::Single(0),
+
+            command: command::CommandApp::new(),
 
             items: vec![
                 vec!["Row11", "Row12", "Row13"],
@@ -81,122 +65,20 @@ impl Default for App {
     }
 }
 
-impl App {
-    fn move_cursor_left(&mut self, shifted: bool) {
-        self.cursor_selection = match self.cursor_selection {
-            Selection::Single(i) => {
-                if shifted && i > 0 {
-                    Selection::Region(i.saturating_sub(1), i, SelectionOrigin::Left)
-                } else {
-                    Selection::Single(i.saturating_sub(1))
-                }
-            }
-            Selection::Region(start, end, dir) => {
-                if shifted {
-                    match dir {
-                        SelectionOrigin::Right => {
-                            if start == end.saturating_sub(1) {
-                                Selection::Single(start)
-                            } else {
-                                Selection::Region(start, end.saturating_sub(1), dir)
-                            }
-                        },
-                        SelectionOrigin::Left => {
-                            Selection::Region(start.saturating_sub(1), end, dir)
-                        },
-                    }
-                } else {
-                    Selection::Single(start)
-                }
-            }
-        }
-    }
-
-    fn clamped(&self, i: usize) -> usize {
-        i.clamp(0, self.command_buffer.len_chars())
-    }
-
-    fn move_cursor_right(&mut self, shifted: bool) {
-        self.cursor_selection = match self.cursor_selection {
-            Selection::Single(i) => {
-                if shifted && i < self.command_buffer.len_chars() {
-                    Selection::Region(
-                        i,
-                        self.clamped(i.saturating_add(1)),
-                        SelectionOrigin::Right,
-                    )
-                } else {
-                    Selection::Single(self.clamped(i.saturating_add(1)))
-                }
-            }
-            Selection::Region(start, end, dir) => {
-                if shifted {
-                    match dir {
-                        SelectionOrigin::Right => {
-                            Selection::Region(start, self.clamped(end.saturating_add(1)), dir)
-                        },
-                        SelectionOrigin::Left => {
-                            if start.saturating_add(1) == end {
-                                Selection::Single(end)
-                            } else {
-                                Selection::Region(self.clamped(start.saturating_add(1)), end, dir)
-                            }
-                        },
-                    }
-                } else {
-                    Selection::Single(end)
-                }
-            }
-        }
-    }
-
-    fn enter_char(&mut self, new_char: char) {
-        match self.cursor_selection {
-            Selection::Single(i) => {
-                self.command_buffer.insert_char(i, new_char);
-                self.move_cursor_right(false)
-            }
-            Selection::Region(_, _, _) => {
-                self.delete();
-                self.enter_char(new_char)
-            },
-        }
-    }
-
-    fn delete(&mut self) -> bool {
-        match self.cursor_selection {
-            Selection::Single(i) => {
-                if i == 0 {
-                    return self.command_buffer.len_chars() != 0;
-                }
-                self.command_buffer.remove(i - 1..i);
-                self.move_cursor_left(false)
-            }
-            Selection::Region(start, end, _) => {
-                self.command_buffer.remove(start..end);
-                self.move_cursor_left(false);
-            },
-        }
-        true
-    }
-
-    fn submit_message(&mut self) {
-        self.messages.push(self.command_buffer.to_string());
-        self.command_buffer.remove(..);
-        self.cursor_selection = Selection::Single(0);
-    }
-}
-
 fn main() -> Result<(), Box<dyn Error>> {
     // setup terminal
     enable_raw_mode()?;
-    let mut stdout = io::stdout();
-    execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
+    let stdout = io::stdout().lock();
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
+    execute!(
+        terminal.backend_mut(),
+        EnterAlternateScreen,
+        EnableMouseCapture
+    )?;
 
     // create app and run it
-    let app = App::default();
+    let app = App::new();
     let res = run_app(&mut terminal, app);
 
     // restore terminal
@@ -231,20 +113,74 @@ fn run_app<B: Backend>(terminal: &mut Terminal<B>, mut app: App) -> io::Result<(
                     _ => {}
                 },
                 InputMode::Command if key.kind == KeyEventKind::Press => match key.code {
-                    KeyCode::Enter => app.submit_message(),
-                    KeyCode::Char(to_insert) => {
-                        app.enter_char(to_insert);
-                    }
-                    KeyCode::Backspace => {
-                        if !app.delete() {
-                            app.input_mode = InputMode::Log;
+                    KeyCode::Enter => {
+                        if app.command.submit() == "q" {
+                            return Ok(());
                         }
                     }
                     KeyCode::Left => {
-                        app.move_cursor_left(key.modifiers.contains(KeyModifiers::SHIFT));
+                        app.command.move_left(command::CursorMovement::new(
+                            key.modifiers.contains(KeyModifiers::SHIFT),
+                            if key.modifiers.contains(KeyModifiers::ALT) {
+                                command::CursorJump::Word
+                            } else {
+                                command::CursorJump::None
+                            },
+                        ));
                     }
                     KeyCode::Right => {
-                        app.move_cursor_right(key.modifiers.contains(KeyModifiers::SHIFT));
+                        app.command.move_right(command::CursorMovement::new(
+                            key.modifiers.contains(KeyModifiers::SHIFT),
+                            if key.modifiers.contains(KeyModifiers::ALT) {
+                                command::CursorJump::Word
+                            } else {
+                                command::CursorJump::None
+                            },
+                        ));
+                    }
+                    KeyCode::Home => {
+                        app.command.move_left(command::CursorMovement::new(
+                            key.modifiers.contains(KeyModifiers::SHIFT),
+                            command::CursorJump::Boundary,
+                        ));
+                    }
+                    KeyCode::End => {
+                        app.command.move_right(command::CursorMovement::new(
+                            key.modifiers.contains(KeyModifiers::SHIFT),
+                            command::CursorJump::Boundary,
+                        ));
+                    }
+                    KeyCode::Char(to_insert) => match to_insert {
+                        'b' if key.modifiers.contains(KeyModifiers::ALT) => {
+                            app.command.move_left(command::CursorMovement::new(
+                                key.modifiers.contains(KeyModifiers::SHIFT),
+                                command::CursorJump::Word,
+                            ));
+                        }
+                        'f' if key.modifiers.contains(KeyModifiers::ALT) => {
+                            app.command.move_right(command::CursorMovement::new(
+                                key.modifiers.contains(KeyModifiers::SHIFT),
+                                command::CursorJump::Word,
+                            ));
+                        }
+                        'a' if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                            app.command.move_left(command::CursorMovement::new(
+                                key.modifiers.contains(KeyModifiers::SHIFT),
+                                command::CursorJump::Boundary,
+                            ));
+                        }
+                        'e' if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                            app.command.move_right(command::CursorMovement::new(
+                                key.modifiers.contains(KeyModifiers::SHIFT),
+                                command::CursorJump::Boundary,
+                            ));
+                        }
+                        _ => app.command.enter_char(to_insert),
+                    },
+                    KeyCode::Backspace => {
+                        if !app.command.delete() {
+                            app.input_mode = InputMode::Log;
+                        }
                     }
                     KeyCode::Esc => {
                         app.input_mode = InputMode::Log;
@@ -257,57 +193,77 @@ fn run_app<B: Backend>(terminal: &mut Terminal<B>, mut app: App) -> io::Result<(
     }
 }
 
+struct CommandWidget<'a> {
+    inner: &'a command::CommandApp,
+    cursor: &'a mut Option<(u16, u16)>,
+    active: bool,
+}
+
+impl Widget for CommandWidget<'_> {
+    fn render(self, area: Rect, buf: &mut Buffer) {
+        let command_chunks = Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([Constraint::Length(1), Constraint::Min(1)])
+            .split(area);
+
+        let input = Paragraph::new({
+            let mut v = Vec::new();
+
+            match self.inner.cursor {
+                command::Cursor::Singleton(_) => v.push(Span::from(&self.inner.buf)),
+                command::Cursor::Selection(start, end, _) => {
+                    v.push(Span::from(&self.inner.buf[..start]));
+                    v.push(Span::from(&self.inner.buf[start..end]).on_blue());
+                    v.push(Span::from(&self.inner.buf[end..]));
+                }
+            }
+
+            Line::from(v)
+        })
+        .style(match self.active {
+            false => Style::default(),
+            true => Style::default().fg(Color::Yellow),
+        });
+        match self.active {
+            false => {}
+            true => {
+                Paragraph::new(":").render(command_chunks[0], buf);
+                match self.inner.cursor {
+                    command::Cursor::Singleton(i) => {
+                        *self.cursor = Some((command_chunks[1].x + i as u16, command_chunks[1].y));
+                    }
+                    command::Cursor::Selection(start, end, dir) => {
+                        let x = match dir {
+                            command::SelectionOrigin::Right => end,
+                            command::SelectionOrigin::Left => start,
+                        };
+                        *self.cursor = Some((command_chunks[1].x + x as u16, command_chunks[1].y));
+                    }
+                }
+            }
+        }
+        input.render(command_chunks[1], buf);
+    }
+}
+
 fn ui(f: &mut Frame, app: &App) {
     let overall_chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([Constraint::Min(1), Constraint::Length(1)])
         .split(f.size());
 
-    let command_chunks = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([Constraint::Length(1), Constraint::Min(1)])
-        .split(overall_chunks[1]);
+    let mut cursor = None;
+    f.render_widget(
+        CommandWidget {
+            active: app.input_mode == InputMode::Command,
+            inner: &app.command,
+            cursor: &mut cursor,
+        },
+        overall_chunks[1],
+    );
 
-    let input = Paragraph::new({
-        let mut v = Vec::new();
-
-        match app.cursor_selection {
-            Selection::Single(_) => v.push(Span::from(app.command_buffer.slice(..))),
-            Selection::Region(start, end, _) => {
-                let before = app.command_buffer.slice(..start);
-                let selected = app.command_buffer.slice(start..end);
-                let after = app.command_buffer.slice(end..);
-
-                v.push(Span::from(before));
-                v.push(Span::from(selected).black().on_blue().bold());
-                v.push(Span::from(after));
-            }
-        }
-
-        Line::from(v)
-    }).style(match app.input_mode {
-        InputMode::Log => Style::default(),
-        InputMode::Command => Style::default().fg(Color::Yellow),
-    });
-    f.render_widget(input, command_chunks[1]);
-    match app.input_mode {
-        InputMode::Log => {}
-        InputMode::Command => {
-            f.render_widget(Paragraph::new(":"), command_chunks[0]);
-
-            match app.cursor_selection {
-                Selection::Single(i) => {
-                    f.set_cursor(command_chunks[1].x + i as u16, command_chunks[1].y)
-                }
-                Selection::Region(start, end, dir) => {
-                    let x = match dir {
-                        SelectionOrigin::Right => end,
-                        SelectionOrigin::Left => start,
-                    };
-                    f.set_cursor(command_chunks[1].x + x as u16, command_chunks[1].y)
-                }
-            }
-        }
+    if let Some((x, y)) = cursor {
+        f.set_cursor(x, y);
     }
 
     let rows = app.items.iter().map(|item| {
