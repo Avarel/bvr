@@ -1,11 +1,11 @@
 #[derive(Clone, Copy)]
-pub(crate) enum SelectionOrigin {
+pub enum SelectionOrigin {
     Right,
     Left,
 }
 
 impl SelectionOrigin {
-    pub(crate) fn flip(self) -> Self {
+    pub fn flip(self) -> Self {
         match self {
             Self::Right => Self::Left,
             Self::Left => Self::Right,
@@ -14,7 +14,7 @@ impl SelectionOrigin {
 }
 
 #[derive(Clone, Copy)]
-pub(crate) enum Cursor {
+pub enum Cursor {
     Singleton(usize),
     Selection(usize, usize, SelectionOrigin),
 }
@@ -32,23 +32,23 @@ impl Cursor {
 }
 
 #[derive(Clone, Copy, Default)]
-pub(crate) enum CursorJump {
+pub enum CursorJump {
     Word,
     Boundary,
     #[default]
     None,
 }
 
-#[derive(Clone, Copy, Default)]
-pub(crate) struct CursorMovement {
-    pub(crate) select: bool,
-    pub(crate) jump: CursorJump,
+#[derive(Clone, Copy)]
+pub struct CursorMovement {
+    select: bool,
+    jump: CursorJump,
 }
 
 impl CursorMovement {
-    pub(crate) const DEFAULT: Self = Self::new(false, CursorJump::None);
+    pub const DEFAULT: Self = Self::new(false, CursorJump::None);
 
-    pub(crate) const fn new(range_selection: bool, jump: CursorJump) -> Self {
+    pub const fn new(range_selection: bool, jump: CursorJump) -> Self {
         Self {
             select: range_selection,
             jump,
@@ -56,9 +56,9 @@ impl CursorMovement {
     }
 }
 
-pub(crate) struct CommandApp {
-    pub(crate) buf: String,
-    pub(crate) cursor: Cursor,
+pub struct CommandApp {
+    buf: String,
+    cursor: Cursor,
 }
 
 impl CommandApp {
@@ -69,7 +69,15 @@ impl CommandApp {
         }
     }
 
-    pub(crate) fn backward_index(&self, i: usize, jump: CursorJump) -> usize {
+    pub fn buf(&self) -> &str {
+        &self.buf
+    }
+
+    pub fn cursor(&self) -> &Cursor {
+        &self.cursor
+    }
+
+    fn backward_index(&self, i: usize, jump: CursorJump) -> usize {
         match jump {
             CursorJump::Word => self.buf[..i].rfind(' ').unwrap_or(0),
             CursorJump::Boundary => 0,
@@ -77,7 +85,7 @@ impl CommandApp {
         }
     }
 
-    pub(crate) fn move_left(&mut self, movement: CursorMovement) {
+    pub fn move_left(&mut self, movement: CursorMovement) {
         self.cursor = match self.cursor {
             Cursor::Singleton(i) => {
                 if movement.select && i > 0 {
@@ -107,7 +115,7 @@ impl CommandApp {
         }
     }
 
-    pub(crate) fn forward_index(&self, i: usize, jump: CursorJump) -> usize {
+    fn forward_index(&self, i: usize, jump: CursorJump) -> usize {
         match jump {
             CursorJump::Word => self.buf[(i + 1).min(self.buf.len())..]
                 .find(' ')
@@ -119,7 +127,7 @@ impl CommandApp {
         .clamp(0, self.buf.len())
     }
 
-    pub(crate) fn move_right(&mut self, movement: CursorMovement) {
+    pub fn move_right(&mut self, movement: CursorMovement) {
         self.cursor = match self.cursor {
             Cursor::Singleton(i) => {
                 if movement.select && i < self.buf.len() {
@@ -149,7 +157,7 @@ impl CommandApp {
         }
     }
 
-    pub(crate) fn enter_char(&mut self, new_char: char) {
+    pub fn enter_char(&mut self, new_char: char) {
         if !new_char.is_ascii() {
             return;
         }
@@ -165,7 +173,7 @@ impl CommandApp {
         }
     }
 
-    pub(crate) fn delete(&mut self) -> bool {
+    pub fn delete(&mut self) -> bool {
         match self.cursor {
             Cursor::Singleton(i) => {
                 if i == 0 {
@@ -182,7 +190,7 @@ impl CommandApp {
         true
     }
 
-    pub(crate) fn submit(&mut self) -> String {
+    pub fn submit(&mut self) -> String {
         self.cursor = Cursor::Singleton(0);
         std::mem::replace(&mut self.buf, String::new())
     }
