@@ -330,7 +330,7 @@ impl FileIndex {
     }
 
     pub fn line_count(&self) -> usize {
-        self.line_index.len() - 1
+        self.line_index.len() - 2
     }
 
     pub fn shard_count(&self) -> usize {

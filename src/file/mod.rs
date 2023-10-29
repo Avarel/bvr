@@ -130,7 +130,7 @@ impl ShardedFile {
     }
 
     pub fn get_line(&self, line_number: usize) -> Result<ShardStr> {
-        assert!(line_number < self.line_count());
+        assert!(line_number <= self.line_count());
         let shard = self.get_shard_of_line(line_number)?;
         
         // prefetch shards
@@ -168,7 +168,7 @@ mod test {
         let file = rt.block_on(ShardedFile::new(file, 25)).unwrap();
         dbg!(file.line_count());
 
-        for i in 0..file.line_count() {
+        for i in 0..=file.line_count() {
             eprintln!("{}\t{}", i + 1, file.get_line(i).unwrap());
         }
     }
