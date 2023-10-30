@@ -1,12 +1,13 @@
-use std::{borrow::Cow, sync::Arc};
+mod index;
+mod partition;
+
+use std::sync::Arc;
 
 use anyhow::Result;
 use quick_cache::sync::Cache;
 use tokio::fs::File;
 
 use self::index::FileIndex;
-
-mod index;
 
 struct Shard {
     id: usize,
@@ -30,7 +31,11 @@ impl ShardStr {
         let slice = unsafe { std::slice::from_raw_parts(ptr, len) };
         // This does the checking
         std::str::from_utf8(slice)?;
-        Ok(Self { _origin: origin, ptr, len })
+        Ok(Self {
+            _origin: origin,
+            ptr,
+            len,
+        })
     }
 }
 
@@ -68,10 +73,6 @@ impl Shard {
         let str = &self.data[start as usize..end as usize];
         ShardStr::new(self.clone(), str.as_ptr(), (end - start) as usize)
     }
-
-    fn get_data(&self, start: u64, end: u64) -> Cow<str> {
-        String::from_utf8_lossy(&self.data[start as usize..end as usize])
-    }
 }
 
 pub struct ShardedFile {
@@ -82,8 +83,7 @@ pub struct ShardedFile {
 
 impl ShardedFile {
     pub async fn new(file: File, shard_count: usize) -> Result<Self> {
-        let len = file.metadata().await?.len();
-        let index = FileIndex::new(&file, len).await?;
+        let index = FileIndex::new(&file).await?;
         Ok(Self {
             file,
             index,
@@ -96,20 +96,7 @@ impl ShardedFile {
     }
 
     fn get_shard_of_line(&self, line_number: usize) -> Result<Arc<Shard>> {
-        let (shard_id, range) = self.index.data_range_of_line(line_number).unwrap();
-        self.shards.get_or_insert_with(&shard_id, || {
-            let data = unsafe {
-                memmap2::MmapOptions::new()
-                    .offset(range.start)
-                    .len((range.end - range.start) as usize)
-                    .map(&self.file)?
-            };
-            Ok(Arc::new(Shard {
-                id: shard_id,
-                data,
-                start: range.start,
-            }))
-        })
+        self.get_shard(self.index.shard_of_line(line_number).unwrap())
     }
 
     fn get_shard(&self, shard_id: usize) -> Result<Arc<Shard>> {
@@ -132,7 +119,7 @@ impl ShardedFile {
     pub fn get_line(&self, line_number: usize) -> Result<ShardStr> {
         assert!(line_number <= self.line_count());
         let shard = self.get_shard_of_line(line_number)?;
-        
+
         // prefetch shards
         if self.shards.capacity() > 3 {
             let shard_id = shard.id;
