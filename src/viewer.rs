@@ -1,5 +1,7 @@
 use std::ops::Range;
 
+use dltwf::file::{shard::ShardStr, ShardedFile};
+
 pub struct Viewport {
     max_height: usize,
     top: usize,
@@ -8,9 +10,9 @@ pub struct Viewport {
 }
 
 impl Viewport {
-    pub(super) fn new() -> Self {
+    pub(super) fn new(max_height: usize) -> Self {
         Self {
-            max_height: 100,
+            max_height,
             top: 0,
             height: 0,
             current: 0,
@@ -39,7 +41,10 @@ impl Viewport {
     }
 
     pub fn move_down(&mut self) {
-        self.top = self.top.saturating_add(1).min(self.max_height.saturating_sub(1))
+        self.top = self
+            .top
+            .saturating_add(1)
+            .min(self.max_height.saturating_sub(1))
     }
 
     pub fn move_up(&mut self) {
@@ -61,12 +66,14 @@ impl Viewport {
 
 pub(super) struct Viewer {
     viewport: Viewport,
+    file: ShardedFile,
 }
 
 impl Viewer {
-    pub(super) fn new() -> Self {
+    pub(super) fn new(file: ShardedFile) -> Self {
         Self {
-            viewport: Viewport::new(),
+            viewport: Viewport::new(file.line_count() + 1),
+            file,
         }
     }
 
@@ -76,5 +83,15 @@ impl Viewer {
 
     pub fn viewport(&self) -> &Viewport {
         &self.viewport
+    }
+
+    pub fn view(&self) -> Vec<Option<(usize, ShardStr)>> {
+        self.viewport.line_range().map(|line_number| {
+            if line_number < self.viewport.max_height() {
+                Some((line_number, self.file.get_line(line_number).unwrap()))
+            } else {
+                None
+            }
+        }).collect()
     }
 }

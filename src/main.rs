@@ -8,6 +8,7 @@ use crossterm::{
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
+use dltwf::file::ShardedFile;
 use ratatui::{prelude::*, widgets::*};
 use std::{error::Error, io};
 
@@ -27,11 +28,12 @@ struct App {
 
 impl App {
     fn new() -> Self {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let file = rt.block_on(tokio::fs::File::open("./Cargo.toml")).unwrap();
         Self {
             input_mode: InputMode::Viewer,
-
             command: command::CommandApp::new(),
-            viewer: viewer::Viewer::new(),
+            viewer: viewer::Viewer::new(rt.block_on(ShardedFile::new(file, 25)).unwrap()),
         }
     }
 }
@@ -67,7 +69,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     Ok(())
 }
-    
+
 fn run_app<B: Backend>(terminal: &mut Terminal<B>, mut app: App) -> io::Result<()> {
     loop {
         terminal.draw(|f| ui(f, &mut app))?;
@@ -80,106 +82,104 @@ fn run_app<B: Backend>(terminal: &mut Terminal<B>, mut app: App) -> io::Result<(
                     // event::MouseEventKind::Moved => todo!(),
                     event::MouseEventKind::ScrollDown => {
                         app.viewer.viewport_mut().move_down();
-                    },
+                    }
                     event::MouseEventKind::ScrollUp => {
                         app.viewer.viewport_mut().move_up();
-                    },
+                    }
                     // event::MouseEventKind::ScrollLeft => todo!(),
                     // event::MouseEventKind::ScrollRight => todo!(),
-                    _ => ()
+                    _ => (),
                 }
             }
-            Event::Key(key) => {
-                match app.input_mode {
-                    InputMode::Viewer => match key.code {
-                        KeyCode::Char(':') => {
-                            app.input_mode = InputMode::Command;
-                        }
-                        KeyCode::Esc => {
+            Event::Key(key) => match app.input_mode {
+                InputMode::Viewer => match key.code {
+                    KeyCode::Char(':') => {
+                        app.input_mode = InputMode::Command;
+                    }
+                    KeyCode::Esc => {
+                        return Ok(());
+                    }
+                    KeyCode::Up => app.viewer.viewport_mut().move_up(),
+                    KeyCode::Down => app.viewer.viewport_mut().move_down(),
+                    _ => {}
+                },
+                InputMode::Command if key.kind == KeyEventKind::Press => match key.code {
+                    KeyCode::Enter => {
+                        if app.command.submit() == "q" {
                             return Ok(());
                         }
-                        KeyCode::Up => app.viewer.viewport_mut().move_up(),
-                        KeyCode::Down => app.viewer.viewport_mut().move_down(),
-                        _ => {}
+                    }
+                    KeyCode::Left => {
+                        app.command.move_left(command::CursorMovement::new(
+                            key.modifiers.contains(KeyModifiers::SHIFT),
+                            if key.modifiers.contains(KeyModifiers::ALT) {
+                                command::CursorJump::Word
+                            } else {
+                                command::CursorJump::None
+                            },
+                        ));
+                    }
+                    KeyCode::Right => {
+                        app.command.move_right(command::CursorMovement::new(
+                            key.modifiers.contains(KeyModifiers::SHIFT),
+                            if key.modifiers.contains(KeyModifiers::ALT) {
+                                command::CursorJump::Word
+                            } else {
+                                command::CursorJump::None
+                            },
+                        ));
+                    }
+                    KeyCode::Home => {
+                        app.command.move_left(command::CursorMovement::new(
+                            key.modifiers.contains(KeyModifiers::SHIFT),
+                            command::CursorJump::Boundary,
+                        ));
+                    }
+                    KeyCode::End => {
+                        app.command.move_right(command::CursorMovement::new(
+                            key.modifiers.contains(KeyModifiers::SHIFT),
+                            command::CursorJump::Boundary,
+                        ));
+                    }
+                    KeyCode::Char(to_insert) => match to_insert {
+                        'b' if key.modifiers.contains(KeyModifiers::ALT) => {
+                            app.command.move_left(command::CursorMovement::new(
+                                key.modifiers.contains(KeyModifiers::SHIFT),
+                                command::CursorJump::Word,
+                            ));
+                        }
+                        'f' if key.modifiers.contains(KeyModifiers::ALT) => {
+                            app.command.move_right(command::CursorMovement::new(
+                                key.modifiers.contains(KeyModifiers::SHIFT),
+                                command::CursorJump::Word,
+                            ));
+                        }
+                        'a' if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                            app.command.move_left(command::CursorMovement::new(
+                                key.modifiers.contains(KeyModifiers::SHIFT),
+                                command::CursorJump::Boundary,
+                            ));
+                        }
+                        'e' if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                            app.command.move_right(command::CursorMovement::new(
+                                key.modifiers.contains(KeyModifiers::SHIFT),
+                                command::CursorJump::Boundary,
+                            ));
+                        }
+                        _ => app.command.enter_char(to_insert),
                     },
-                    InputMode::Command if key.kind == KeyEventKind::Press => match key.code {
-                        KeyCode::Enter => {
-                            if app.command.submit() == "q" {
-                                return Ok(());
-                            }
-                        }
-                        KeyCode::Left => {
-                            app.command.move_left(command::CursorMovement::new(
-                                key.modifiers.contains(KeyModifiers::SHIFT),
-                                if key.modifiers.contains(KeyModifiers::ALT) {
-                                    command::CursorJump::Word
-                                } else {
-                                    command::CursorJump::None
-                                },
-                            ));
-                        }
-                        KeyCode::Right => {
-                            app.command.move_right(command::CursorMovement::new(
-                                key.modifiers.contains(KeyModifiers::SHIFT),
-                                if key.modifiers.contains(KeyModifiers::ALT) {
-                                    command::CursorJump::Word
-                                } else {
-                                    command::CursorJump::None
-                                },
-                            ));
-                        }
-                        KeyCode::Home => {
-                            app.command.move_left(command::CursorMovement::new(
-                                key.modifiers.contains(KeyModifiers::SHIFT),
-                                command::CursorJump::Boundary,
-                            ));
-                        }
-                        KeyCode::End => {
-                            app.command.move_right(command::CursorMovement::new(
-                                key.modifiers.contains(KeyModifiers::SHIFT),
-                                command::CursorJump::Boundary,
-                            ));
-                        }
-                        KeyCode::Char(to_insert) => match to_insert {
-                            'b' if key.modifiers.contains(KeyModifiers::ALT) => {
-                                app.command.move_left(command::CursorMovement::new(
-                                    key.modifiers.contains(KeyModifiers::SHIFT),
-                                    command::CursorJump::Word,
-                                ));
-                            }
-                            'f' if key.modifiers.contains(KeyModifiers::ALT) => {
-                                app.command.move_right(command::CursorMovement::new(
-                                    key.modifiers.contains(KeyModifiers::SHIFT),
-                                    command::CursorJump::Word,
-                                ));
-                            }
-                            'a' if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                                app.command.move_left(command::CursorMovement::new(
-                                    key.modifiers.contains(KeyModifiers::SHIFT),
-                                    command::CursorJump::Boundary,
-                                ));
-                            }
-                            'e' if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                                app.command.move_right(command::CursorMovement::new(
-                                    key.modifiers.contains(KeyModifiers::SHIFT),
-                                    command::CursorJump::Boundary,
-                                ));
-                            }
-                            _ => app.command.enter_char(to_insert),
-                        },
-                        KeyCode::Backspace => {
-                            if !app.command.delete() {
-                                app.input_mode = InputMode::Viewer;
-                            }
-                        }
-                        KeyCode::Esc => {
+                    KeyCode::Backspace => {
+                        if !app.command.delete() {
                             app.input_mode = InputMode::Viewer;
                         }
-                        _ => {}
-                    },
+                    }
+                    KeyCode::Esc => {
+                        app.input_mode = InputMode::Viewer;
+                    }
                     _ => {}
-                }
-            }
+                },
+                _ => {}
+            },
             _ => (),
         }
     }
@@ -262,21 +262,15 @@ fn ui(f: &mut Frame, app: &mut App) {
         .viewport_mut()
         .fit_view(overall_chunks[0].height as usize);
 
-    let rows = app.viewer.viewport().line_range().map(|line_number| {
-        let ln = (line_number + 1).to_string();
-
-        let mut row = if line_number < app.viewer.viewport().max_height() {
-            Row::new([Cell::from(ln), Cell::from("hi")]).height(1)
+    let view = app.viewer.view();
+    let rows = view.iter().map(|data| {
+        if let Some((ln, data)) = data {
+            Row::new([Cell::from((ln + 1).to_string()), Cell::from(data.as_str())])
         } else {
-            Row::new([] as [Cell; 0]).height(1)
-        };
-
-        if app.viewer.viewport_mut().current() == line_number {
-            row = row.on_blue();
+            Row::new([Cell::from(""), Cell::from("")])
         }
-
-        row
+        .height(1)
     });
-    let t = Table::new(rows).widths(&[Constraint::Max(8), Constraint::Min(1)]);
+    let t = Table::new(rows).widths(&[Constraint::Percentage(10), Constraint::Percentage(90)]);
     f.render_widget(t, overall_chunks[0]);
 }

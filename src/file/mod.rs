@@ -1,4 +1,6 @@
-mod index;
+pub mod index;
+pub mod shard;
+
 mod partition;
 
 use std::sync::Arc;
@@ -7,83 +9,25 @@ use anyhow::Result;
 use quick_cache::sync::Cache;
 use tokio::fs::File;
 
-use self::index::FileIndex;
-
-struct Shard {
-    id: usize,
-    data: memmap2::Mmap,
-    start: u64,
-}
-
-/// A line that comes from a shard.
-/// The shard will not be dropped until all of its lines have been dropped.
-/// This structure avoids cloning unnecessarily.
-pub struct ShardStr {
-    _origin: Arc<Shard>,
-    // This data point to the ref-counted arc
-    ptr: *const u8,
-    len: usize,
-}
-
-impl ShardStr {
-    fn new(origin: Arc<Shard>, ptr: *const u8, len: usize) -> Result<Self> {
-        // Safety: the ptr came from an immutable slice
-        let slice = unsafe { std::slice::from_raw_parts(ptr, len) };
-        // This does the checking
-        std::str::from_utf8(slice)?;
-        Ok(Self {
-            _origin: origin,
-            ptr,
-            len,
-        })
-    }
-}
-
-impl std::borrow::Borrow<str> for ShardStr {
-    fn borrow(&self) -> &str {
-        self
-    }
-}
-
-impl std::ops::Deref for ShardStr {
-    type Target = str;
-
-    fn deref(&self) -> &Self::Target {
-        unsafe {
-            // Safety: the ptr came from an immutable slice
-            let slice = std::slice::from_raw_parts(self.ptr, self.len);
-            // Safety: we have already done our checking
-            std::str::from_utf8_unchecked(slice)
-        }
-    }
-}
-
-impl std::fmt::Display for ShardStr {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(self)
-    }
-}
-
-impl Shard {
-    fn translate_inner_data_range(&self, start: u64, end: u64) -> (u64, u64) {
-        (start - self.start, end - self.start)
-    }
-
-    pub fn get_shard_line(self: &Arc<Self>, start: u64, end: u64) -> Result<ShardStr> {
-        let str = &self.data[start as usize..end as usize];
-        ShardStr::new(self.clone(), str.as_ptr(), (end - start) as usize)
-    }
-}
+use self::{
+    index::AsyncIndex,
+    shard::ShardStr,
+};
 
 pub struct ShardedFile {
     file: File,
     index: index::FileIndex,
-    shards: Cache<usize, Arc<Shard>>,
+    shards: Cache<usize, Arc<shard::Shard>>,
 }
 
 impl ShardedFile {
     pub async fn new(file: File, shard_count: usize) -> Result<Self> {
-        let index = FileIndex::new(&file).await?;
+        let index = AsyncIndex::new_complete(&file).await?;
+
+        // let len = file.metadata().await?.len();
+        // let zs = Arc::new(AsyncIndex::new(len));
+        // tokio::task::spawn(zs.index(file.try_clone().await?));
+
         Ok(Self {
             file,
             index,
@@ -95,11 +39,11 @@ impl ShardedFile {
         self.index.line_count()
     }
 
-    fn get_shard_of_line(&self, line_number: usize) -> Result<Arc<Shard>> {
+    fn get_shard_of_line(&self, line_number: usize) -> Result<Arc<shard::Shard>> {
         self.get_shard(self.index.shard_of_line(line_number).unwrap())
     }
 
-    fn get_shard(&self, shard_id: usize) -> Result<Arc<Shard>> {
+    fn get_shard(&self, shard_id: usize) -> Result<Arc<shard::Shard>> {
         let range = self.index.data_range_of_shard(shard_id).unwrap();
         self.shards.get_or_insert_with(&shard_id, || {
             let data = unsafe {
@@ -108,7 +52,7 @@ impl ShardedFile {
                     .len((range.end - range.start) as usize)
                     .map(&self.file)?
             };
-            Ok(Arc::new(Shard {
+            Ok(Arc::new(shard::Shard {
                 id: shard_id,
                 data,
                 start: range.start,
@@ -134,7 +78,11 @@ impl ShardedFile {
         self.get_line_from_shard(&shard, line_number)
     }
 
-    fn get_line_from_shard(&self, shard: &Arc<Shard>, line_number: usize) -> Result<ShardStr> {
+    fn get_line_from_shard(
+        &self,
+        shard: &Arc<shard::Shard>,
+        line_number: usize,
+    ) -> Result<shard::ShardStr> {
         let (start, end) = shard.translate_inner_data_range(
             self.index.start_of_line(line_number),
             self.index.start_of_line(line_number + 1),

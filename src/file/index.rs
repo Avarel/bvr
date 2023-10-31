@@ -1,12 +1,12 @@
+use std::fs::File as StdFile;
 use std::ops::Range;
 use std::os::fd::AsRawFd;
+use std::sync::atomic::AtomicU64;
+use std::sync::Arc;
 
 use anyhow::Result;
 use tokio::fs::File as TokioFile;
 use tokio::sync::mpsc::Receiver;
-
-#[cfg(test)]
-use std::fs::File as StdFile;
 
 use super::partition::RangePartition;
 
@@ -45,8 +45,9 @@ impl IndexingTask {
     }
 }
 
-pub(super) struct IncompleteIndex {
-    index: FileIndex,
+#[derive(Debug)]
+pub struct IncompleteIndex {
+    inner: FileIndex,
     data_size: u64,
     finished: bool,
 }
@@ -60,24 +61,29 @@ impl IncompleteIndex {
     /// How much data of the file should each indexing task handle?
     const INDEXING_VIEW_SIZE: u64 = 1 << 20;
 
-    fn new() -> Self {
+    pub fn new() -> Self {
         Self {
-            index: FileIndex::empty(),
+            inner: FileIndex::empty(),
             data_size: 0,
             finished: false,
         }
     }
 
-    /// Use to check correctness of async version
-    #[cfg(test)]
-    fn index_sync(&mut self, file: &StdFile) -> Result<()> {
+    pub fn index(mut self, file: &StdFile) -> Result<FileIndex> {
         let len = file.metadata()?.len();
         let mut start = 0;
 
         while start < len {
             let end = (start + IncompleteIndex::INDEXING_VIEW_SIZE).min(len);
 
-            let data = IndexingTask::get_data(file, start, end)?;
+            let data = unsafe {
+                memmap2::MmapOptions::new()
+                    .offset(start)
+                    .len((end - start) as usize)
+                    .map(file)?
+            };
+            data.advise(memmap2::Advice::Sequential)?;
+
             for i in memchr::memchr_iter(b'\n', &data) {
                 let line_data = start + i as u64;
                 self.push_line_data(line_data);
@@ -85,51 +91,121 @@ impl IncompleteIndex {
 
             start = end;
         }
-        Ok(self.finalize(len))
+        self.finalize(len);
+
+        Ok(self.inner)
     }
 
     fn push_line_data(&mut self, line_data: u64) {
-        let line_number = self.index.line_index.len();
-        self.index.line_index.push(line_data);
+        let line_number = self.inner.line_index.len();
+        self.inner.line_index.push(line_data);
 
         self.data_size += line_data;
         if self.data_size > Self::SHARD_DATA_THRESHOLD {
-            self.index.shard_partition.partition(line_number);
+            self.inner.shard_partition.partition(line_number);
             self.data_size = 0;
         }
     }
 
     fn finalize(&mut self, len: u64) {
-        self.index.line_index.push(len);
+        self.inner.line_index.push(len);
         // In case the shard boundary did not end on the very last line we iterated through
-        self.index
+        self.inner
             .shard_partition
-            .partition(self.index.line_index.len() - 1);
+            .partition(self.inner.line_index.len() - 1);
 
         self.finished = true;
     }
 
     fn finish(self) -> FileIndex {
         assert!(self.finished);
-        self.index
+        self.inner
     }
 }
 
-pub(super) enum AsyncIndex {
-    Incomplete(tokio::sync::Mutex<IncompleteIndex>),
+#[derive(Debug, PartialEq, Eq)]
+pub struct FileIndex {
+    /// Store the byte location of the start of the indexed line
+    line_index: Vec<u64>,
+    /// Allow queries from line number in a line range to shard
+    shard_partition: RangePartition,
+}
+
+impl FileIndex {
+    fn empty() -> Self {
+        Self {
+            line_index: vec![0],
+            shard_partition: RangePartition::new(),
+        }
+    }
+
+    pub fn line_count(&self) -> usize {
+        self.line_index.len() - 2
+    }
+
+    pub fn shard_count(&self) -> usize {
+        self.shard_partition.len()
+    }
+
+    pub fn start_of_line(&self, line_number: usize) -> u64 {
+        self.line_index[line_number]
+    }
+
+    pub fn shard_of_line(&self, line_number: usize) -> Option<usize> {
+        self.shard_partition.lookup(line_number)
+    }
+
+    pub fn translate_data_from_line_range(&self, line_range: Range<usize>) -> Range<u64> {
+        self.start_of_line(line_range.start)..self.start_of_line(line_range.end)
+    }
+
+    pub fn line_range_of_shard(&self, shard_id: usize) -> Option<Range<usize>> {
+        self.shard_partition.reverse_lookup(shard_id)
+    }
+
+    pub fn data_range_of_shard(&self, shard_id: usize) -> Option<Range<u64>> {
+        Some(self.translate_data_from_line_range(self.line_range_of_shard(shard_id)?))
+    }
+}
+
+#[derive(Debug)]
+pub enum AsyncIndex {
+    Incomplete {
+        inner: tokio::sync::Mutex<IncompleteIndex>,
+        progress: AtomicU64,
+        len: u64,
+    },
     Complete(FileIndex),
 }
 
 impl AsyncIndex {
-    fn new() -> Self {
-        Self::Incomplete(tokio::sync::Mutex::new(IncompleteIndex::new()))
+    pub fn new(len: u64) -> Arc<Self> {
+        Arc::new(Self::Incomplete {
+            inner: tokio::sync::Mutex::new(IncompleteIndex::new()),
+            progress: AtomicU64::new(0),
+            len,
+        })
     }
 
-    async fn index(&self, file: &TokioFile) -> Result<()> {
+    pub async fn new_complete(file: &TokioFile) -> Result<FileIndex> {
+        let len = file.metadata().await?.len();
+
+        let result = AsyncIndex::new(len);
+        result.clone().index(file.try_clone().await?).await?;
+        let mut result = Arc::try_unwrap(result).unwrap();
+        assert!(result.try_finalize());
+        Ok(result.into_inner())
+    }
+
+    pub(super) async fn index(self: Arc<Self>, file: TokioFile) -> Result<()> {
+        let Self::Incomplete { progress, len, .. } = &*self else {
+            panic!("Illegal state")
+        };
+
         // Build line & shard index
         let (sx, mut rx) = tokio::sync::mpsc::channel(10);
 
-        let len = file.metadata().await?.len();
+        let len = *len;
         let file = file.try_clone().await?;
 
         // Indexing worker
@@ -160,12 +236,19 @@ impl AsyncIndex {
                             break;
                         }
                     }
+                    progress.store(line_data, std::sync::atomic::Ordering::SeqCst);
                 })
                 .await;
             }
         }
+
         spawner.await??;
-        Ok(self.write(|z| z.finalize(len)).await)
+        Ok(self
+            .write(|z| {
+                assert!(z.inner.line_index.last().copied().unwrap() < len);
+                z.finalize(len)
+            })
+            .await)
     }
 
     async fn write<F>(&self, cb: F)
@@ -173,7 +256,7 @@ impl AsyncIndex {
         F: FnOnce(&mut IncompleteIndex),
     {
         match self {
-            AsyncIndex::Incomplete(inner) => cb(&mut *inner.lock().await),
+            AsyncIndex::Incomplete { inner, .. } => cb(&mut *inner.lock().await),
             AsyncIndex::Complete(_) => panic!("Index is already complete!"),
         }
     }
@@ -183,14 +266,14 @@ impl AsyncIndex {
         F: FnOnce(&FileIndex) -> T,
     {
         match self {
-            AsyncIndex::Incomplete(inner) => cb(&inner.lock().await.index),
+            AsyncIndex::Incomplete { inner, .. } => cb(&inner.lock().await.inner),
             AsyncIndex::Complete(index) => cb(index),
         }
     }
 
     fn try_finalize(&mut self) -> bool {
         match self {
-            AsyncIndex::Incomplete(inner) => {
+            AsyncIndex::Incomplete { inner, .. } => {
                 let inner = inner.get_mut();
                 if !inner.finished {
                     return false;
@@ -205,8 +288,17 @@ impl AsyncIndex {
 
     fn into_inner(self) -> FileIndex {
         match self {
-            AsyncIndex::Incomplete(_) => panic!("The index is incomplete!"),
+            AsyncIndex::Incomplete { .. } => panic!("The index is incomplete!"),
             AsyncIndex::Complete(inner) => inner,
+        }
+    }
+
+    fn progress(&self) -> f64 {
+        match self {
+            AsyncIndex::Incomplete { progress, len, .. } => {
+                progress.load(std::sync::atomic::Ordering::SeqCst) as f64 / *len as f64
+            }
+            AsyncIndex::Complete(inner) => 1.0,
         }
     }
 
@@ -237,81 +329,5 @@ impl AsyncIndex {
 
     pub async fn data_range_of_shard(&self, shard_id: usize) -> Option<Range<u64>> {
         self.read(|index| index.data_range_of_shard(shard_id)).await
-    }
-}
-
-#[derive(Debug, PartialEq, Eq)]
-pub(super) struct FileIndex {
-    /// Store the byte location of the start of the indexed line
-    line_index: Vec<u64>,
-    /// Allow queries from line number in a line range to shard
-    shard_partition: RangePartition,
-}
-
-impl FileIndex {
-    fn empty() -> Self {
-        Self {
-            line_index: vec![0],
-            shard_partition: RangePartition::new(),
-        }
-    }
-
-    pub(super) async fn new(file: &TokioFile) -> Result<Self> {
-        let mut result = AsyncIndex::new();
-        result.index(file).await?;
-        assert!(result.try_finalize());
-        Ok(result.into_inner())
-    }
-
-    #[cfg(test)]
-    pub(super) fn new_sync(file: &StdFile) -> Result<Self> {
-        let mut result = IncompleteIndex::new();
-        result.index_sync(file)?;
-        Ok(result.finish())
-    }
-
-    pub fn line_count(&self) -> usize {
-        self.line_index.len() - 2
-    }
-
-    pub fn shard_count(&self) -> usize {
-        self.shard_partition.len()
-    }
-
-    pub fn start_of_line(&self, line_number: usize) -> u64 {
-        self.line_index[line_number]
-    }
-
-    pub fn shard_of_line(&self, line_number: usize) -> Option<usize> {
-        self.shard_partition.lookup(line_number)
-    }
-
-    pub fn translate_data_from_line_range(&self, line_range: Range<usize>) -> Range<u64> {
-        self.start_of_line(line_range.start)..self.start_of_line(line_range.end)
-    }
-
-    pub fn line_range_of_shard(&self, shard_id: usize) -> Option<Range<usize>> {
-        self.shard_partition.reverse_lookup(shard_id)
-    }
-
-    pub fn data_range_of_shard(&self, shard_id: usize) -> Option<Range<u64>> {
-        self.line_range_of_shard(shard_id)
-            .map(|range| self.translate_data_from_line_range(range))
-    }
-}
-
-#[cfg(test)]
-mod test {
-    use super::FileIndex;
-
-    #[test]
-    fn what() {
-        let rt = tokio::runtime::Runtime::new().unwrap();
-        let file = rt.block_on(tokio::fs::File::open("./Cargo.toml")).unwrap();
-
-        let index_async = rt.block_on(FileIndex::new(&file)).unwrap();
-        let index_sync = FileIndex::new_sync(&rt.block_on(file.into_std())).unwrap();
-
-        assert_eq!(index_async, index_sync);
     }
 }
