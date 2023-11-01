@@ -169,43 +169,25 @@ impl FileIndex {
 }
 
 #[derive(Debug)]
-pub enum AsyncIndex {
-    Incomplete {
-        inner: tokio::sync::Mutex<IncompleteIndex>,
-        progress: AtomicU64,
-        len: u64,
-    },
-    Complete(FileIndex),
+pub struct AsyncIndexImpl {
+    inner: tokio::sync::Mutex<IncompleteIndex>,
+    progress: AtomicU64,
 }
 
-impl AsyncIndex {
-    pub fn new(len: u64) -> Arc<Self> {
-        Arc::new(Self::Incomplete {
+impl AsyncIndexImpl {
+    fn new() -> Arc<Self> {
+        Arc::new(AsyncIndexImpl {
             inner: tokio::sync::Mutex::new(IncompleteIndex::new()),
             progress: AtomicU64::new(0),
-            len,
         })
     }
 
-    pub async fn new_complete(file: &TokioFile) -> Result<FileIndex> {
-        let len = file.metadata().await?.len();
-
-        let result = AsyncIndex::new(len);
-        result.clone().index(file.try_clone().await?).await?;
-        let mut result = Arc::try_unwrap(result).unwrap();
-        assert!(result.try_finalize());
-        Ok(result.into_inner())
-    }
-
-    pub(super) async fn index(self: Arc<Self>, file: TokioFile) -> Result<()> {
-        let Self::Incomplete { progress, len, .. } = &*self else {
-            panic!("Illegal state")
-        };
-
+    async fn index(self: Arc<Self>, file: TokioFile) -> Result<()> {
+        assert_eq!(Arc::strong_count(&self), 2);
         // Build line & shard index
-        let (sx, mut rx) = tokio::sync::mpsc::channel(10);
+        let (sx, mut rx) = tokio::sync::mpsc::channel(4);
 
-        let len = *len;
+        let len = file.metadata().await?.len();
         let file = file.try_clone().await?;
 
         // Indexing worker
@@ -226,79 +208,102 @@ impl AsyncIndex {
 
         while let Some(mut task_rx) = rx.recv().await {
             while let Some(line_data) = task_rx.recv().await {
-                self.write(|z| {
-                    z.push_line_data(line_data);
-                    // Poll for more data to avoid locking and relocking
-                    for _ in 0..IndexingTask::LINES_PER_MB {
-                        if let Ok(line_data) = task_rx.try_recv() {
-                            z.push_line_data(line_data);
-                        } else {
-                            break;
-                        }
+                let mut inner = self.inner.lock().await;
+                inner.push_line_data(line_data);
+                // Poll for more data to avoid locking and relocking
+                for _ in 0..IndexingTask::LINES_PER_MB {
+                    if let Ok(line_data) = task_rx.try_recv() {
+                        inner.push_line_data(line_data);
+                    } else {
+                        break;
                     }
-                    progress.store(line_data, std::sync::atomic::Ordering::SeqCst);
-                })
-                .await;
+                }
+                self.progress.store(
+                    (line_data as f64 / len as f64).to_bits(),
+                    std::sync::atomic::Ordering::SeqCst,
+                );
             }
         }
 
         spawner.await??;
-        Ok(self
-            .write(|z| {
-                assert!(z.inner.line_index.last().copied().unwrap() < len);
-                z.finalize(len)
-            })
-            .await)
+        let mut inner = self.inner.lock().await;
+        Ok(inner.finalize(len))
     }
 
-    async fn write<F>(&self, cb: F)
-    where
-        F: FnOnce(&mut IncompleteIndex),
-    {
-        match self {
-            AsyncIndex::Incomplete { inner, .. } => cb(&mut *inner.lock().await),
-            AsyncIndex::Complete(_) => panic!("Index is already complete!"),
-        }
+    pub fn progress(&self) -> f64 {
+        f64::from_bits(self.progress.load(std::sync::atomic::Ordering::SeqCst))
+    }
+}
+
+pub struct AsyncIndexIndexer(Arc<AsyncIndexImpl>);
+
+impl AsyncIndexIndexer {
+    pub async fn index(self, file: TokioFile) -> Result<()> {
+        self.0.index(file).await
+    }
+}
+
+#[derive(Debug)]
+pub enum AsyncIndex {
+    Incomplete(Arc<AsyncIndexImpl>),
+    Complete(FileIndex),
+}
+
+impl AsyncIndex {
+    pub fn new() -> (Self, AsyncIndexIndexer) {
+        let inner = AsyncIndexImpl::new();
+        (Self::Incomplete(inner.clone()), AsyncIndexIndexer(inner))
     }
 
-    async fn read<F, T>(&self, cb: F) -> T
+    pub async fn new_complete(file: &TokioFile) -> Result<FileIndex> {
+        let (result, indexer) = Self::new();
+        indexer.index(file.try_clone().await?).await?;
+        Ok(result.unwrap())
+    }
+
+    pub async fn read<F, T>(&self, cb: F) -> T
     where
         F: FnOnce(&FileIndex) -> T,
     {
         match self {
-            AsyncIndex::Incomplete { inner, .. } => cb(&inner.lock().await.inner),
+            AsyncIndex::Incomplete(indexer) => cb(&indexer.inner.lock().await.inner),
             AsyncIndex::Complete(index) => cb(index),
         }
     }
 
-    fn try_finalize(&mut self) -> bool {
+    /// Use this to drop the indirection
+    pub fn try_finalize(&mut self) -> bool {
         match self {
-            AsyncIndex::Incomplete { inner, .. } => {
-                let inner = inner.get_mut();
-                if !inner.finished {
-                    return false;
-                }
-                *self =
-                    AsyncIndex::Complete(std::mem::replace(inner, IncompleteIndex::new()).finish())
+            AsyncIndex::Incomplete(inner) if Arc::strong_count(inner) == 1 => {
+                let inner = unsafe {
+                    Arc::try_unwrap(std::mem::replace(inner, AsyncIndexImpl::new()))
+                        .unwrap_unchecked()
+                };
+                *self = AsyncIndex::Complete(inner.inner.into_inner().finish());
+                true
             }
-            AsyncIndex::Complete(_) => {}
+            AsyncIndex::Incomplete(_) => false,
+            AsyncIndex::Complete(_) => true,
         }
-        true
     }
 
-    fn into_inner(self) -> FileIndex {
+    fn unwrap(mut self) -> FileIndex {
         match self {
-            AsyncIndex::Incomplete { .. } => panic!("The index is incomplete!"),
+            AsyncIndex::Incomplete { .. } => {
+                if self.try_finalize() {
+                    self.unwrap()
+                } else {
+                    panic!("indexing is incomplete")
+                }
+            }
             AsyncIndex::Complete(inner) => inner,
         }
     }
 
-    fn progress(&self) -> f64 {
+    pub fn progress(&self) -> f64 {
         match self {
-            AsyncIndex::Incomplete { progress, len, .. } => {
-                progress.load(std::sync::atomic::Ordering::SeqCst) as f64 / *len as f64
-            }
-            AsyncIndex::Complete(inner) => 1.0,
+            AsyncIndex::Incomplete(indexer) => indexer.progress(),
+            AsyncIndex::Complete(_) => 1.0,
         }
     }
 
