@@ -23,7 +23,6 @@ pub enum Event {
     Init,
     Quit,
     Error,
-    Tick,
     Render,
     FocusGained,
     FocusLost,
@@ -110,9 +109,6 @@ impl<'a> Tui<'a> {
                         None => {},
                         }
                     },
-                    _ = tick_delay => {
-                        _event_tx.send(Event::Tick).unwrap();
-                    },
                     _ = render_delay => {
                         _event_tx.send(Event::Render).unwrap();
                     },
@@ -173,8 +169,8 @@ impl<'a> Tui<'a> {
 
     pub fn suspend(&mut self) -> Result<()> {
         self.exit()?;
-        #[cfg(not(windows))]
-        signal_hook::low_level::raise(signal_hook::consts::signal::SIGTSTP)?;
+        // #[cfg(not(windows))]
+        // signal_hook::low_level::raise(signal_hook::consts::signal::SIGTSTP)?;
         Ok(())
     }
 

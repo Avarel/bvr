@@ -1,6 +1,6 @@
 use anyhow::Result;
 use bvr::file::ShardedFile;
-use crossterm::event::{KeyEvent, KeyCode, KeyEventKind, KeyModifiers};
+use crossterm::event::{KeyEvent, KeyCode, KeyEventKind, KeyModifiers, MouseEventKind};
 use ratatui::{prelude::*, widgets::{Paragraph, Widget, Row, Cell, Table}};
 use tokio::sync::mpsc;
 
@@ -14,7 +14,6 @@ enum InputMode {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Action {
-    Tick,
     Render,
     Resize(u16, u16),
     Quit,
@@ -23,7 +22,6 @@ pub enum Action {
 pub struct App {
     pub should_quit: bool,
     pub should_suspend: bool,
-    pub last_tick_key_events: Vec<KeyEvent>,
     command: CommandApp,
     viewer: Viewer,
     input_mode: InputMode,
@@ -35,7 +33,6 @@ impl App {
         Ok(Self {
             should_quit: false,
             should_suspend: false,
-            last_tick_key_events: Vec::new(),
             input_mode: InputMode::Viewer,
             command: CommandApp::new(),
             viewer: Viewer::new(ShardedFile::new(file, 25).await?),
@@ -51,25 +48,17 @@ impl App {
         let mut tui = tui::Tui::new(terminal)?;
         tui.enter()?;
 
-        // for component in self.components.iter_mut() {
-        //     component.register_action_handler(action_tx.clone())?;
-        // }
-
-        // for component in self.components.iter_mut() {
-        //     component.register_config_handler(self.config.clone())?;
-        // }
-
-        // for component in self.components.iter_mut() {
-        //     component.init(tui.size()?)?;
-        // }
-
         loop {
             if let Some(e) = tui.next().await {
                 match e {
                     tui::Event::Quit => action_tx.send(Action::Quit)?,
-                    tui::Event::Tick => action_tx.send(Action::Tick)?,
                     tui::Event::Render => action_tx.send(Action::Render)?,
                     tui::Event::Resize(x, y) => action_tx.send(Action::Resize(x, y))?,
+                    tui::Event::Mouse(mouse) => match mouse.kind {
+                        MouseEventKind::ScrollUp => self.viewer.viewport_mut().move_up(),
+                        MouseEventKind::ScrollDown => self.viewer.viewport_mut().move_down(),
+                        _ => {}
+                    },
                     tui::Event::Key(key) => {
                         match self.input_mode {
                             InputMode::Viewer => match key.code {
@@ -163,21 +152,10 @@ impl App {
                     }
                     _ => {}
                 }
-                // for component in self.components.iter_mut() {
-                //     if let Some(action) = component.handle_events(Some(e.clone()))? {
-                //         action_tx.send(action)?;
-                //     }
-                // }
             }
 
             while let Ok(action) = action_rx.try_recv() {
-                if action != Action::Tick && action != Action::Render {
-                    // log::debug!("{action:?}");
-                }
                 match action {
-                    Action::Tick => {
-                        self.last_tick_key_events.drain(..);
-                    }
                     Action::Quit => self.should_quit = true,
                     Action::Resize(w, h) => {
                         tui.resize(Rect::new(0, 0, w, h))?;
@@ -187,11 +165,6 @@ impl App {
                         tui.draw(|f| self.ui(f))?;
                     }
                 }
-                // for component in self.components.iter_mut() {
-                //     if let Some(action) = component.update(action.clone())? {
-                //         action_tx.send(action)?
-                //     };
-                // }
             }
             if self.should_quit {
                 tui.stop()?;

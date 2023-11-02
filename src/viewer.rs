@@ -1,6 +1,6 @@
 use std::ops::Range;
 
-use bvr::file::{shard::ShardStr, ShardedFile};
+use bvr::file::{shard::ShardStr, ShardedFile as RawShardedFile};
 
 pub struct Viewport {
     max_height: usize,
@@ -68,6 +68,8 @@ impl Viewport {
         
     }
 }
+
+type ShardedFile = RawShardedFile<bvr::index::sync::AsyncIndex>;
 
 pub(super) struct Viewer {
     viewport: Viewport,

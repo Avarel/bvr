@@ -1,7 +1,4 @@
-pub mod index;
 pub mod shard;
-
-mod partition;
 
 use std::sync::Arc;
 
@@ -9,18 +6,16 @@ use anyhow::Result;
 use quick_cache::sync::Cache;
 use tokio::fs::File;
 
-use self::{
-    index::{sync::AsyncIndex, FileIndex},
-    shard::ShardStr,
-};
+use self::shard::ShardStr;
+use crate::index::{sync::AsyncIndex, CompleteIndex, FileIndex};
 
-pub struct ShardedFile {
+pub struct ShardedFile<Idx> {
     file: File,
-    index: index::sync::AsyncIndex,
+    index: Idx,
     shards: Cache<usize, Arc<shard::Shard>>,
 }
 
-impl ShardedFile {
+impl ShardedFile<AsyncIndex> {
     pub async fn new(file: File, shard_count: usize) -> Result<Self> {
         let (index, indexer) = AsyncIndex::new();
         tokio::spawn(indexer.index(file.try_clone().await?));
@@ -32,22 +27,27 @@ impl ShardedFile {
         })
     }
 
-    #[cfg(test)]
-    async fn new_complete(file: File, shard_count: usize) -> Result<Self> {
-        let (index, indexer) = AsyncIndex::new();
-        indexer.index(file.try_clone().await?).await?;
-
-        Ok(Self {
-            file,
-            index,
-            shards: Cache::new(shard_count),
-        })
-    }
-
     pub fn try_finalize(&mut self) -> bool {
         self.index.try_finalize()
     }
+}
 
+impl ShardedFile<CompleteIndex> {
+    #[cfg(test)]
+    async fn new_complete(file: File, shard_count: usize) -> Result<Self> {
+        let (mut index, indexer) = AsyncIndex::new();
+        indexer.index(file.try_clone().await?).await?;
+        assert!(index.try_finalize());
+
+        Ok(Self {
+            file,
+            index: index.unwrap(),
+            shards: Cache::new(shard_count),
+        })
+    }
+}
+
+impl<Idx: FileIndex> ShardedFile<Idx> {
     pub fn line_count(&self) -> usize {
         self.index.line_count()
     }
@@ -77,7 +77,6 @@ impl ShardedFile {
         assert!(line_number <= self.line_count());
         let shard = self.get_shard_of_line(line_number)?;
 
-        // prefetch shards
         if self.shards.capacity() > 3 {
             let shard_id = shard.id;
             if shard_id > 0 {

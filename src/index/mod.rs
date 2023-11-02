@@ -1,4 +1,6 @@
 pub mod sync;
+mod partition;
+mod atomicvec;
 
 use std::fs::File;
 use std::ops::Range;
@@ -7,7 +9,7 @@ use std::os::fd::AsRawFd;
 use anyhow::Result;
 use tokio::sync::mpsc::Receiver;
 
-use super::partition::RangePartition;
+use partition::RangePartition;
 
 struct IndexingTask {
     sx: tokio::sync::mpsc::Sender<u64>,
@@ -132,7 +134,7 @@ impl IncompleteIndex {
     }
 }
 
-#[derive(Debug, PartialEq, Eq, Clone)]
+#[derive(Debug, Clone)]
 pub struct CompleteIndex {
     /// Store the byte location of the start of the indexed line
     line_index: Vec<u64>,
