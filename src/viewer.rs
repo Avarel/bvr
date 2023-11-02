@@ -62,6 +62,11 @@ impl Viewport {
     pub fn max_height(&self) -> usize {
         self.max_height
     }
+
+    pub fn set_max_height(&mut self, line_count: usize) {
+        self.max_height = line_count;
+        
+    }
 }
 
 pub(super) struct Viewer {
@@ -72,9 +77,13 @@ pub(super) struct Viewer {
 impl Viewer {
     pub(super) fn new(file: ShardedFile) -> Self {
         Self {
-            viewport: Viewport::new(file.line_count() + 1),
+            viewport: Viewport::new(0),
             file,
         }
+    }
+
+    pub fn file_mut(&mut self) -> &mut ShardedFile {
+        &mut self.file
     }
 
     pub fn viewport_mut(&mut self) -> &mut Viewport {
@@ -85,7 +94,9 @@ impl Viewer {
         &self.viewport
     }
 
-    pub fn view(&self) -> Vec<Option<(usize, ShardStr)>> {
+    pub fn view(&mut self) -> Vec<Option<(usize, ShardStr)>> {
+        self.file.try_finalize();
+        self.viewport.max_height = self.file.line_count();
         self.viewport.line_range().map(|line_number| {
             if line_number < self.viewport.max_height() {
                 Some((line_number, self.file.get_line(line_number).unwrap()))

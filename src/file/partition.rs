@@ -3,7 +3,7 @@ use std::{cmp::Ordering, ops::Range};
 /// A data structure to partition a continuous spectrum
 /// of numbers into indexed shards. This allows for
 /// fast lookup
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub struct RangePartition {
     inner: Vec<Range<usize>>,
 }

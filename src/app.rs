@@ -202,7 +202,7 @@ impl App {
         Ok(())
     }
 
-    fn ui(&mut self, f: &mut Frame) {
+    fn ui(&mut self, f: &mut Frame<'_>) {
         let overall_chunks = Layout::default()
             .direction(Direction::Vertical)
             .constraints([Constraint::Min(1), Constraint::Length(1)])

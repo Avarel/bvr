@@ -10,29 +10,42 @@ use quick_cache::sync::Cache;
 use tokio::fs::File;
 
 use self::{
-    index::AsyncIndex,
+    index::{sync::AsyncIndex, FileIndex},
     shard::ShardStr,
 };
 
 pub struct ShardedFile {
     file: File,
-    index: index::FileIndex,
+    index: index::sync::AsyncIndex,
     shards: Cache<usize, Arc<shard::Shard>>,
 }
 
 impl ShardedFile {
     pub async fn new(file: File, shard_count: usize) -> Result<Self> {
-        let index = AsyncIndex::new_complete(&file).await?;
-
-        // let len = file.metadata().await?.len();
-        // let zs = Arc::new(AsyncIndex::new(len));
-        // tokio::task::spawn(zs.index(file.try_clone().await?));
+        let (index, indexer) = AsyncIndex::new();
+        tokio::spawn(indexer.index(file.try_clone().await?));
 
         Ok(Self {
             file,
             index,
             shards: Cache::new(shard_count),
         })
+    }
+
+    #[cfg(test)]
+    async fn new_complete(file: File, shard_count: usize) -> Result<Self> {
+        let (index, indexer) = AsyncIndex::new();
+        indexer.index(file.try_clone().await?).await?;
+
+        Ok(Self {
+            file,
+            index,
+            shards: Cache::new(shard_count),
+        })
+    }
+
+    pub fn try_finalize(&mut self) -> bool {
+        self.index.try_finalize()
     }
 
     pub fn line_count(&self) -> usize {
@@ -100,7 +113,7 @@ mod test {
     fn what() {
         let rt = tokio::runtime::Runtime::new().unwrap();
         let file = rt.block_on(tokio::fs::File::open("./Cargo.toml")).unwrap();
-        let file = rt.block_on(ShardedFile::new(file, 25)).unwrap();
+        let file = rt.block_on(ShardedFile::new_complete(file, 25)).unwrap();
         dbg!(file.line_count());
 
         for i in 0..=file.line_count() {
