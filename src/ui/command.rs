@@ -41,6 +41,7 @@ pub enum CursorJump {
 
 #[derive(Clone, Copy)]
 pub struct CursorMovement {
+    delta: usize,
     select: bool,
     jump: CursorJump,
 }
@@ -50,6 +51,7 @@ impl CursorMovement {
 
     pub const fn new(range_selection: bool, jump: CursorJump) -> Self {
         Self {
+            delta: 1,
             select: range_selection,
             jump,
         }
@@ -77,11 +79,11 @@ impl CommandApp {
         &self.cursor
     }
 
-    fn backward_index(&self, i: usize, jump: CursorJump) -> usize {
-        match jump {
+    fn backward_index(&self, i: usize, movement: CursorMovement) -> usize {
+        match movement.jump {
             CursorJump::Word => self.buf[..i].rfind(' ').unwrap_or(0),
             CursorJump::Boundary => 0,
-            CursorJump::None => i.saturating_sub(1),
+            CursorJump::None => i.saturating_sub(movement.delta),
         }
     }
 
@@ -89,23 +91,19 @@ impl CommandApp {
         self.cursor = match self.cursor {
             Cursor::Singleton(i) => {
                 if movement.select && i > 0 {
-                    Cursor::Selection(
-                        self.backward_index(i, movement.jump),
-                        i,
-                        SelectionOrigin::Left,
-                    )
+                    Cursor::Selection(self.backward_index(i, movement), i, SelectionOrigin::Left)
                 } else {
-                    Cursor::Singleton(self.backward_index(i, movement.jump))
+                    Cursor::Singleton(self.backward_index(i, movement))
                 }
             }
             Cursor::Selection(start, end, dir) => {
                 if movement.select {
                     match dir {
                         SelectionOrigin::Right => {
-                            Cursor::new_range(start, self.backward_index(end, movement.jump), dir)
+                            Cursor::new_range(start, self.backward_index(end, movement), dir)
                         }
                         SelectionOrigin::Left => {
-                            Cursor::new_range(self.backward_index(start, movement.jump), end, dir)
+                            Cursor::new_range(self.backward_index(start, movement), end, dir)
                         }
                     }
                 } else {
@@ -115,39 +113,35 @@ impl CommandApp {
         }
     }
 
-    fn forward_index(&self, i: usize, jump: CursorJump) -> usize {
-        match jump {
+    fn forward_index(&self, i: usize, movement: CursorMovement) -> usize {
+        match movement.jump {
             CursorJump::Word => self.buf[(i + 1).min(self.buf.len())..]
                 .find(' ')
                 .map(|z| z + i + 1)
                 .unwrap_or(usize::MAX),
             CursorJump::Boundary => usize::MAX,
-            CursorJump::None => i.saturating_add(1),
+            CursorJump::None => i.saturating_add(movement.delta),
         }
-        .clamp(0, self.buf.len())
+        .min(self.buf.len())
     }
 
     pub fn move_right(&mut self, movement: CursorMovement) {
         self.cursor = match self.cursor {
             Cursor::Singleton(i) => {
                 if movement.select && i < self.buf.len() {
-                    Cursor::new_range(
-                        i,
-                        self.forward_index(i, movement.jump),
-                        SelectionOrigin::Right,
-                    )
+                    Cursor::new_range(i, self.forward_index(i, movement), SelectionOrigin::Right)
                 } else {
-                    Cursor::Singleton(self.forward_index(i, movement.jump))
+                    Cursor::Singleton(self.forward_index(i, movement))
                 }
             }
             Cursor::Selection(start, end, dir) => {
                 if movement.select {
                     match dir {
                         SelectionOrigin::Right => {
-                            Cursor::new_range(start, self.forward_index(end, movement.jump), dir)
+                            Cursor::new_range(start, self.forward_index(end, movement), dir)
                         }
                         SelectionOrigin::Left => {
-                            Cursor::new_range(self.forward_index(start, movement.jump), end, dir)
+                            Cursor::new_range(self.forward_index(start, movement), end, dir)
                         }
                     }
                 } else {
@@ -157,18 +151,30 @@ impl CommandApp {
         }
     }
 
-    pub fn enter_char(&mut self, new_char: char) {
-        if !new_char.is_ascii() {
+    pub fn enter_char(&mut self, input: char) {
+        let mut b = [0];
+        self.enter_str(input.encode_utf8(&mut b));
+    }
+
+    pub fn enter_str(&mut self, input: &str) {
+        if !input.is_ascii() {
             return;
         }
         match self.cursor {
             Cursor::Singleton(i) => {
-                self.buf.insert(i, new_char);
-                self.move_right(CursorMovement::DEFAULT)
+                self.buf.insert_str(i, input);
+                self.move_right(CursorMovement {
+                    delta: input.len(),
+                    ..CursorMovement::DEFAULT
+                })
             }
-            Cursor::Selection(_, _, _) => {
-                self.delete();
-                self.enter_char(new_char)
+            Cursor::Selection(start, end, _) => {
+                self.buf.replace_range(start..end, input);
+                self.move_left(CursorMovement::DEFAULT);
+                self.move_right(CursorMovement {
+                    delta: input.len(),
+                    ..CursorMovement::DEFAULT
+                })
             }
         }
     }

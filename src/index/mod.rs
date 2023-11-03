@@ -1,6 +1,5 @@
-pub mod sync;
 mod partition;
-mod atomicvec;
+pub mod sync;
 
 use std::fs::File;
 use std::ops::Range;
@@ -10,6 +9,8 @@ use anyhow::Result;
 use tokio::sync::mpsc::Receiver;
 
 use partition::RangePartition;
+
+use crate::cow_vec::CowVec;
 
 struct IndexingTask {
     sx: tokio::sync::mpsc::Sender<u64>,
@@ -56,7 +57,6 @@ pub trait FileIndex {
     fn data_range_of_shard(&self, shard_id: usize) -> Option<Range<u64>>;
 }
 
-#[derive(Debug)]
 pub struct IncompleteIndex {
     inner: CompleteIndex,
     data_size: u64,
@@ -134,10 +134,10 @@ impl IncompleteIndex {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct CompleteIndex {
     /// Store the byte location of the start of the indexed line
-    line_index: Vec<u64>,
+    line_index: CowVec<u64>,
     /// Allow queries from line number in a line range to shard
     shard_partition: RangePartition,
 }
@@ -145,7 +145,7 @@ pub struct CompleteIndex {
 impl CompleteIndex {
     fn empty() -> Self {
         Self {
-            line_index: vec![0],
+            line_index: CowVec::new_one_elem(0),
             shard_partition: RangePartition::new(),
         }
     }

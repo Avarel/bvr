@@ -10,9 +10,9 @@ pub struct Viewport {
 }
 
 impl Viewport {
-    pub(super) fn new(max_height: usize) -> Self {
+    const fn new() -> Self {
         Self {
-            max_height,
+            max_height: 0,
             top: 0,
             height: 0,
             current: 0,
@@ -35,76 +35,75 @@ impl Viewport {
                 self.top = self.current;
             } else {
                 // bring the bottom to current
-                self.top = self.current.saturating_sub(self.height);
+                self.top = self.current.saturating_sub(self.height).saturating_add(1);
             }
         }
     }
 
-    pub fn move_down(&mut self) {
+    pub fn move_view_down(&mut self, delta: usize) {
         self.top = self
             .top
-            .saturating_add(1)
+            .saturating_add(delta)
             .min(self.max_height.saturating_sub(1))
     }
 
-    pub fn move_up(&mut self) {
-        self.top = self.top.saturating_sub(1)
+    pub fn move_view_up(&mut self, delta: usize) {
+        self.top = self.top.saturating_sub(delta)
+    }
+
+    pub fn move_select_down(&mut self, delta: usize) {
+        self.current = self
+            .current
+            .saturating_add(delta)
+            .min(self.max_height.saturating_sub(1));
+        self.jump_to_current()
+    }
+
+    pub fn move_select_up(&mut self, delta: usize) {
+        self.current = self.current.saturating_sub(delta);
+        self.jump_to_current()
     }
 
     pub fn line_range(&self) -> Range<usize> {
-        self.top..self.bottom()
+        self.top..self.bottom().min(self.max_height)
     }
 
     pub fn current(&self) -> usize {
         self.current
     }
-
-    pub fn max_height(&self) -> usize {
-        self.max_height
-    }
-
-    pub fn set_max_height(&mut self, line_count: usize) {
-        self.max_height = line_count;
-        
-    }
 }
 
 type ShardedFile = RawShardedFile<bvr::index::sync::AsyncIndex>;
 
-pub(super) struct Viewer {
+pub struct Viewer {
     viewport: Viewport,
     file: ShardedFile,
 }
 
 impl Viewer {
-    pub(super) fn new(file: ShardedFile) -> Self {
+    pub fn new(file: ShardedFile) -> Self {
         Self {
-            viewport: Viewport::new(0),
+            viewport: Viewport::new(),
             file,
         }
     }
 
-    pub fn file_mut(&mut self) -> &mut ShardedFile {
-        &mut self.file
+    pub fn file(&self) -> &ShardedFile {
+        &self.file
     }
 
     pub fn viewport_mut(&mut self) -> &mut Viewport {
         &mut self.viewport
     }
 
-    pub fn viewport(&self) -> &Viewport {
-        &self.viewport
-    }
-
-    pub fn view(&mut self) -> Vec<Option<(usize, ShardStr)>> {
+    pub fn update_and_view(&mut self) -> Vec<(usize, ShardStr)> {
         self.file.try_finalize();
         self.viewport.max_height = self.file.line_count();
-        self.viewport.line_range().map(|line_number| {
-            if line_number < self.viewport.max_height() {
-                Some((line_number, self.file.get_line(line_number).unwrap()))
-            } else {
-                None
-            }
-        }).collect()
+        self.viewport
+            .line_range()
+            .map(|line_number| {
+                (line_number, self.file.get_line(line_number).unwrap())
+            })
+            .collect()
     }
 }

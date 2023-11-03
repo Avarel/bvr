@@ -30,6 +30,10 @@ impl ShardedFile<AsyncIndex> {
     pub fn try_finalize(&mut self) -> bool {
         self.index.try_finalize()
     }
+
+    pub fn progress(&self) -> f64 {
+        self.index.progress()
+    }
 }
 
 impl ShardedFile<CompleteIndex> {

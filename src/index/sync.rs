@@ -4,11 +4,10 @@ use anyhow::Result;
 use std::ops::Range;
 use std::sync::{atomic::AtomicU64, Arc};
 
-#[derive(Debug)]
 pub struct AsyncIndexImpl {
     pub(crate) inner: tokio::sync::Mutex<IncompleteIndex>,
     pub(crate) progress: AtomicU64,
-    pub(crate) cache: AsyncCache<CompleteIndex>,
+    pub(crate) cache: std::sync::Mutex<Option<CompleteIndex>>,
 }
 
 impl AsyncIndexImpl {
@@ -16,7 +15,7 @@ impl AsyncIndexImpl {
         Arc::new(AsyncIndexImpl {
             inner: tokio::sync::Mutex::new(IncompleteIndex::new()),
             progress: AtomicU64::new(0),
-            cache: AsyncCache::new(),
+            cache: std::sync::Mutex::new(None),
         })
     }
 
@@ -78,13 +77,24 @@ impl AsyncIndexImpl {
         T: std::fmt::Debug + Clone,
     {
         match self.inner.try_lock() {
-            Ok(index) => self.cache.write(index.inner.clone(), cb),
-            Err(_) => self.cache.read(|index| match index {
-                Some(v) => cb(&v),
-                None => self
-                    .cache
-                    .write(self.inner.blocking_lock().inner.clone(), cb),
-            }),
+            Ok(index) => {
+                let clone = index.inner.clone();
+                let val = cb(&clone);
+                *self.cache.lock().unwrap() = Some(clone);
+                val
+            },
+            Err(_) => {
+                let lock = self.cache.lock().unwrap();
+                if let Some(v) = lock.as_ref() {
+                    return cb(&v);
+                }
+                drop(lock);
+
+                let clone = self.inner.blocking_lock().inner.clone();
+                let val = cb(&clone);
+                *self.cache.lock().unwrap() = Some(clone);
+                val
+            },
         }
     }
 }
@@ -127,30 +137,6 @@ impl AsyncIndexIndexer {
     }
 }
 
-#[derive(Debug)]
-pub(crate) struct AsyncCache<T>(std::sync::Mutex<Option<T>>);
-
-impl<T> AsyncCache<T> {
-    pub(crate) const fn new() -> Self {
-        Self(std::sync::Mutex::new(None))
-    }
-
-    pub(crate) fn write<F, R>(&self, val: T, f: F) -> R
-    where
-        F: FnOnce(&T) -> R,
-    {
-        f(self.0.lock().unwrap().insert(val))
-    }
-
-    pub(crate) fn read<F, R>(&self, f: F) -> R
-    where
-        F: FnOnce(Option<&T>) -> R,
-    {
-        f(self.0.lock().unwrap().as_ref())
-    }
-}
-
-#[derive(Debug)]
 pub enum AsyncIndex {
     Incomplete(Arc<AsyncIndexImpl>),
     Complete(CompleteIndex),

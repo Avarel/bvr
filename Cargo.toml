@@ -19,9 +19,6 @@ serde_json = "1.0"
 tempfile = "3.8"
 tokio = { version = "1", features = ["sync", "rt-multi-thread", "fs", "time", "macros"]}
 grep = "0.2"
-tokio-util = "0.7.10"
-futures = "0.3.29"
-signal-hook = "0.3.17"
 
 [dev-dependencies]
 rand = "0.8"

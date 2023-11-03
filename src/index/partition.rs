@@ -1,17 +1,19 @@
 use std::ops::Range;
 
+use crate::cow_vec::CowVec;
+
 /// A data structure to partition a continuous spectrum
 /// of numbers into indexed shards. This allows for
 /// fast lookup.
-#[derive(Debug, PartialEq, Eq, Clone)]
+#[derive(Clone)]
 pub struct RangePartition {
-    inner: Vec<usize>,
+    inner: CowVec<usize>,
 }
 
 impl RangePartition {
     /// Create a new range parition.
     pub fn new() -> Self {
-        Self { inner: vec![0] }
+        Self { inner: CowVec::new_one_elem(0) }
     }
 
     /// List how many partitions there are.
