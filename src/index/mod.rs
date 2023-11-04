@@ -1,5 +1,5 @@
-mod partition;
 pub mod sync;
+mod partition;
 
 use std::fs::File;
 use std::ops::Range;

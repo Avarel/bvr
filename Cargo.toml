@@ -1,23 +1,27 @@
 [package]
 name = "bvr"
-version = "0.1.0"
+description = "Chew through logs."
+categories = ["command-line-utilities"]
+authors = ["An Tran <antranprm@gmail.com>"]
+version = "0.0.1"
 edition = "2021"
+license = "MIT"
+keywords = ["cli", "pager"]
+homepage = "https://github.com/Avarel/bvr"
+repository = "https://github.com/Avarel/bvr"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
 anyhow = "1.0"
-base64-simd = "0.8"
 clap = { version = "4.4", features = ["cargo", "derive"] }
-crossterm = { version = "0.27", features = ["event-stream"] }
+crossterm = "0.27"
 memchr = "2.6"
 memmap2 = "0.9"
 quick_cache = "0.4"
 ratatui = "0.24"
-serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
 tempfile = "3.8"
-tokio = { version = "1", features = ["sync", "rt-multi-thread", "fs", "time", "macros"]}
+tokio = { version = "1", features = ["sync", "rt-multi-thread", "fs"] }
 grep = "0.2"
 
 [dev-dependencies]

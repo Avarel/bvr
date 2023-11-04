@@ -1,14 +1,32 @@
 use anyhow::Result;
-use std::sync::Arc;
+use std::{ops::Range, os::fd::AsRawFd, sync::Arc};
 
-pub(crate) struct Shard {
-    pub(crate) id: usize,
-    pub(crate) data: memmap2::Mmap,
-    pub(crate) start: u64,
+pub struct Shard {
+    id: usize,
+    data: memmap2::Mmap,
+    start: u64,
 }
 
 impl Shard {
-    pub(crate) fn translate_inner_data_range(&self, start: u64, end: u64) -> (u64, u64) {
+    pub fn new<F: AsRawFd>(id: usize, range: Range<u64>, file: &F) -> Result<Self> {
+        let data = unsafe {
+            memmap2::MmapOptions::new()
+                .offset(range.start)
+                .len((range.end - range.start) as usize)
+                .map(file)?
+        };
+        Ok(Self {
+            id,
+            data,
+            start: range.start,
+        })
+    }
+
+    pub fn id(&self) -> usize {
+        self.id
+    }
+
+    pub fn translate_inner_data_range(&self, start: u64, end: u64) -> (u64, u64) {
         (start - self.start, end - self.start)
     }
 

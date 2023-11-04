@@ -63,17 +63,7 @@ impl<Idx: FileIndex> ShardedFile<Idx> {
     fn get_shard(&self, shard_id: usize) -> Result<Arc<shard::Shard>> {
         let range = self.index.data_range_of_shard(shard_id).unwrap();
         self.shards.get_or_insert_with(&shard_id, || {
-            let data = unsafe {
-                memmap2::MmapOptions::new()
-                    .offset(range.start)
-                    .len((range.end - range.start) as usize)
-                    .map(&self.file)?
-            };
-            Ok(Arc::new(shard::Shard {
-                id: shard_id,
-                data,
-                start: range.start,
-            }))
+            Ok(Arc::new(shard::Shard::new(shard_id, range, &self.file)?))
         })
     }
 
@@ -82,7 +72,7 @@ impl<Idx: FileIndex> ShardedFile<Idx> {
         let shard = self.get_shard_of_line(line_number)?;
 
         if self.shards.capacity() > 3 {
-            let shard_id = shard.id;
+            let shard_id = shard.id();
             if shard_id > 0 {
                 self.get_shard(shard_id - 1).ok();
             }
