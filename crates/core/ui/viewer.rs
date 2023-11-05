@@ -1,6 +1,6 @@
 use std::ops::Range;
 
-use bvr::file::{shard::ShardStr, ShardedFile as RawShardedFile};
+use bvr_file::file::{shard::ShardStr, ShardedFile as RawShardedFile};
 
 use crate::common::VDirection;
 
@@ -72,7 +72,7 @@ impl Viewport {
     }
 }
 
-type ShardedFile = RawShardedFile<bvr::index::sync::AsyncIndex>;
+type ShardedFile = RawShardedFile<bvr_file::index::sync::AsyncIndex>;
 
 pub struct Viewer {
     name: String,

@@ -9,7 +9,7 @@ use crate::ui::{
     viewer::Viewer,
 };
 use anyhow::Result;
-use bvr::file::ShardedFile;
+use bvr_file::file::ShardedFile;
 use crossterm::{
     event::{
         self, DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture,
