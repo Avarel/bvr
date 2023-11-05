@@ -1,30 +1,38 @@
+use crate::common::{HDirection, VDirection};
+
+use super::InputMode;
+
 pub enum Action {
+    Exit,
+    SwitchMode(InputMode),
     Command(CommandAction),
     Viewer(ViewerAction),
 }
 
 pub enum ViewerAction {
-    ScrollUp,
-    ScrollDown,
+    Pan {
+        direction: VDirection,
+        delta: u16
+    },
+    Move(VDirection),
+    SwitchActive(HDirection),
 }
 
 pub enum CommandAction {
-    CursorMove {
-        direction: CursorDirection,
+    Move {
+        direction: HDirection,
         select: bool,
-        jump: CursorJump,
+        jump: Jump,
     },
     Type(char),
     Paste(String),
+    Backspace,
+    Submit,
 }
 
-pub enum CursorJump {
+#[derive(Clone, Copy)]
+pub enum Jump {
     Word,
     Boundary,
     None,
-}
-
-pub enum CursorDirection {
-    Left,
-    Right,
 }

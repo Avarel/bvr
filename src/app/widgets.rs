@@ -59,7 +59,7 @@ impl<'a> Widget for StatusWidget<'a> {
                 Paragraph::new(name)
                     .block(Block::new().padding(Padding::horizontal(1)))
                     .alignment(Alignment::Right)
-                    .on_blue()
+                    .on_black()
                     .render(chunks[1], buf);
             }
             StatusWidgetState::Message { message } => {

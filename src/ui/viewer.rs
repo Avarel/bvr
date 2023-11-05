@@ -2,6 +2,8 @@ use std::ops::Range;
 
 use bvr::file::{shard::ShardStr, ShardedFile as RawShardedFile};
 
+use crate::common::VDirection;
+
 pub struct Viewport {
     max_height: usize,
     top: usize,
@@ -40,27 +42,24 @@ impl Viewport {
         }
     }
 
-    pub fn move_view_down(&mut self, delta: usize) {
-        self.top = self
-            .top
-            .saturating_add(delta)
-            .min(self.max_height.saturating_sub(1))
+    pub fn pan_view(&mut self, direction: VDirection, delta: usize) {
+        self.top = match direction {
+            VDirection::Up => self.top.saturating_sub(delta),
+            VDirection::Down => self
+                .top
+                .saturating_add(delta)
+                .min(self.max_height.saturating_sub(1)),
+        }
     }
 
-    pub fn move_view_up(&mut self, delta: usize) {
-        self.top = self.top.saturating_sub(delta)
-    }
-
-    pub fn move_select_down(&mut self, delta: usize) {
-        self.current = self
-            .current
-            .saturating_add(delta)
-            .min(self.max_height.saturating_sub(1));
-        self.jump_to_current()
-    }
-
-    pub fn move_select_up(&mut self, delta: usize) {
-        self.current = self.current.saturating_sub(delta);
+    pub fn move_select(&mut self, direction: VDirection, delta: usize) {
+        self.current = match direction {
+            VDirection::Up => self.current.saturating_sub(delta),
+            VDirection::Down => self
+                .current
+                .saturating_add(delta)
+                .min(self.max_height.saturating_sub(1)),
+        };
         self.jump_to_current()
     }
 
@@ -103,9 +102,7 @@ impl Viewer {
         self.viewport.max_height = self.file.line_count();
         self.viewport
             .line_range()
-            .map(|line_number| {
-                (line_number, self.file.get_line(line_number).unwrap())
-            })
+            .map(|line_number| (line_number, self.file.get_line(line_number).unwrap()))
             .collect()
     }
 

@@ -1,8 +1,9 @@
-mod widgets;
 mod actions;
+mod keybinding;
+mod widgets;
 
 use crate::ui::{
-    command::{CommandApp, CursorJump, CursorMovement},
+    command::{CommandApp, CursorMovement},
     mux::MultiplexerApp,
     status::StatusApp,
     viewer::Viewer,
@@ -12,7 +13,6 @@ use bvr::file::ShardedFile;
 use crossterm::{
     event::{
         self, DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture,
-        Event, KeyCode, KeyEventKind, KeyModifiers,
     },
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
@@ -20,13 +20,17 @@ use crossterm::{
 use ratatui::prelude::*;
 use std::{path::Path, time::Duration};
 
-use self::widgets::{CommandWidget, MultiplexerWidget};
+use self::{
+    actions::{Action, CommandAction, ViewerAction},
+    keybinding::Keybinding,
+    widgets::{CommandWidget, MultiplexerWidget},
+};
 
 pub type Backend<'a> = ratatui::backend::CrosstermBackend<std::io::StdoutLock<'a>>;
 pub type Terminal<'a> = ratatui::Terminal<Backend<'a>>;
 
 #[derive(PartialEq, Clone, Copy)]
-enum InputMode {
+pub enum InputMode {
     Command,
     Viewer,
     Select,
@@ -39,6 +43,7 @@ pub struct App {
     mux: MultiplexerApp,
     status: StatusApp,
     command: CommandApp,
+    keybinds: Keybinding,
     rt: tokio::runtime::Runtime,
 }
 
@@ -49,6 +54,7 @@ impl App {
             command: CommandApp::new(),
             mux: MultiplexerApp::new(),
             status: StatusApp::new(),
+            keybinds: Keybinding::Default,
             rt,
         }
     }
@@ -74,178 +80,7 @@ impl App {
             EnableMouseCapture,
         )?;
 
-        loop {
-            terminal.draw(|f| self.ui(f))?;
-
-            if !event::poll(Duration::from_secs_f64(1.0 / 60.0))? {
-                continue;
-            }
-            // TODO: map each event into a simpler enum [Action] for cleaner keybinding handling
-            match event::read()? {
-                Event::Mouse(mouse) => match mouse.kind {
-                    event::MouseEventKind::ScrollDown => {
-                        self.mux
-                            .active_viewer_mut()
-                            .map(|viewer| viewer.viewport_mut().move_view_down(2));
-                    }
-                    event::MouseEventKind::ScrollUp => {
-                        self.mux
-                            .active_viewer_mut()
-                            .map(|viewer| viewer.viewport_mut().move_view_up(2));
-                    }
-                    _ => (),
-                },
-                Event::Paste(paste) => {
-                    self.command.enter_str(&paste);
-                }
-                Event::Key(key) => match self.input_mode {
-                    InputMode::Viewer => match key.code {
-                        KeyCode::Char(':') => {
-                            self.input_mode = InputMode::Command;
-                        }
-                        KeyCode::Char('i') => {
-                            self.input_mode = InputMode::Select;
-                        }
-                        KeyCode::Esc => {
-                            break;
-                        }
-                        KeyCode::Up => {
-                            self.mux
-                                .active_viewer_mut()
-                                .map(|viewer| viewer.viewport_mut().move_view_up(1));
-                        }
-                        KeyCode::Down => {
-                            self.mux
-                                .active_viewer_mut()
-                                .map(|viewer| viewer.viewport_mut().move_view_down(1));
-                        }
-                        KeyCode::Right => {
-                            self.mux.move_active_right();
-                        }
-                        KeyCode::Left => {
-                            self.mux.move_active_left();
-                        }
-                        _ => {}
-                    },
-                    InputMode::Select => match key.code {
-                        KeyCode::Char(':') => {
-                            self.input_mode = InputMode::Command;
-                        }
-                        KeyCode::Esc => {
-                            self.input_mode = InputMode::Viewer;
-                        }
-                        KeyCode::Up => {
-                            self.mux
-                                .active_viewer_mut()
-                                .map(|viewer| viewer.viewport_mut().move_select_up(1));
-                        }
-                        KeyCode::Down => {
-                            self.mux
-                                .active_viewer_mut()
-                                .map(|viewer| viewer.viewport_mut().move_select_down(1));
-                        }
-                        _ => {}
-                    },
-                    InputMode::Command if key.kind == KeyEventKind::Press => match key.code {
-                        KeyCode::Esc => {
-                            self.input_mode = InputMode::Viewer;
-                        }
-                        KeyCode::Enter => {
-                            let command = self.command.submit();
-                            if command == "q" {
-                                break;
-                            } else if command.starts_with("open ") {
-                                let path = &command[5..];
-                                match self.new_viewer(path) {
-                                    Ok(_) => {}
-                                    Err(err) => self.status.submit_message(
-                                        format!("Error opening file `{path}`: {err}"),
-                                        Some(Duration::from_secs(2)),
-                                    ),
-                                }
-                            } else if command == "close" {
-                                self.mux.close_active_viewer()
-                            } else if command == "mux" {
-                                self.mux.swap_mode();
-                            } else {
-                                self.status.submit_message(
-                                    format!("Invalid command `{command}`"),
-                                    Some(Duration::from_secs(2)),
-                                );
-                            }
-                            self.input_mode = InputMode::Viewer;
-                        }
-                        KeyCode::Left => {
-                            self.command.move_left(CursorMovement::new(
-                                key.modifiers.contains(KeyModifiers::SHIFT),
-                                if key.modifiers.contains(KeyModifiers::ALT) {
-                                    CursorJump::Word
-                                } else {
-                                    CursorJump::None
-                                },
-                            ));
-                        }
-                        KeyCode::Right => {
-                            self.command.move_right(CursorMovement::new(
-                                key.modifiers.contains(KeyModifiers::SHIFT),
-                                if key.modifiers.contains(KeyModifiers::ALT) {
-                                    CursorJump::Word
-                                } else {
-                                    CursorJump::None
-                                },
-                            ));
-                        }
-                        KeyCode::Home => {
-                            self.command.move_left(CursorMovement::new(
-                                key.modifiers.contains(KeyModifiers::SHIFT),
-                                CursorJump::Boundary,
-                            ));
-                        }
-                        KeyCode::End => {
-                            self.command.move_right(CursorMovement::new(
-                                key.modifiers.contains(KeyModifiers::SHIFT),
-                                CursorJump::Boundary,
-                            ));
-                        }
-                        KeyCode::Backspace => {
-                            if !self.command.delete() {
-                                self.input_mode = InputMode::Viewer;
-                            }
-                        }
-                        KeyCode::Char(to_insert) => match to_insert {
-                            'b' if key.modifiers.contains(KeyModifiers::ALT) => {
-                                self.command.move_left(CursorMovement::new(
-                                    key.modifiers.contains(KeyModifiers::SHIFT),
-                                    CursorJump::Word,
-                                ));
-                            }
-                            'f' if key.modifiers.contains(KeyModifiers::ALT) => {
-                                self.command.move_right(CursorMovement::new(
-                                    key.modifiers.contains(KeyModifiers::SHIFT),
-                                    CursorJump::Word,
-                                ));
-                            }
-                            'a' if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                                self.command.move_left(CursorMovement::new(
-                                    key.modifiers.contains(KeyModifiers::SHIFT),
-                                    CursorJump::Boundary,
-                                ));
-                            }
-                            'e' if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                                self.command.move_right(CursorMovement::new(
-                                    key.modifiers.contains(KeyModifiers::SHIFT),
-                                    CursorJump::Boundary,
-                                ));
-                            }
-                            _ => self.command.enter_char(to_insert),
-                        },
-                        _ => {}
-                    },
-                    _ => {}
-                },
-                _ => (),
-            }
-        }
+        self.event_loop(terminal)?;
 
         // restore terminal
         disable_raw_mode()?;
@@ -257,6 +92,88 @@ impl App {
         )?;
         terminal.show_cursor()?;
 
+        Ok(())
+    }
+
+    fn event_loop(&mut self, terminal: &mut Terminal) -> Result<()> {
+        loop {
+            terminal.draw(|f| self.ui(f))?;
+
+            if !event::poll(Duration::from_secs_f64(1.0 / 60.0))? {
+                continue;
+            }
+
+            let key = self.keybinds.map_key(self.input_mode, event::read()?);
+
+            let Some(action) = key else { continue };
+
+            match action {
+                Action::Exit => break,
+                Action::SwitchMode(new_mode) => self.input_mode = new_mode,
+                Action::Viewer(action) => match action {
+                    ViewerAction::Pan { direction, delta } => {
+                        if let Some(viewer) = self.mux.active_viewer_mut() {
+                            viewer.viewport_mut().pan_view(direction, delta as usize)
+                        }
+                    }
+                    ViewerAction::SwitchActive(direction) => self.mux.move_active(direction),
+                    ViewerAction::Move(direction) => {
+                        if let Some(viewer) = self.mux.active_viewer_mut() {
+                            viewer.viewport_mut().move_select(direction, 1)
+                        }
+                    }
+                },
+                Action::Command(action) => match action {
+                    CommandAction::Move {
+                        direction,
+                        select,
+                        jump,
+                    } => self.command.move_cursor(
+                        direction,
+                        CursorMovement::new(
+                            select,
+                            match jump {
+                                actions::Jump::Word => crate::ui::command::CursorJump::Word,
+                                actions::Jump::Boundary => crate::ui::command::CursorJump::Boundary,
+                                actions::Jump::None => crate::ui::command::CursorJump::None,
+                            },
+                        ),
+                    ),
+                    CommandAction::Type(c) => self.command.enter_char(c),
+                    CommandAction::Paste(s) => self.command.enter_str(&s),
+                    CommandAction::Backspace => {
+                        if !self.command.delete() {
+                            self.input_mode = InputMode::Viewer;
+                        }
+                    }
+                    CommandAction::Submit => {
+                        let command = self.command.submit();
+                        if command == "q" {
+                            break;
+                        } else if command.starts_with("open ") {
+                            let path = &command[5..];
+                            match self.new_viewer(path) {
+                                Ok(_) => {}
+                                Err(err) => self.status.submit_message(
+                                    format!("Error opening file `{path}`: {err}"),
+                                    Some(Duration::from_secs(2)),
+                                ),
+                            }
+                        } else if command == "close" {
+                            self.mux.close_active_viewer()
+                        } else if command == "mux" {
+                            self.mux.swap_mode();
+                        } else {
+                            self.status.submit_message(
+                                format!("Invalid command `{command}`"),
+                                Some(Duration::from_secs(2)),
+                            );
+                        }
+                        self.input_mode = InputMode::Viewer;
+                    }
+                },
+            }
+        }
         Ok(())
     }
 

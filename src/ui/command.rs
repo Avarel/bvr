@@ -1,3 +1,5 @@
+use crate::common::HDirection;
+
 #[derive(Clone, Copy)]
 pub enum SelectionOrigin {
     Right,
@@ -87,32 +89,6 @@ impl CommandApp {
         }
     }
 
-    pub fn move_left(&mut self, movement: CursorMovement) {
-        self.cursor = match self.cursor {
-            Cursor::Singleton(i) => {
-                if movement.select && i > 0 {
-                    Cursor::Selection(self.backward_index(i, movement), i, SelectionOrigin::Left)
-                } else {
-                    Cursor::Singleton(self.backward_index(i, movement))
-                }
-            }
-            Cursor::Selection(start, end, dir) => {
-                if movement.select {
-                    match dir {
-                        SelectionOrigin::Right => {
-                            Cursor::new_range(start, self.backward_index(end, movement), dir)
-                        }
-                        SelectionOrigin::Left => {
-                            Cursor::new_range(self.backward_index(start, movement), end, dir)
-                        }
-                    }
-                } else {
-                    Cursor::Singleton(start)
-                }
-            }
-        }
-    }
-
     fn forward_index(&self, i: usize, movement: CursorMovement) -> usize {
         match movement.jump {
             CursorJump::Word => self.buf[(i + 1).min(self.buf.len())..]
@@ -125,31 +101,73 @@ impl CommandApp {
         .min(self.buf.len())
     }
 
-    pub fn move_right(&mut self, movement: CursorMovement) {
-        self.cursor = match self.cursor {
-            Cursor::Singleton(i) => {
-                if movement.select && i < self.buf.len() {
-                    Cursor::new_range(i, self.forward_index(i, movement), SelectionOrigin::Right)
-                } else {
-                    Cursor::Singleton(self.forward_index(i, movement))
-                }
-            }
-            Cursor::Selection(start, end, dir) => {
-                if movement.select {
-                    match dir {
-                        SelectionOrigin::Right => {
-                            Cursor::new_range(start, self.forward_index(end, movement), dir)
-                        }
-                        SelectionOrigin::Left => {
-                            Cursor::new_range(self.forward_index(start, movement), end, dir)
+    pub fn move_cursor(&mut self, direction: HDirection, movement: CursorMovement) {
+        match direction {
+            HDirection::Left => {
+                self.cursor = match self.cursor {
+                    Cursor::Singleton(i) => {
+                        if movement.select && i > 0 {
+                            Cursor::Selection(
+                                self.backward_index(i, movement),
+                                i,
+                                SelectionOrigin::Left,
+                            )
+                        } else {
+                            Cursor::Singleton(self.backward_index(i, movement))
                         }
                     }
-                } else {
-                    Cursor::Singleton(end)
+                    Cursor::Selection(start, end, dir) => {
+                        if movement.select {
+                            match dir {
+                                SelectionOrigin::Right => Cursor::new_range(
+                                    start,
+                                    self.backward_index(end, movement),
+                                    dir,
+                                ),
+                                SelectionOrigin::Left => Cursor::new_range(
+                                    self.backward_index(start, movement),
+                                    end,
+                                    dir,
+                                ),
+                            }
+                        } else {
+                            Cursor::Singleton(start)
+                        }
+                    }
+                }
+            }
+            HDirection::Right => {
+                self.cursor = match self.cursor {
+                    Cursor::Singleton(i) => {
+                        if movement.select && i < self.buf.len() {
+                            Cursor::new_range(
+                                i,
+                                self.forward_index(i, movement),
+                                SelectionOrigin::Right,
+                            )
+                        } else {
+                            Cursor::Singleton(self.forward_index(i, movement))
+                        }
+                    }
+                    Cursor::Selection(start, end, dir) => {
+                        if movement.select {
+                            match dir {
+                                SelectionOrigin::Right => {
+                                    Cursor::new_range(start, self.forward_index(end, movement), dir)
+                                }
+                                SelectionOrigin::Left => {
+                                    Cursor::new_range(self.forward_index(start, movement), end, dir)
+                                }
+                            }
+                        } else {
+                            Cursor::Singleton(end)
+                        }
+                    }
                 }
             }
         }
     }
+
 
     pub fn enter_char(&mut self, input: char) {
         let mut b = [0];
@@ -163,15 +181,15 @@ impl CommandApp {
         match self.cursor {
             Cursor::Singleton(i) => {
                 self.buf.insert_str(i, input);
-                self.move_right(CursorMovement {
+                self.move_cursor(HDirection::Right, CursorMovement {
                     delta: input.len(),
                     ..CursorMovement::DEFAULT
                 })
             }
             Cursor::Selection(start, end, _) => {
                 self.buf.replace_range(start..end, input);
-                self.move_left(CursorMovement::DEFAULT);
-                self.move_right(CursorMovement {
+                self.move_cursor(HDirection::Left, CursorMovement::DEFAULT);
+                self.move_cursor(HDirection::Right, CursorMovement {
                     delta: input.len(),
                     ..CursorMovement::DEFAULT
                 })
@@ -186,11 +204,11 @@ impl CommandApp {
                     return self.buf.len() != 0;
                 }
                 self.buf.remove(i - 1);
-                self.move_left(CursorMovement::DEFAULT)
+                self.move_cursor(HDirection::Left, CursorMovement::DEFAULT)
             }
             Cursor::Selection(start, end, _) => {
                 self.buf.replace_range(start..end, "");
-                self.move_left(CursorMovement::DEFAULT);
+                self.move_cursor(HDirection::Left, CursorMovement::DEFAULT);
             }
         }
         true

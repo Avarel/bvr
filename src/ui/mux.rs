@@ -1,3 +1,5 @@
+use crate::common::HDirection;
+
 use super::viewer::Viewer;
 
 #[derive(Clone, Copy)]
@@ -60,15 +62,14 @@ impl MultiplexerApp {
         self.active
     }
 
-    pub fn move_active_left(&mut self) {
-        self.active = self.active.saturating_sub(1);
-    }
-
-    pub fn move_active_right(&mut self) {
-        self.active = self
-            .active
-            .saturating_add(1)
-            .min(self.views.len().saturating_sub(1));
+    pub fn move_active(&mut self, direction: HDirection) {
+        self.active = match direction {
+            HDirection::Left => self.active.saturating_sub(1),
+            HDirection::Right => self
+                .active
+                .saturating_add(1)
+                .min(self.views.len().saturating_sub(1)),
+        }
     }
 
     pub fn active_viewer_mut(&mut self) -> Option<&mut Viewer> {

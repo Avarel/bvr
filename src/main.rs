@@ -1,3 +1,4 @@
+mod common;
 mod app;
 mod ui;
 
