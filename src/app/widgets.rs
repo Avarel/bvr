@@ -1,53 +1,92 @@
 use crate::ui::{
     command::{CommandApp, Cursor, SelectionOrigin},
-    viewer::{Multiplexer, MultiplexerMode, Viewer},
+    status::StatusApp,
+    viewer::Viewer,
+    mux::{MultiplexerApp, MultiplexerMode}
 };
 use ratatui::{prelude::*, widgets::*};
 
 use super::InputMode;
 
+enum StatusWidgetState<'a> {
+    Normal {
+        progress: f64,
+        line_count: usize,
+        name: &'a str,
+    },
+    Message {
+        message: &'a str,
+    },
+    None,
+}
+
 pub struct StatusWidget<'a> {
-    pub(super) input_mode: InputMode,
-    pub progress: f64,
-    pub line_count: usize,
-    pub name: &'a str,
+    input_mode: InputMode,
+    state: StatusWidgetState<'a>,
 }
 
 impl<'a> Widget for StatusWidget<'a> {
     fn render(self, area: Rect, buf: &mut Buffer) {
         let chunks = Layout::default()
             .direction(Direction::Horizontal)
-            .constraints([
-                Constraint::Length(11),
-                Constraint::Min(1),
-                Constraint::Length(self.name.len() as u16 + 2),
-            ])
+            .constraints([Constraint::Length(9), Constraint::Min(1)])
             .split(area);
 
-        Paragraph::new(Span::from(if self.progress > 1.0 {
-            format!("100% ({} lines)", self.line_count)
-        } else {
-            format!("{:.2}% ({} lines)", self.progress * 100.0, self.line_count)
-        }))
-        .block(Block::new().padding(Padding::horizontal(1)))
-        .dark_gray()
-        .on_black()
-        .render(chunks[1], buf);
+        match self.state {
+            StatusWidgetState::Normal {
+                progress,
+                line_count,
+                name,
+            } => {
+                let chunks = Layout::default()
+                    .direction(Direction::Horizontal)
+                    .constraints([
+                        Constraint::Min(1),
+                        Constraint::Length(name.len() as u16 + 2),
+                    ])
+                    .split(chunks[1]);
 
-        Paragraph::new(Span::from(match self.input_mode {
-            InputMode::Command => "COMMAND",
-            InputMode::Viewer => "VIEWER",
-            InputMode::Select => "SELECT",
-        }))
-        .block(Block::new().padding(Padding::horizontal(1)))
-        .on_blue()
-        .render(chunks[0], buf);
+                Paragraph::new(Span::from(if progress > 1.0 {
+                    format!("100% ({} lines)", line_count)
+                } else {
+                    format!("{:.2}% ({} lines)", progress * 100.0, line_count)
+                }))
+                .block(Block::new().padding(Padding::horizontal(1)))
+                .dark_gray()
+                .on_black()
+                .render(chunks[0], buf);
 
-        Paragraph::new(self.name)
+                Paragraph::new(name)
+                    .block(Block::new().padding(Padding::horizontal(1)))
+                    .alignment(Alignment::Right)
+                    .on_blue()
+                    .render(chunks[1], buf);
+            }
+            StatusWidgetState::Message { message } => {
+                Paragraph::new(message)
+                    .block(Block::new().padding(Padding::horizontal(1)))
+                    .dark_gray()
+                    .on_black()
+                    .render(chunks[1], buf);
+            }
+            StatusWidgetState::None => {
+                Paragraph::new("Open a file with :open [filename]")
+                    .block(Block::new().padding(Padding::horizontal(1)))
+                    .dark_gray()
+                    .on_black()
+                    .render(chunks[1], buf);
+            }
+        }
+
+        let mode_tag = match self.input_mode {
+            InputMode::Command => Paragraph::new(Span::from("COMMAND")).on_light_green(),
+            InputMode::Viewer => Paragraph::new(Span::from("VIEWER")).on_blue(),
+            InputMode::Select => Paragraph::new(Span::from("SELECT")).on_magenta(),
+        };
+
+        mode_tag
             .block(Block::new().padding(Padding::horizontal(1)))
-            .alignment(Alignment::Right)
-            .on_blue()
-            .render(chunks[2], buf);
+            .render(chunks[0], buf);
     }
 }
 
@@ -130,7 +169,8 @@ impl Widget for ViewerWidget<'_> {
 }
 
 pub struct MultiplexerWidget<'a> {
-    pub mux: &'a mut Multiplexer,
+    pub mux: &'a mut MultiplexerApp,
+    pub status: &'a mut StatusApp,
     pub(super) input_mode: InputMode,
 }
 
@@ -178,57 +218,68 @@ impl Widget for TabWidget<'_> {
 
 impl Widget for MultiplexerWidget<'_> {
     fn render(self, area: Rect, buf: &mut Buffer) {
-        if self.mux.is_empty() {
-            return Paragraph::new("empty")
-                .alignment(Alignment::Center)
-                .render(area, buf);
-        }
-
         let chunks = Self::split_status(area);
-        let active = self.mux.active();
-        match self.mux.mode() {
-            MultiplexerMode::Windows => {
-                let hsplit = Self::split_horizontal(chunks[0], self.mux.len());
 
-                for (i, (&chunk, viewer)) in
-                    hsplit.into_iter().zip(self.mux.viewers_mut()).enumerate()
-                {
-                    let vsplit = Self::split_tabs(chunk);
-                    TabWidget {
-                        name: viewer.name(),
-                        active: active == i,
+        if !self.mux.is_empty() {
+            let active = self.mux.active();
+            match self.mux.mode() {
+                MultiplexerMode::Windows => {
+                    let hsplit = Self::split_horizontal(chunks[0], self.mux.len());
+
+                    for (i, (&chunk, viewer)) in
+                        hsplit.into_iter().zip(self.mux.viewers_mut()).enumerate()
+                    {
+                        let vsplit = Self::split_tabs(chunk);
+                        TabWidget {
+                            name: viewer.name(),
+                            active: active == i,
+                        }
+                        .render(vsplit[0], buf);
+                        ViewerWidget { viewer }.render(vsplit[1], buf);
                     }
-                    .render(vsplit[0], buf);
+                }
+                MultiplexerMode::Tabs => {
+                    let vsplit = Self::split_tabs(chunks[0]);
+                    let hsplit = Self::split_horizontal(vsplit[0], self.mux.len());
+
+                    for (i, (&chunk, viewer)) in
+                        hsplit.into_iter().zip(self.mux.viewers_mut()).enumerate()
+                    {
+                        TabWidget {
+                            name: viewer.name(),
+                            active: active == i,
+                        }
+                        .render(chunk, buf);
+                    }
+
+                    let viewer = self.mux.active_viewer_mut().unwrap();
                     ViewerWidget { viewer }.render(vsplit[1], buf);
                 }
             }
-            MultiplexerMode::Tabs => {
-                let vsplit = Self::split_tabs(chunks[0]);
-                let hsplit = Self::split_horizontal(vsplit[0], self.mux.len());
-
-                for (i, (&chunk, viewer)) in
-                    hsplit.into_iter().zip(self.mux.viewers_mut()).enumerate()
-                {
-                    TabWidget {
-                        name: viewer.name(),
-                        active: active == i,
-                    }
-                    .render(chunk, buf);
-                }
-
-                let viewer = self.mux.active_viewer_mut().unwrap();
-                ViewerWidget { viewer }.render(vsplit[1], buf);
-            }
         }
 
-        if let Some(viewer) = self.mux.active_viewer_mut() {
-            StatusWidget {
+        match self.status.get_message_update() {
+            Some(message) => StatusWidget {
                 input_mode: self.input_mode,
-                progress: viewer.file().progress(),
-                line_count: viewer.file().line_count(),
-                name: viewer.name(),
+                state: StatusWidgetState::Message { message: &message },
             }
-            .render(chunks[1], buf);
+            .render(chunks[1], buf),
+            None => match self.mux.active_viewer_mut() {
+                Some(viewer) => StatusWidget {
+                    input_mode: self.input_mode,
+                    state: StatusWidgetState::Normal {
+                        progress: viewer.file().progress(),
+                        line_count: viewer.file().line_count(),
+                        name: viewer.name(),
+                    },
+                }
+                .render(chunks[1], buf),
+                None => StatusWidget {
+                    input_mode: self.input_mode,
+                    state: StatusWidgetState::None,
+                }
+                .render(chunks[1], buf),
+            },
         }
     }
 }

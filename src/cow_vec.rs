@@ -16,7 +16,7 @@ use std::{
 enum CowVecRepr<T> {
     /// Snapshot form of the [`CowVec`]. Reads must be done using
     /// the saved length field.
-    Borrow {
+    Borrowed {
         buf: Arc<AtomicAllocation<T>>,
         len: usize,
     },
@@ -107,7 +107,7 @@ impl<T> CowVec<T> {
         // No matter what len we load, it will be valid since the length
         // is only incremented after the data is written.
         match &self.repr {
-            CowVecRepr::Borrow { len, .. } => *len,
+            CowVecRepr::Borrowed { len, .. } => *len,
             CowVecRepr::Owned { buf } => buf.len.load(Relaxed),
         }
     }
@@ -122,7 +122,7 @@ impl<T: Copy> CowVec<T> {
 
     pub fn push(&mut self, elem: T) {
         let (buf, len) = match &self.repr {
-            &CowVecRepr::Borrow { len, .. } => (self.grow(), len),
+            &CowVecRepr::Borrowed { len, .. } => (self.grow(), len),
             CowVecRepr::Owned { buf } => {
                 let len = buf.len.load(Acquire);
                 let cap = buf.cap;
@@ -142,7 +142,7 @@ impl<T: Copy> CowVec<T> {
     /// Grow will return a buffer that the caller can write to.
     fn grow(&mut self) -> &Arc<AtomicAllocation<T>> {
         let (buf, len) = match &self.repr {
-            CowVecRepr::Borrow { buf, len } => (buf, *len),
+            CowVecRepr::Borrowed { buf, len } => (buf, *len),
             CowVecRepr::Owned { buf } => (buf, buf.len.load(SeqCst)),
         };
         let cap = buf.cap;
@@ -201,7 +201,7 @@ impl<T: Copy> CowVec<T> {
         // Safety: we just assigned an owned repr in the previous statement
         //         to an exclusive reference
         match &self.repr {
-            CowVecRepr::Borrow { .. } => unsafe { unreachable_unchecked() },
+            CowVecRepr::Borrowed { .. } => unsafe { unreachable_unchecked() },
             CowVecRepr::Owned { buf } => buf,
         }
     }
@@ -210,7 +210,7 @@ impl<T: Copy> CowVec<T> {
 impl<T: Copy> Clone for CowVec<T> {
     fn clone(&self) -> Self {
         let (buf, len) = match &self.repr {
-            CowVecRepr::Borrow { buf, len } => (buf.clone(), *len),
+            CowVecRepr::Borrowed { buf, len } => (buf.clone(), *len),
             CowVecRepr::Owned { buf } => {
                 // Load using seqcst so it doesn't magically get reordered in the CPU
                 // instruction buffer to after the Arc atomic clone (which uses relaxed)
@@ -225,7 +225,7 @@ impl<T: Copy> Clone for CowVec<T> {
             }
         };
         CowVec {
-            repr: CowVecRepr::Borrow { buf, len },
+            repr: CowVecRepr::Borrowed { buf, len },
         }
     }
 }
@@ -235,7 +235,7 @@ impl<T: Copy> Deref for CowVec<T> {
 
     fn deref(&self) -> &Self::Target {
         let (ptr, len) = match &self.repr {
-            CowVecRepr::Borrow { buf, len } => (buf.as_ptr(), *len),
+            CowVecRepr::Borrowed { buf, len } => (buf.as_ptr(), *len),
             CowVecRepr::Owned { buf } => {
                 let len = buf.len.load(SeqCst);
                 (buf.as_ptr(), len)

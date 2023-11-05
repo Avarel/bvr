@@ -28,7 +28,7 @@ fn main() -> Result<()> {
     let mut app = App::new(rt);
 
     if let Some(path) = args.file {
-        app.new_viewer(path);
+        app.new_viewer(path)?;
     }
 
     app.run_app(&mut terminal)

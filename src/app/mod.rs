@@ -1,8 +1,11 @@
 mod widgets;
+mod actions;
 
 use crate::ui::{
     command::{CommandApp, CursorJump, CursorMovement},
-    viewer::{Multiplexer, Viewer},
+    mux::MultiplexerApp,
+    status::StatusApp,
+    viewer::Viewer,
 };
 use anyhow::Result;
 use bvr::file::ShardedFile;
@@ -31,10 +34,11 @@ enum InputMode {
 
 /// App holds the state of the application
 pub struct App {
-    command: CommandApp,
-    mux: Multiplexer,
     /// Current input mode
     input_mode: InputMode,
+    mux: MultiplexerApp,
+    status: StatusApp,
+    command: CommandApp,
     rt: tokio::runtime::Runtime,
 }
 
@@ -43,20 +47,22 @@ impl App {
         Self {
             input_mode: InputMode::Viewer,
             command: CommandApp::new(),
-            mux: Multiplexer::new(),
+            mux: MultiplexerApp::new(),
+            status: StatusApp::new(),
             rt,
         }
     }
 
-    pub fn new_viewer(&mut self, path: impl AsRef<Path>) {
+    pub fn new_viewer(&mut self, path: impl AsRef<Path>) -> Result<()> {
         let path = path.as_ref();
-        let file = self.rt.block_on(tokio::fs::File::open(path)).unwrap();
+        let file = self.rt.block_on(tokio::fs::File::open(path))?;
         let name = path
             .file_name()
             .map(|str| str.to_string_lossy().into_owned())
             .unwrap_or_else(|| String::from("Unnamed File"));
-        let viewer = Viewer::new(name, self.rt.block_on(ShardedFile::new(file, 25)).unwrap());
+        let viewer = Viewer::new(name, self.rt.block_on(ShardedFile::new(file, 25))?);
         self.mux.push_viewer(viewer);
+        Ok(())
     }
 
     pub fn run_app(&mut self, terminal: &mut Terminal) -> Result<()> {
@@ -74,6 +80,7 @@ impl App {
             if !event::poll(Duration::from_secs_f64(1.0 / 60.0))? {
                 continue;
             }
+            // TODO: map each event into a simpler enum [Action] for cleaner keybinding handling
             match event::read()? {
                 Event::Mouse(mouse) => match mouse.kind {
                     event::MouseEventKind::ScrollDown => {
@@ -148,11 +155,23 @@ impl App {
                             if command == "q" {
                                 break;
                             } else if command.starts_with("open ") {
-                                self.new_viewer(&command[5..]);
+                                let path = &command[5..];
+                                match self.new_viewer(path) {
+                                    Ok(_) => {}
+                                    Err(err) => self.status.submit_message(
+                                        format!("Error opening file `{path}`: {err}"),
+                                        Some(Duration::from_secs(2)),
+                                    ),
+                                }
                             } else if command == "close" {
                                 self.mux.close_active_viewer()
                             } else if command == "mux" {
                                 self.mux.swap_mode();
+                            } else {
+                                self.status.submit_message(
+                                    format!("Invalid command `{command}`"),
+                                    Some(Duration::from_secs(2)),
+                                );
                             }
                             self.input_mode = InputMode::Viewer;
                         }
@@ -250,6 +269,7 @@ impl App {
         f.render_widget(
             MultiplexerWidget {
                 mux: &mut self.mux,
+                status: &mut self.status,
                 input_mode: self.input_mode,
             },
             chunks[0],
