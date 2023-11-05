@@ -1,5 +1,5 @@
 use anyhow::Result;
-use std::{ops::Range, os::fd::AsRawFd, sync::Arc};
+use std::{cell::Cell, ops::Range, os::fd::AsRawFd, ptr::NonNull, rc::Rc};
 
 pub struct Shard {
     id: usize,
@@ -15,6 +15,7 @@ impl Shard {
                 .len((range.end - range.start) as usize)
                 .map(file)?
         };
+        data.advise(memmap2::Advice::WillNeed)?;
         Ok(Self {
             id,
             data,
@@ -30,43 +31,81 @@ impl Shard {
         (start - self.start, end - self.start)
     }
 
-    pub fn get_shard_line(self: &Arc<Self>, start: u64, end: u64) -> Result<ShardStr> {
+    pub fn get_shard_line(self: &Rc<Self>, start: u64, end: u64) -> Result<ShardStr> {
         let str = &self.data[start as usize..end as usize];
-        ShardStr::new(self.clone(), str.as_ptr(), (end - start) as usize)
+        ShardStr::new(
+            self.clone(),
+            // Safety: this ptr came from a slice
+            unsafe { NonNull::new(str.as_ptr() as *mut _).unwrap_unchecked() },
+            (end - start) as usize,
+        )
     }
 }
 
 /// A line that comes from a shard.
-/// The shard will not be dropped until all of its lines have been dropped.
+/// The shard will not be dropped until all of its lines have been dropped, essentially
+/// pinning the shard.
+///
 /// This structure avoids cloning unnecessarily.
 pub struct ShardStr {
-    pub(crate) _origin: Arc<Shard>,
+    _origin: Rc<Shard>,
     // This data point to the ref-counted arc
-    pub(crate) ptr: *const u8,
-    pub(crate) len: usize,
+    repr: Cell<ShardStrRepr>,
+}
+
+#[derive(Clone, Copy)]
+enum ShardStrRepr {
+    Unchecked(FatPtr),
+    Borrowed(FatPtr),
+    Error,
+}
+
+#[derive(Clone, Copy)]
+struct FatPtr {
+    ptr: NonNull<u8>,
+    len: usize,
+}
+
+impl FatPtr {
+    fn as_bytes(&self) -> &'static [u8] {
+        // Safety: this came from origin, we borrow for 'static but the lifetime
+        // is tied to self in as_str()
+        unsafe { std::slice::from_raw_parts(self.ptr.as_ptr(), self.len) }
+    }
 }
 
 impl ShardStr {
-    pub(crate) fn new(origin: Arc<Shard>, ptr: *const u8, len: usize) -> Result<Self> {
-        // Safety: the ptr came from an immutable slice
-        let slice = unsafe { std::slice::from_raw_parts(ptr, len) };
-        // Check if it is utf8 for later
-        std::str::from_utf8(slice)?;
+    const ERROR_STR: &str = "!!! line is not utf-8 !!!";
+
+    /// Constructs a string that lives inside
+    /// # Contract
+    /// 1. The provided pointer must point to data that lives inside the ref-counted [Shard].
+    /// 2. The length must be valid.
+    fn new(origin: Rc<Shard>, ptr: NonNull<u8>, len: usize) -> Result<Self> {
         Ok(Self {
             _origin: origin,
-            ptr,
-            len,
+            repr: Cell::new(ShardStrRepr::Unchecked(FatPtr { ptr, len })),
         })
     }
 
-    pub fn as_bytes(&self) -> &[u8] {
-        // Safety: the ptr came from an immutable slice
-        unsafe { std::slice::from_raw_parts(self.ptr, self.len) }
-    }
-
     pub fn as_str(&self) -> &str {
-        // Safety: We have checked in new
-        unsafe { std::str::from_utf8_unchecked(self.as_bytes()) }
+        match self.repr.get() {
+            ShardStrRepr::Unchecked(repr) => match std::str::from_utf8(repr.as_bytes()) {
+                Ok(s) => {
+                    self.repr.replace(ShardStrRepr::Borrowed(repr));
+                    s
+                }
+                Err(_) => {
+                    self.repr.replace(ShardStrRepr::Error);
+                    Self::ERROR_STR
+                }
+            },
+            ShardStrRepr::Borrowed(repr) => unsafe {
+                // Safety: we have already checked this
+                std::str::from_utf8_unchecked(repr.as_bytes())
+            },
+            ShardStrRepr::Error => Self::ERROR_STR,
+        }
     }
 }
 

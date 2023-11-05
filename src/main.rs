@@ -13,7 +13,7 @@ use clap::Parser;
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
 struct Args {
-    file: PathBuf,
+    file: Option<PathBuf>,
 }
 
 fn main() -> Result<()> {
@@ -25,6 +25,11 @@ fn main() -> Result<()> {
 
     let rt = tokio::runtime::Runtime::new().unwrap();
 
-    let mut app = App::new(rt, &args.file);
+    let mut app = App::new(rt);
+
+    if let Some(path) = args.file {
+        app.new_viewer(path);
+    }
+
     app.run_app(&mut terminal)
 }

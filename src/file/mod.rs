@@ -1,9 +1,9 @@
 pub mod shard;
 
-use std::sync::Arc;
+use std::{rc::Rc, num::NonZeroUsize};
 
 use anyhow::Result;
-use quick_cache::sync::Cache;
+use lru::LruCache;
 use tokio::fs::File;
 
 use self::shard::ShardStr;
@@ -12,7 +12,7 @@ use crate::index::{sync::AsyncIndex, CompleteIndex, FileIndex};
 pub struct ShardedFile<Idx> {
     file: File,
     index: Idx,
-    shards: Cache<usize, Arc<shard::Shard>>,
+    shards: LruCache<usize, Rc<shard::Shard>>,
 }
 
 impl ShardedFile<AsyncIndex> {
@@ -23,7 +23,7 @@ impl ShardedFile<AsyncIndex> {
         Ok(Self {
             file,
             index,
-            shards: Cache::new(shard_count),
+            shards: LruCache::new(NonZeroUsize::new(shard_count).unwrap()),
         })
     }
 
@@ -38,7 +38,7 @@ impl ShardedFile<AsyncIndex> {
 
 impl ShardedFile<CompleteIndex> {
     #[cfg(test)]
-    async fn new_complete(file: File, shard_count: usize) -> Result<Self> {
+    async fn new(file: File, shard_count: usize) -> Result<Self> {
         let (mut index, indexer) = AsyncIndex::new();
         indexer.index(file.try_clone().await?).await?;
         assert!(index.try_finalize());
@@ -46,7 +46,7 @@ impl ShardedFile<CompleteIndex> {
         Ok(Self {
             file,
             index: index.unwrap(),
-            shards: Cache::new(shard_count),
+            shards: LruCache::new(NonZeroUsize::new(shard_count).unwrap()),
         })
     }
 }
@@ -56,22 +56,22 @@ impl<Idx: FileIndex> ShardedFile<Idx> {
         self.index.line_count()
     }
 
-    fn get_shard_of_line(&self, line_number: usize) -> Result<Arc<shard::Shard>> {
+    fn get_shard_of_line(&mut self, line_number: usize) -> Result<Rc<shard::Shard>> {
         self.get_shard(self.index.shard_of_line(line_number).unwrap())
     }
 
-    fn get_shard(&self, shard_id: usize) -> Result<Arc<shard::Shard>> {
+    fn get_shard(&mut self, shard_id: usize) -> Result<Rc<shard::Shard>> {
         let range = self.index.data_range_of_shard(shard_id).unwrap();
-        self.shards.get_or_insert_with(&shard_id, || {
-            Ok(Arc::new(shard::Shard::new(shard_id, range, &self.file)?))
-        })
+        self.shards.try_get_or_insert(shard_id, || {
+            Ok(Rc::new(shard::Shard::new(shard_id, range, &self.file)?))
+        }).cloned()
     }
 
-    pub fn get_line(&self, line_number: usize) -> Result<ShardStr> {
+    pub fn get_line(&mut self, line_number: usize) -> Result<ShardStr> {
         assert!(line_number <= self.line_count());
         let shard = self.get_shard_of_line(line_number)?;
 
-        if self.shards.capacity() > 3 {
+        if usize::from(self.shards.cap()) > 3 {
             let shard_id = shard.id();
             if shard_id > 0 {
                 self.get_shard(shard_id - 1).ok();
@@ -86,13 +86,14 @@ impl<Idx: FileIndex> ShardedFile<Idx> {
 
     fn get_line_from_shard(
         &self,
-        shard: &Arc<shard::Shard>,
+        shard: &Rc<shard::Shard>,
         line_number: usize,
     ) -> Result<shard::ShardStr> {
         let (start, end) = shard.translate_inner_data_range(
             self.index.start_of_line(line_number),
             self.index.start_of_line(line_number + 1),
         );
+        // Trim the newline
         let start = if line_number == 0 { 0 } else { start + 1 };
         shard.get_shard_line(start, end)
     }
@@ -100,13 +101,13 @@ impl<Idx: FileIndex> ShardedFile<Idx> {
 
 #[cfg(test)]
 mod test {
-    use crate::file::ShardedFile;
+    use crate::{file::ShardedFile, index::CompleteIndex};
 
     #[test]
     fn what() {
         let rt = tokio::runtime::Runtime::new().unwrap();
         let file = rt.block_on(tokio::fs::File::open("./Cargo.toml")).unwrap();
-        let file = rt.block_on(ShardedFile::new_complete(file, 25)).unwrap();
+        let mut file = rt.block_on(ShardedFile::<CompleteIndex>::new(file, 25)).unwrap();
         dbg!(file.line_count());
 
         for i in 0..=file.line_count() {

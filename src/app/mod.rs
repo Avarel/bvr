@@ -2,7 +2,7 @@ mod widgets;
 
 use crate::ui::{
     command::{CommandApp, CursorJump, CursorMovement},
-    viewer::Viewer,
+    viewer::{Multiplexer, Viewer},
 };
 use anyhow::Result;
 use bvr::file::ShardedFile;
@@ -14,10 +14,10 @@ use crossterm::{
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
-use ratatui::{prelude::*, widgets::*};
+use ratatui::prelude::*;
 use std::{path::Path, time::Duration};
 
-use self::widgets::{CommandWidget, StatusWidget};
+use self::widgets::{CommandWidget, MultiplexerWidget};
 
 pub type Backend<'a> = ratatui::backend::CrosstermBackend<std::io::StdoutLock<'a>>;
 pub type Terminal<'a> = ratatui::Terminal<Backend<'a>>;
@@ -32,21 +32,31 @@ enum InputMode {
 /// App holds the state of the application
 pub struct App {
     command: CommandApp,
-    viewer: Viewer,
+    mux: Multiplexer,
     /// Current input mode
     input_mode: InputMode,
-    _rt: tokio::runtime::Runtime,
+    rt: tokio::runtime::Runtime,
 }
 
 impl App {
-    pub fn new(rt: tokio::runtime::Runtime, path: &Path) -> Self {
-        let file = rt.block_on(tokio::fs::File::open(path)).unwrap();
+    pub fn new(rt: tokio::runtime::Runtime) -> Self {
         Self {
             input_mode: InputMode::Viewer,
             command: CommandApp::new(),
-            viewer: Viewer::new(rt.block_on(ShardedFile::new(file, 25)).unwrap()),
-            _rt: rt,
+            mux: Multiplexer::new(),
+            rt,
         }
+    }
+
+    pub fn new_viewer(&mut self, path: impl AsRef<Path>) {
+        let path = path.as_ref();
+        let file = self.rt.block_on(tokio::fs::File::open(path)).unwrap();
+        let name = path
+            .file_name()
+            .map(|str| str.to_string_lossy().into_owned())
+            .unwrap_or_else(|| String::from("Unnamed File"));
+        let viewer = Viewer::new(name, self.rt.block_on(ShardedFile::new(file, 25)).unwrap());
+        self.mux.push_viewer(viewer);
     }
 
     pub fn run_app(&mut self, terminal: &mut Terminal) -> Result<()> {
@@ -67,10 +77,14 @@ impl App {
             match event::read()? {
                 Event::Mouse(mouse) => match mouse.kind {
                     event::MouseEventKind::ScrollDown => {
-                        self.viewer.viewport_mut().move_view_down(2);
+                        self.mux
+                            .active_viewer_mut()
+                            .map(|viewer| viewer.viewport_mut().move_view_down(2));
                     }
                     event::MouseEventKind::ScrollUp => {
-                        self.viewer.viewport_mut().move_view_up(2);
+                        self.mux
+                            .active_viewer_mut()
+                            .map(|viewer| viewer.viewport_mut().move_view_up(2));
                     }
                     _ => (),
                 },
@@ -88,8 +102,22 @@ impl App {
                         KeyCode::Esc => {
                             break;
                         }
-                        KeyCode::Up => self.viewer.viewport_mut().move_view_up(1),
-                        KeyCode::Down => self.viewer.viewport_mut().move_view_down(1),
+                        KeyCode::Up => {
+                            self.mux
+                                .active_viewer_mut()
+                                .map(|viewer| viewer.viewport_mut().move_view_up(1));
+                        }
+                        KeyCode::Down => {
+                            self.mux
+                                .active_viewer_mut()
+                                .map(|viewer| viewer.viewport_mut().move_view_down(1));
+                        }
+                        KeyCode::Right => {
+                            self.mux.move_active_right();
+                        }
+                        KeyCode::Left => {
+                            self.mux.move_active_left();
+                        }
                         _ => {}
                     },
                     InputMode::Select => match key.code {
@@ -99,8 +127,16 @@ impl App {
                         KeyCode::Esc => {
                             self.input_mode = InputMode::Viewer;
                         }
-                        KeyCode::Up => self.viewer.viewport_mut().move_select_up(1),
-                        KeyCode::Down => self.viewer.viewport_mut().move_select_down(1),
+                        KeyCode::Up => {
+                            self.mux
+                                .active_viewer_mut()
+                                .map(|viewer| viewer.viewport_mut().move_select_up(1));
+                        }
+                        KeyCode::Down => {
+                            self.mux
+                                .active_viewer_mut()
+                                .map(|viewer| viewer.viewport_mut().move_select_down(1));
+                        }
                         _ => {}
                     },
                     InputMode::Command if key.kind == KeyEventKind::Press => match key.code {
@@ -108,9 +144,17 @@ impl App {
                             self.input_mode = InputMode::Viewer;
                         }
                         KeyCode::Enter => {
-                            if self.command.submit() == "q" {
+                            let command = self.command.submit();
+                            if command == "q" {
                                 break;
+                            } else if command.starts_with("open ") {
+                                self.new_viewer(&command[5..]);
+                            } else if command == "close" {
+                                self.mux.close_active_viewer()
+                            } else if command == "mux" {
+                                self.mux.swap_mode();
                             }
+                            self.input_mode = InputMode::Viewer;
                         }
                         KeyCode::Left => {
                             self.command.move_left(CursorMovement::new(
@@ -198,14 +242,18 @@ impl App {
     }
 
     fn ui(&mut self, f: &mut Frame) {
-        let overall_chunks = Layout::default()
+        let chunks = Layout::default()
             .direction(Direction::Vertical)
-            .constraints([
-                Constraint::Min(1),
-                Constraint::Length(1),
-                Constraint::Length(1),
-            ])
+            .constraints([Constraint::Min(1), Constraint::Length(1)])
             .split(f.size());
+
+        f.render_widget(
+            MultiplexerWidget {
+                mux: &mut self.mux,
+                input_mode: self.input_mode,
+            },
+            chunks[0],
+        );
 
         let mut cursor = None;
         f.render_widget(
@@ -214,38 +262,11 @@ impl App {
                 inner: &self.command,
                 cursor: &mut cursor,
             },
-            overall_chunks[2],
-        );
-        f.render_widget(
-            StatusWidget {
-                input_mode: self.input_mode,
-                progress: self.viewer.file().progress(),
-                line_count: self.viewer.file().line_count(),
-            },
-            overall_chunks[1],
+            chunks[1],
         );
 
         if let Some((x, y)) = cursor {
             f.set_cursor(x, y);
         }
-
-        self.viewer
-            .viewport_mut()
-            .fit_view(overall_chunks[0].height as usize);
-
-        let view = self.viewer.update_and_view();
-        let rows = view.iter().map(|(ln, data)| {
-            let mut row = Row::new([Cell::from((ln + 1).to_string()), Cell::from(data.as_str())]);
-
-            if *ln == self.viewer.viewport_mut().current() {
-                row = row.on_dark_gray();
-            }
-
-            row.height(1)
-        });
-        // Wait til https://github.com/ratatui-org/ratatui/issues/537 is fixed
-        let t = Table::new(rows).widths(&[Constraint::Percentage(5), Constraint::Percentage(95)]);
-
-        f.render_widget(t, overall_chunks[0]);
     }
 }
