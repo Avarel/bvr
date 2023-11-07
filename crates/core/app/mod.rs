@@ -6,7 +6,7 @@ use crate::ui::{
     command::{CommandApp, CursorMovement},
     mux::MultiplexerApp,
     status::StatusApp,
-    viewer::Viewer,
+    viewer::Instance,
 };
 use anyhow::Result;
 use bvr_file::file::ShardedFile;
@@ -66,7 +66,7 @@ impl App {
             .file_name()
             .map(|str| str.to_string_lossy().into_owned())
             .unwrap_or_else(|| String::from("Unnamed File"));
-        let viewer = Viewer::new(name, self.rt.block_on(ShardedFile::new(file, 25))?);
+        let viewer = Instance::new(name, self.rt.block_on(ShardedFile::new(file, 25))?);
         self.mux.push_viewer(viewer);
         Ok(())
     }
@@ -122,6 +122,12 @@ impl App {
                             viewer.viewport_mut().move_select(direction, 1)
                         }
                     }
+                    ViewerAction::ToggleLine => {
+                        if let Some(viewer) = self.mux.active_viewer_mut() {
+                            let ln = viewer.viewport_mut().current();
+                            viewer.mask_mut().toggle(ln);
+                        }
+                    }
                 },
                 Action::Command(action) => match action {
                     CommandAction::Move {
@@ -163,6 +169,10 @@ impl App {
                             self.mux.close_active_viewer()
                         } else if command == "mux" {
                             self.mux.swap_mode();
+                        } else if command == "clearmask" {
+                            if let Some(viewer) = self.mux.active_viewer_mut() {
+                                viewer.clear_mask()
+                            }
                         } else {
                             self.status.submit_message(
                                 format!("Invalid command `{command}`"),

@@ -1,8 +1,8 @@
 use crate::ui::{
     command::{CommandApp, Cursor, SelectionOrigin},
+    mux::{MultiplexerApp, MultiplexerMode},
     status::StatusApp,
-    viewer::Viewer,
-    mux::{MultiplexerApp, MultiplexerMode}
+    viewer::{Instance, LineType},
 };
 use ratatui::{prelude::*, widgets::*};
 
@@ -144,7 +144,7 @@ impl Widget for CommandWidget<'_> {
 }
 
 pub struct ViewerWidget<'a> {
-    viewer: &'a mut Viewer,
+    viewer: &'a mut Instance,
 }
 
 impl Widget for ViewerWidget<'_> {
@@ -152,11 +152,16 @@ impl Widget for ViewerWidget<'_> {
         self.viewer.viewport_mut().fit_view(area.height as usize);
 
         let view = self.viewer.update_and_view();
-        let rows = view.iter().map(|(ln, data)| {
-            let mut row = Row::new([Cell::from((ln + 1).to_string()), Cell::from(data.as_str())]);
+        let rows = view.iter().map(|line| {
+            let mut row = Row::new([
+                Cell::from((line.line_number() + 1).to_string()),
+                Cell::from(line.data().as_str()),
+            ]);
 
-            if *ln == self.viewer.viewport_mut().current() {
+            if line.line_type() == LineType::Selected {
                 row = row.on_dark_gray();
+            } else if line.line_type() == LineType::Mask {
+                row = row.blue();
             }
 
             row.height(1)

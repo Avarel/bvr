@@ -1,6 +1,6 @@
 use crate::common::HDirection;
 
-use super::viewer::Viewer;
+use super::viewer::Instance;
 
 #[derive(Clone, Copy)]
 pub enum MultiplexerMode {
@@ -18,7 +18,7 @@ impl MultiplexerMode {
 }
 
 pub struct MultiplexerApp {
-    views: Vec<Viewer>,
+    views: Vec<Instance>,
     mode: MultiplexerMode,
     active: usize,
 }
@@ -40,7 +40,7 @@ impl MultiplexerApp {
         self.views.is_empty()
     }
 
-    pub fn push_viewer(&mut self, viewer: Viewer) {
+    pub fn push_viewer(&mut self, viewer: Instance) {
         self.views.push(viewer);
     }
 
@@ -50,11 +50,11 @@ impl MultiplexerApp {
         self.active = self.active.min(self.views.len().saturating_sub(1));
     }
 
-    pub fn viewer_mut(&mut self, idx: usize) -> &mut Viewer {
+    pub fn viewer_mut(&mut self, idx: usize) -> &mut Instance {
         &mut self.views[idx]
     }
 
-    pub fn viewers_mut(&mut self) -> &mut Vec<Viewer> {
+    pub fn viewers_mut(&mut self) -> &mut Vec<Instance> {
         &mut self.views
     }
 
@@ -72,7 +72,7 @@ impl MultiplexerApp {
         }
     }
 
-    pub fn active_viewer_mut(&mut self) -> Option<&mut Viewer> {
+    pub fn active_viewer_mut(&mut self) -> Option<&mut Instance> {
         debug_assert!(self.is_empty() || self.active < self.views.len());
         if !self.views.is_empty() {
             Some(self.viewer_mut(self.active))

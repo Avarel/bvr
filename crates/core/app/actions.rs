@@ -15,6 +15,7 @@ pub enum ViewerAction {
         delta: u16
     },
     Move(VDirection),
+    ToggleLine,
     SwitchActive(HDirection),
 }
 
