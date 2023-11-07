@@ -1,5 +1,6 @@
 use anyhow::Result;
-use std::{borrow::Cow, ops::Range, os::fd::AsRawFd, ptr::NonNull, rc::Rc};
+use std::{borrow::Cow, ops::Range, ptr::NonNull, rc::Rc};
+use crate::Mmappable;
 
 pub struct Shard {
     id: usize,
@@ -8,13 +9,14 @@ pub struct Shard {
 }
 
 impl Shard {
-    pub fn new<F: AsRawFd>(id: usize, range: Range<u64>, file: &F) -> Result<Self> {
+    pub fn new<F: Mmappable>(id: usize, range: Range<u64>, file: &F) -> Result<Self> {
         let data = unsafe {
             memmap2::MmapOptions::new()
                 .offset(range.start)
                 .len((range.end - range.start) as usize)
                 .map(file)?
         };
+        #[cfg(unix)]
         data.advise(memmap2::Advice::WillNeed)?;
         Ok(Self {
             id,

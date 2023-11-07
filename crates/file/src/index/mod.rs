@@ -3,7 +3,7 @@ mod partition;
 
 use std::fs::File;
 use std::ops::Range;
-use std::os::fd::AsRawFd;
+use crate::Mmappable;
 
 use anyhow::Result;
 use tokio::sync::mpsc::Receiver;
@@ -21,18 +21,19 @@ struct IndexingTask {
 impl IndexingTask {
     const LINES_PER_MB: usize = 1 << 13;
 
-    fn get_data<T: AsRawFd>(file: &T, start: u64, end: u64) -> Result<memmap2::Mmap> {
+    fn get_data<T: Mmappable>(file: &T, start: u64, end: u64) -> Result<memmap2::Mmap> {
         let data = unsafe {
             memmap2::MmapOptions::new()
                 .offset(start)
                 .len((end - start) as usize)
                 .map(file)?
         };
+        #[cfg(unix)]
         data.advise(memmap2::Advice::Sequential)?;
         Ok(data)
     }
 
-    fn new<T: AsRawFd>(file: &T, start: u64, end: u64) -> Result<(Self, Receiver<u64>)> {
+    fn new<T: Mmappable>(file: &T, start: u64, end: u64) -> Result<(Self, Receiver<u64>)> {
         let data = Self::get_data(file, start, end)?;
         let (sx, rx) = tokio::sync::mpsc::channel(Self::LINES_PER_MB);
         Ok((Self { sx, data, start }, rx))
@@ -93,6 +94,7 @@ impl IncompleteIndex {
                     .len((end - start) as usize)
                     .map(file)?
             };
+            #[cfg(unix)]
             data.advise(memmap2::Advice::Sequential)?;
 
             for i in memchr::memchr_iter(b'\n', &data) {
