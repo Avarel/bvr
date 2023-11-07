@@ -1,4 +1,4 @@
-use crate::ui::{
+use crate::components::{
     command::{CommandApp, Cursor, SelectionOrigin},
     mux::{MultiplexerApp, MultiplexerMode},
     status::StatusApp,

@@ -1,4 +1,4 @@
-use crate::common::{HDirection, VDirection};
+use crate::direction::{HDirection, VDirection};
 
 use super::InputMode;
 

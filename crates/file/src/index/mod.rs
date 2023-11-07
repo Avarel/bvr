@@ -10,7 +10,7 @@ use tokio::sync::mpsc::Receiver;
 
 use partition::RangePartition;
 
-use crate::cow_vec::CowVec;
+use bvr_vec::CowVec;
 
 struct IndexingTask {
     sx: tokio::sync::mpsc::Sender<u64>,

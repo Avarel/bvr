@@ -1,6 +1,6 @@
 use std::ops::Range;
 
-use crate::cow_vec::CowVec;
+use bvr_vec::CowVec;
 
 /// A data structure to partition a continuous spectrum
 /// of numbers into indexed shards. This allows for

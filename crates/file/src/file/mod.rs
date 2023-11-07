@@ -16,7 +16,7 @@ pub struct ShardedFile<Idx> {
 }
 
 impl ShardedFile<AsyncIndex> {
-    pub async fn new(file: File, shard_count: usize) -> Result<Self> {
+    pub async fn read_file(file: File, shard_count: usize) -> Result<Self> {
         let (index, indexer) = AsyncIndex::new();
         tokio::spawn(indexer.index(file.try_clone().await?));
 
@@ -38,7 +38,7 @@ impl ShardedFile<AsyncIndex> {
 
 impl ShardedFile<CompleteIndex> {
     #[cfg(test)]
-    async fn new(file: File, shard_count: usize) -> Result<Self> {
+    async fn read_file(file: File, shard_count: usize) -> Result<Self> {
         let (mut index, indexer) = AsyncIndex::new();
         indexer.index(file.try_clone().await?).await?;
         assert!(index.try_finalize());
@@ -107,7 +107,7 @@ mod test {
     fn what() {
         let rt = tokio::runtime::Runtime::new().unwrap();
         let file = rt.block_on(tokio::fs::File::open("./Cargo.toml")).unwrap();
-        let mut file = rt.block_on(ShardedFile::<CompleteIndex>::new(file, 25)).unwrap();
+        let mut file = rt.block_on(ShardedFile::<CompleteIndex>::read_file(file, 25)).unwrap();
         dbg!(file.line_count());
 
         for i in 0..=file.line_count() {

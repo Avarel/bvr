@@ -28,7 +28,7 @@ enum CowVecRepr<T> {
 }
 
 /// An allocation used in a [`SnapVec`].
-pub(super) struct AtomicAllocation<T> {
+pub struct AtomicAllocation<T> {
     ptr: NonNull<T>,
     len: AtomicUsize,
     cap: usize,
@@ -89,11 +89,14 @@ pub struct CowVec<T> {
 
 impl<T> Debug for CowVec<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "CowVec [..., {}]", self.len())
+        write!(f, "[..., {}]", self.len())
     }
 }
 
 impl<T> CowVec<T> {
+    // Constructs a new, empty `CowVec<T>`.
+    // 
+    // The vector will not allocate until elements are pushed onto it.
     pub fn new() -> Self {
         assert!(std::mem::size_of::<T>() != 0);
         Self {
@@ -120,6 +123,9 @@ impl<T: Copy> CowVec<T> {
         vec
     }
 
+    /// Appends an element to the back of this collection. If the collection
+    /// is in a borrowed state, it will copy the data underneath and become
+    /// an owned state.
     pub fn push(&mut self, elem: T) {
         let (buf, len) = match &self.repr {
             &CowVecRepr::Borrowed { len, .. } => (self.grow(), len),
@@ -214,7 +220,7 @@ impl<T: Copy> Clone for CowVec<T> {
             CowVecRepr::Owned { buf } => {
                 // Load using seqcst so it doesn't magically get reordered in the CPU
                 // instruction buffer to after the Arc atomic clone (which uses relaxed)
-                let len = buf.len.load(SeqCst);
+                let len = buf.len.load(Relaxed);
                 // Imagine that we clone the allocation information, atomically grow
                 // the array, push an element, and then load the length. We would have
                 // a length that's invalid for the old allocation. Therefore,
@@ -237,7 +243,7 @@ impl<T: Copy> Deref for CowVec<T> {
         let (ptr, len) = match &self.repr {
             CowVecRepr::Borrowed { buf, len } => (buf.as_ptr(), *len),
             CowVecRepr::Owned { buf } => {
-                let len = buf.len.load(SeqCst);
+                let len = buf.len.load(Relaxed);
                 (buf.as_ptr(), len)
             }
         };

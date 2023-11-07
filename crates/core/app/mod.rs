@@ -2,7 +2,7 @@ mod actions;
 mod keybinding;
 mod widgets;
 
-use crate::ui::{
+use crate::components::{
     command::{CommandApp, CursorMovement},
     mux::MultiplexerApp,
     status::StatusApp,
@@ -66,7 +66,7 @@ impl App {
             .file_name()
             .map(|str| str.to_string_lossy().into_owned())
             .unwrap_or_else(|| String::from("Unnamed File"));
-        let viewer = Instance::new(name, self.rt.block_on(ShardedFile::new(file, 25))?);
+        let viewer = Instance::new(name, self.rt.block_on(ShardedFile::read_file(file, 25))?);
         self.mux.push_viewer(viewer);
         Ok(())
     }
@@ -139,9 +139,9 @@ impl App {
                         CursorMovement::new(
                             select,
                             match jump {
-                                actions::Jump::Word => crate::ui::command::CursorJump::Word,
-                                actions::Jump::Boundary => crate::ui::command::CursorJump::Boundary,
-                                actions::Jump::None => crate::ui::command::CursorJump::None,
+                                actions::Jump::Word => crate::components::command::CursorJump::Word,
+                                actions::Jump::Boundary => crate::components::command::CursorJump::Boundary,
+                                actions::Jump::None => crate::components::command::CursorJump::None,
                             },
                         ),
                     ),

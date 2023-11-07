@@ -1,8 +1,7 @@
+use bvr_file::file::shard::ShardStr;
 use std::{collections::HashMap, ops::Range};
 
-use bvr_file::file::shard::ShardStr;
-
-use crate::common::VDirection;
+use crate::direction::VDirection;
 
 pub struct Viewport {
     max_height: usize,

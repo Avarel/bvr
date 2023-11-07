@@ -1,6 +1,6 @@
-mod common;
 mod app;
-mod ui;
+mod components;
+mod direction;
 
 use std::path::PathBuf;
 
@@ -12,7 +12,7 @@ use clap::Parser;
 
 /// Simple program to greet a person
 #[derive(Parser, Debug)]
-#[command(author, version, about, long_about = None)]
+#[command(author, version, about)]
 struct Args {
     file: Option<PathBuf>,
 }

@@ -1,6 +1,5 @@
 pub mod index;
 pub mod file;
-mod cow_vec;
 
 #[cfg(unix)]
 use std::os::fd::AsRawFd as Mmappable;

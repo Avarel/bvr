@@ -1,6 +1,6 @@
 use crossterm::event::{Event, KeyCode, KeyModifiers, MouseEventKind};
 
-use crate::common::{HDirection, VDirection};
+use crate::direction::{HDirection, VDirection};
 
 use super::{
     actions::{Action, CommandAction, Jump, ViewerAction},

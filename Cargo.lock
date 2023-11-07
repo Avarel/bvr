@@ -163,12 +163,12 @@ version = "0.0.2"
 dependencies = [
  "anyhow",
  "bvr-file",
+ "bvr-vec",
  "clap",
  "crossterm",
  "grep",
  "rand",
  "ratatui",
- "tempfile",
  "time",
  "tokio",
 ]
@@ -178,11 +178,17 @@ name = "bvr-file"
 version = "0.0.2"
 dependencies = [
  "anyhow",
+ "bvr-vec",
  "lru",
  "memchr",
  "memmap2 0.9.0",
+ "tempfile",
  "tokio",
 ]
+
+[[package]]
+name = "bvr-vec"
+version = "0.0.2"
 
 [[package]]
 name = "bytecount"

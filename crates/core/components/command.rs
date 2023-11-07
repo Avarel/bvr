@@ -1,4 +1,4 @@
-use crate::common::HDirection;
+use crate::direction::HDirection;
 
 #[derive(Clone, Copy)]
 pub enum SelectionOrigin {
