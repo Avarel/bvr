@@ -33,8 +33,7 @@ enum ShardRepr {
 }
 
 impl ShardedFile<CompleteIndex> {
-    #[cfg(test)]
-    async fn read_file(file: File, shard_count: usize) -> Result<Self> {
+    pub async fn read_file(file: File, shard_count: usize) -> Result<Self> {
         let (mut index, indexer) = AsyncIndex::new(AsyncIndexMode::File);
         indexer.index_file(file.try_clone().await?).await?;
         assert!(index.try_finalize());
@@ -48,8 +47,7 @@ impl ShardedFile<CompleteIndex> {
         })
     }
 
-    #[cfg(test)]
-    async fn read_stream(stream: AsyncStream) -> Result<Self> {
+    pub async fn read_stream(stream: AsyncStream) -> Result<Self> {
         let (mut index, indexer) = AsyncIndex::new(AsyncIndexMode::Stream);
         let (sx, rx) = tokio::sync::mpsc::channel(1024);
         indexer.index_stream(stream, sx).await?;
@@ -176,6 +174,8 @@ impl<Idx: FileIndex> ShardedFile<Idx> {
 
 #[cfg(test)]
 mod test {
+    use std::io::BufReader;
+
     use crate::{file::ShardedFile, index::CompleteIndex};
 
     #[test]
@@ -187,8 +187,29 @@ mod test {
             .unwrap();
         dbg!(file.line_count());
 
-        for i in 0..=file.line_count() {
+        for i in 0..file.line_count() {
             eprintln!("{}\t{}", i + 1, file.get_line(i).unwrap());
+        }
+    }
+
+    #[test]
+    fn file_stream_consistency() {
+        let path = "./Cargo.toml";
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let file = std::fs::File::open(path).unwrap();
+        let stream = BufReader::new(file);
+        let file = rt.block_on(tokio::fs::File::open(path)).unwrap();
+
+        let mut file_index = rt
+            .block_on(ShardedFile::<CompleteIndex>::read_file(file, 25))
+            .unwrap();
+        let mut stream_index = rt
+            .block_on(ShardedFile::<CompleteIndex>::read_stream(Box::new(stream)))
+            .unwrap();
+
+        assert_eq!(file_index.line_count(), stream_index.line_count());
+        for i in 0..file_index.line_count() {
+            assert_eq!(file_index.get_line(i).unwrap().as_str(), stream_index.get_line(i).unwrap().as_str());
         }
     }
 }

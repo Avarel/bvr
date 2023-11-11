@@ -15,7 +15,7 @@ BVR (pronounced "beaver") is still under heavy development.
 
 ## Planned Features
 * Mouse support
-* Search (powered by ripgrep)
+* Search
 * Search layers
 * More commands
 * Better status bar

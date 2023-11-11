@@ -9,7 +9,10 @@ use crate::components::{
     viewer::Instance,
 };
 use anyhow::Result;
-use bvr_file::{file::ShardedFile, index::sync::AsyncStream};
+use bvr_file::{
+    file::ShardedFile,
+    index::sync::{AsyncIndex, AsyncStream},
+};
 use crossterm::{
     event::{
         self, DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture,
@@ -66,16 +69,25 @@ impl App {
             .file_name()
             .map(|str| str.to_string_lossy().into_owned())
             .unwrap_or_else(|| String::from("Unnamed File"));
-        let viewer = Instance::new(name, self.rt.block_on(ShardedFile::read_file(file, 25))?);
-        self.mux.push_viewer(viewer);
-        Ok(())
+        Ok(self.push_instance(
+            name,
+            self.rt
+                .block_on(ShardedFile::<AsyncIndex>::read_file(file, 25))?,
+        ))
     }
 
     pub fn open_stream(&mut self, stream: AsyncStream) -> Result<()> {
         let name = String::from("Stream");
-        let viewer = Instance::new(name, self.rt.block_on(ShardedFile::read_stream(stream))?);
+        Ok(self.push_instance(
+            name,
+            self.rt
+                .block_on(ShardedFile::<AsyncIndex>::read_stream(stream))?,
+        ))
+    }
+
+    fn push_instance(&mut self, name: String, file: ShardedFile<AsyncIndex>) {
+        let viewer = Instance::new(name, file);
         self.mux.push_viewer(viewer);
-        Ok(())
     }
 
     pub fn run_app(&mut self, terminal: &mut Terminal) -> Result<()> {
@@ -106,7 +118,7 @@ impl App {
         loop {
             terminal.draw(|f| self.ui(f))?;
 
-            if !event::poll(Duration::from_secs_f64(1.0 / 60.0))? {
+            if !event::poll(Duration::from_secs_f64(1.0 / 30.0))? {
                 continue;
             }
 
@@ -147,7 +159,9 @@ impl App {
                             select,
                             match jump {
                                 actions::Jump::Word => crate::components::command::CursorJump::Word,
-                                actions::Jump::Boundary => crate::components::command::CursorJump::Boundary,
+                                actions::Jump::Boundary => {
+                                    crate::components::command::CursorJump::Boundary
+                                }
                                 actions::Jump::None => crate::components::command::CursorJump::None,
                             },
                         ),
@@ -165,12 +179,11 @@ impl App {
                             break;
                         } else if command.starts_with("open ") {
                             let path = &command[5..];
-                            match self.open_file(path) {
-                                Ok(_) => {}
-                                Err(err) => self.status.submit_message(
+                            if let Err(err) = self.open_file(path) {
+                                self.status.submit_message(
                                     format!("Error opening file `{path}`: {err}"),
                                     Some(Duration::from_secs(2)),
-                                ),
+                                );
                             }
                         } else if command == "close" {
                             self.mux.close_active_viewer()
@@ -182,7 +195,9 @@ impl App {
                             }
                         } else if command == "e" {
                             if let Some(viewer) = self.mux.active_viewer_mut() {
-                                viewer.viewport_mut().pan_view(crate::direction::VDirection::Down, usize::MAX);
+                                viewer
+                                    .viewport_mut()
+                                    .pan_view(crate::direction::VDirection::Down, usize::MAX);
                             }
                         } else {
                             self.status.submit_message(

@@ -33,7 +33,6 @@ clap = { version = "4.4", features = ["cargo", "derive"] }
 crossterm = { version = "0.27", features = ["use-dev-tty"] }
 ratatui = "0.24"
 tokio = { version = "1", features = ["sync", "rt-multi-thread", "fs", "io-util", "io-std"] }
-grep = "0.2"
 bvr-file = { path = "crates/file" }
 bvr-vec = { path = "crates/vec" }
 libc = "0.2.150"
