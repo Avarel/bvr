@@ -9,20 +9,23 @@ use tokio::{fs::File, sync::mpsc::Receiver};
 use self::shard::{Shard, ShardStr};
 use crate::index::{
     inflight::{InflightIndex, InflightIndexMode, InflightIndexProgress, InflightStream},
-    CompleteIndex, FileIndex,
+    BufferIndex, CompleteIndex,
 };
 
 pub struct ShardedBuffer<Idx> {
+    /// The [BufferIndex] of this buffer.
     index: Idx,
+    /// The internal representation of this buffer.
     shards: Repr,
 }
 
+/// Internal representation of the sharded buffer, which allows for working
+/// with both files and streams of data. All shards are assumed to have
+/// the same size with the exception of the last shard.
 enum Repr {
-    /// Data can be loaded on demand
-    /// Shard boundaries are line boundaries
+    /// Data can be loaded on demand.
     File(LruShardedFile),
-    /// Data is all present in memory in multiple mmaps
-    /// All shards are assumed to have the same sizes
+    /// Data is all present in memory in multiple anonymous mmaps.
     Stream {
         pending_shards: Option<Receiver<Shard>>,
         shards: Vec<Rc<Shard>>,
@@ -30,6 +33,8 @@ enum Repr {
 }
 
 impl ShardedBuffer<CompleteIndex> {
+    /// Read a [ShardedBuffer] from a [File]. The indexing process is driven
+    /// to completion by the async runtime.
     pub async fn read_file(file: File, shard_count: usize) -> Result<Self> {
         let (mut index, indexer) = InflightIndex::new(InflightIndexMode::File);
         indexer.index_file(file.try_clone().await?).await?;
@@ -44,6 +49,8 @@ impl ShardedBuffer<CompleteIndex> {
         })
     }
 
+    /// Read a [ShardedBuffer] from an [InflightStream]. The indexing process is
+    /// driven asyncronously for this buffer, and accesses may not have the latest data.
     pub async fn read_stream(stream: InflightStream) -> Result<Self> {
         let (mut index, indexer) = InflightIndex::new(InflightIndexMode::Stream);
         let (sx, rx) = tokio::sync::mpsc::channel(1024);
@@ -61,6 +68,8 @@ impl ShardedBuffer<CompleteIndex> {
 }
 
 impl ShardedBuffer<InflightIndex> {
+    /// Read a [ShardedBuffer] from a [File]. The indexing process is driven
+    /// asyncronously by the async runtime.
     pub async fn read_file(file: File, shard_count: usize) -> Result<Self> {
         let (index, indexer) = InflightIndex::new(InflightIndexMode::File);
         tokio::spawn(indexer.index_file(file.try_clone().await?));
@@ -74,6 +83,8 @@ impl ShardedBuffer<InflightIndex> {
         })
     }
 
+    /// Read a [ShardedBuffer] from an [InflightStream]. The indexing process is
+    /// driven asyncronously for this buffer, and accesses may not have the latest data.
     pub async fn read_stream(stream: InflightStream) -> Result<Self> {
         let (index, indexer) = InflightIndex::new(InflightIndexMode::Stream);
         let (sx, rx) = tokio::sync::mpsc::channel(1024);
@@ -88,10 +99,12 @@ impl ShardedBuffer<InflightIndex> {
         })
     }
 
+    /// Attempt to finalize the inner [InflightIndex].
     pub fn try_finalize(&mut self) -> bool {
         self.index.try_finalize()
     }
 
+    /// Report the progress of the inner [InflightIndex].
     pub fn progress(&self) -> InflightIndexProgress {
         self.index.progress()
     }
@@ -102,7 +115,7 @@ trait ShardContainer {
     fn cap(&self) -> usize;
 }
 
-impl ShardContainer for &mut Vec<Rc<Shard>> {
+impl ShardContainer for &[Rc<Shard>] {
     fn fetch(&mut self, shard_id: usize) -> Result<Rc<Shard>> {
         Ok(self[shard_id].clone())
     }
@@ -137,7 +150,10 @@ impl ShardContainer for &mut LruShardedFile {
     }
 }
 
-impl<Idx: FileIndex> ShardedBuffer<Idx> {
+impl<Idx> ShardedBuffer<Idx>
+where
+    Idx: BufferIndex,
+{
     pub fn line_count(&self) -> usize {
         self.index.line_count()
     }
@@ -147,8 +163,8 @@ impl<Idx: FileIndex> ShardedBuffer<Idx> {
         mut container: impl ShardContainer,
         line_number: usize,
     ) -> Result<ShardStr> {
-        let data_start = index.start_of_line(line_number);
-        let data_end = index.start_of_line(line_number + 1);
+        let data_start = index.data_of_line(line_number).unwrap();
+        let data_end = index.data_of_line(line_number + 1).unwrap();
         let shard_start = (data_start / crate::INDEXING_VIEW_SIZE) as usize;
         let shard_end = (data_end / crate::INDEXING_VIEW_SIZE) as usize;
 
@@ -205,7 +221,7 @@ impl<Idx: FileIndex> ShardedBuffer<Idx> {
                     }
                 }
 
-                Self::fetch_line(&self.index, shards, line_number)
+                Self::fetch_line(&self.index, shards.as_slice(), line_number)
             }
         }
     }
@@ -243,7 +259,9 @@ mod test {
             .block_on(ShardedBuffer::<CompleteIndex>::read_file(file, 25))
             .unwrap();
         let mut stream_index = rt
-            .block_on(ShardedBuffer::<CompleteIndex>::read_stream(Box::new(stream)))
+            .block_on(ShardedBuffer::<CompleteIndex>::read_stream(Box::new(
+                stream,
+            )))
             .unwrap();
 
         assert_eq!(file_index.line_count(), stream_index.line_count());

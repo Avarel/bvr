@@ -1,4 +1,4 @@
-use bvr_core::index::{inflight::InflightIndex, FileIndex};
+use bvr_core::index::{inflight::InflightIndex, BufferIndex};
 
 fn main() {
     let rt = tokio::runtime::Runtime::new().unwrap();

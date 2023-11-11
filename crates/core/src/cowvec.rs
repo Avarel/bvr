@@ -27,7 +27,7 @@ enum CowVecRepr<T> {
     },
 }
 
-/// An allocation used in a [`SnapVec`].
+/// An allocation used in a [`CowVec`].
 struct AtomicAllocation<T> {
     ptr: NonNull<T>,
     len: AtomicUsize,
@@ -79,7 +79,7 @@ impl<T> Drop for AtomicAllocation<T> {
 unsafe impl<T: Send> Send for AtomicAllocation<T> {}
 unsafe impl<T: Sync> Sync for AtomicAllocation<T> {}
 
-/// A copy-on-write vector for Copy only elements. Cloning this vector will give
+/// A copy-on-write vector for Copy-only elements. Cloning this vector will give
 /// a snapshot of the vector's content at the time of clone. The snapshot shares
 /// the buffer with the original owning `CowVec` until it reallocates or until
 /// the user attempts to mutably alter the data.
@@ -94,9 +94,9 @@ impl<T> Debug for CowVec<T> {
 }
 
 impl<T> CowVec<T> {
-    // Constructs a new, empty `CowVec<T>`.
-    // 
-    // The vector will not allocate until elements are pushed onto it.
+    /// Constructs a new, empty `CowVec<T>`.
+    /// 
+    /// The vector will not allocate until elements are pushed onto it.
     pub fn new() -> Self {
         assert!(std::mem::size_of::<T>() != 0);
         Self {
@@ -106,6 +106,7 @@ impl<T> CowVec<T> {
         }
     }
 
+    /// Returns the number of elements in the vector, also referred to as its ‘length’.
     pub fn len(&self) -> usize {
         // No matter what len we load, it will be valid since the length
         // is only incremented after the data is written.
@@ -117,7 +118,7 @@ impl<T> CowVec<T> {
 }
 
 impl<T: Copy> CowVec<T> {
-    pub fn new_one_elem(elem: T) -> Self {
+    pub(crate) fn new_one_elem(elem: T) -> Self {
         let mut vec = Self::new();
         vec.push(elem);
         vec
