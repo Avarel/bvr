@@ -1,9 +1,9 @@
-pub mod sync;
 mod partition;
+pub mod sync;
 
+use crate::Mmappable;
 use std::fs::File;
 use std::ops::Range;
-use crate::Mmappable;
 
 use anyhow::Result;
 use tokio::sync::mpsc::Receiver;
@@ -55,7 +55,10 @@ pub trait FileIndex {
     fn shard_of_line(&self, line_number: usize) -> Option<usize>;
     fn translate_data_from_line_range(&self, line_range: Range<usize>) -> Range<u64>;
     fn line_range_of_shard(&self, shard_id: usize) -> Option<Range<usize>>;
-    fn data_range_of_shard(&self, shard_id: usize) -> Option<Range<u64>>;
+    
+    fn data_range_of_shard(&self, shard_id: usize) -> Option<Range<u64>> {
+        Some(self.translate_data_from_line_range(self.line_range_of_shard(shard_id)?))
+    }
 }
 
 pub struct IncompleteIndex {
@@ -70,9 +73,6 @@ impl IncompleteIndex {
     /// this is just a cutoff.
     const SHARD_DATA_THRESHOLD: u64 = 1 << 20;
 
-    /// How much data of the file should each indexing task handle?
-    const INDEXING_VIEW_SIZE: u64 = 1 << 20;
-
     pub fn new() -> Self {
         Self {
             inner: CompleteIndex::empty(),
@@ -86,7 +86,7 @@ impl IncompleteIndex {
         let mut start = 0;
 
         while start < len {
-            let end = (start + IncompleteIndex::INDEXING_VIEW_SIZE).min(len);
+            let end = (start + crate::INDEXING_VIEW_SIZE).min(len);
 
             let data = unsafe {
                 memmap2::MmapOptions::new()
@@ -155,7 +155,7 @@ impl CompleteIndex {
 
 impl FileIndex for CompleteIndex {
     fn line_count(&self) -> usize {
-        self.line_index.len().saturating_sub(2)
+        self.line_index.len().saturating_sub(1)
     }
 
     fn shard_count(&self) -> usize {
@@ -176,9 +176,5 @@ impl FileIndex for CompleteIndex {
 
     fn line_range_of_shard(&self, shard_id: usize) -> Option<Range<usize>> {
         self.shard_partition.reverse_lookup(shard_id)
-    }
-
-    fn data_range_of_shard(&self, shard_id: usize) -> Option<Range<u64>> {
-        Some(self.translate_data_from_line_range(self.line_range_of_shard(shard_id)?))
     }
 }

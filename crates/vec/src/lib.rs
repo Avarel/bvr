@@ -28,7 +28,7 @@ enum CowVecRepr<T> {
 }
 
 /// An allocation used in a [`SnapVec`].
-pub struct AtomicAllocation<T> {
+struct AtomicAllocation<T> {
     ptr: NonNull<T>,
     len: AtomicUsize,
     cap: usize,

@@ -11,11 +11,11 @@ BVR (pronounced "beaver") is still under heavy development.
 * Fast yet simple design
 * Intuitive
 * Scroll support
+* Piping support
 
 ## Planned Features
 * Mouse support
 * Search (powered by ripgrep)
 * Search layers
-* Piping support
 * More commands
 * Better status bar

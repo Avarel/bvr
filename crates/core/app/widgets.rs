@@ -4,13 +4,14 @@ use crate::components::{
     status::StatusApp,
     viewer::{Instance, LineType},
 };
+use bvr_file::index::sync::AsyncIndexProgress;
 use ratatui::{prelude::*, widgets::*};
 
 use super::InputMode;
 
 enum StatusWidgetState<'a> {
     Normal {
-        progress: f64,
+        progress: AsyncIndexProgress,
         line_count: usize,
         name: &'a str,
     },
@@ -45,11 +46,10 @@ impl<'a> Widget for StatusWidget<'a> {
                         Constraint::Length(name.len() as u16 + 2),
                     ])
                     .split(chunks[1]);
-
-                Paragraph::new(Span::from(if progress > 1.0 {
-                    format!("100% ({} lines)", line_count)
-                } else {
-                    format!("{:.2}% ({} lines)", progress * 100.0, line_count)
+                Paragraph::new(Span::from(match progress {
+                    AsyncIndexProgress::Done => format!("{} lines", line_count),
+                    AsyncIndexProgress::Streaming => format!("Streaming ({} lines)", line_count),
+                    AsyncIndexProgress::File(progress) => format!("{:.2}% ({} lines)", progress * 100.0, line_count),
                 }))
                 .block(Block::new().padding(Padding::horizontal(1)))
                 .dark_gray()

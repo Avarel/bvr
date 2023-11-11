@@ -1,29 +1,95 @@
 pub mod shard;
 
-use std::{rc::Rc, num::NonZeroUsize};
+use std::{num::NonZeroUsize, rc::Rc};
 
 use anyhow::Result;
 use lru::LruCache;
-use tokio::fs::File;
+use tokio::{fs::File, sync::mpsc::Receiver};
 
-use self::shard::{ShardStr, Shard};
-use crate::index::{sync::AsyncIndex, CompleteIndex, FileIndex};
+use self::shard::{Shard, ShardStr};
+use crate::index::{
+    sync::{AsyncIndex, AsyncIndexMode, AsyncIndexProgress, AsyncStream},
+    CompleteIndex, FileIndex,
+};
 
 pub struct ShardedFile<Idx> {
-    file: File,
     index: Idx,
-    shards: LruCache<usize, Rc<Shard>>,
+    shards: ShardRepr,
+}
+
+enum ShardRepr {
+    /// Data can be loaded on demand
+    /// Shard boundaries are line boundaries
+    File {
+        file: File,
+        shards: LruCache<usize, Rc<Shard>>,
+    },
+    /// Data is all present in memory in multiple mmaps
+    /// All shards are assumed to have the same sizes
+    Stream {
+        pending_shards: Option<Receiver<Shard>>,
+        shards: Vec<Rc<Shard>>,
+    },
+}
+
+impl ShardedFile<CompleteIndex> {
+    #[cfg(test)]
+    async fn read_file(file: File, shard_count: usize) -> Result<Self> {
+        let (mut index, indexer) = AsyncIndex::new(AsyncIndexMode::File);
+        indexer.index_file(file.try_clone().await?).await?;
+        assert!(index.try_finalize());
+
+        Ok(Self {
+            index: index.unwrap(),
+            shards: ShardRepr::File {
+                file,
+                shards: LruCache::new(NonZeroUsize::new(shard_count).unwrap()),
+            },
+        })
+    }
+
+    #[cfg(test)]
+    async fn read_stream(stream: AsyncStream) -> Result<Self> {
+        let (mut index, indexer) = AsyncIndex::new(AsyncIndexMode::Stream);
+        let (sx, rx) = tokio::sync::mpsc::channel(1024);
+        indexer.index_stream(stream, sx).await?;
+        assert!(index.try_finalize());
+
+        Ok(Self {
+            index: index.unwrap(),
+            shards: ShardRepr::Stream {
+                pending_shards: Some(rx),
+                shards: Vec::new(),
+            },
+        })
+    }
 }
 
 impl ShardedFile<AsyncIndex> {
     pub async fn read_file(file: File, shard_count: usize) -> Result<Self> {
-        let (index, indexer) = AsyncIndex::new();
-        tokio::spawn(indexer.index(file.try_clone().await?));
+        let (index, indexer) = AsyncIndex::new(AsyncIndexMode::File);
+        tokio::spawn(indexer.index_file(file.try_clone().await?));
 
         Ok(Self {
-            file,
             index,
-            shards: LruCache::new(NonZeroUsize::new(shard_count).unwrap()),
+            shards: ShardRepr::File {
+                file,
+                shards: LruCache::new(NonZeroUsize::new(shard_count).unwrap()),
+            },
+        })
+    }
+
+    pub async fn read_stream(stream: AsyncStream) -> Result<Self> {
+        let (index, indexer) = AsyncIndex::new(AsyncIndexMode::Stream);
+        let (sx, rx) = tokio::sync::mpsc::channel(1024);
+        tokio::spawn(indexer.index_stream(stream, sx));
+
+        Ok(Self {
+            index,
+            shards: ShardRepr::Stream {
+                pending_shards: Some(rx),
+                shards: Vec::new(),
+            },
         })
     }
 
@@ -31,23 +97,8 @@ impl ShardedFile<AsyncIndex> {
         self.index.try_finalize()
     }
 
-    pub fn progress(&self) -> f64 {
+    pub fn progress(&self) -> AsyncIndexProgress {
         self.index.progress()
-    }
-}
-
-impl ShardedFile<CompleteIndex> {
-    #[cfg(test)]
-    async fn read_file(file: File, shard_count: usize) -> Result<Self> {
-        let (mut index, indexer) = AsyncIndex::new();
-        indexer.index(file.try_clone().await?).await?;
-        assert!(index.try_finalize());
-
-        Ok(Self {
-            file,
-            index: index.unwrap(),
-            shards: LruCache::new(NonZeroUsize::new(shard_count).unwrap()),
-        })
     }
 }
 
@@ -56,46 +107,70 @@ impl<Idx: FileIndex> ShardedFile<Idx> {
         self.index.line_count()
     }
 
-    fn get_shard_of_line(&mut self, line_number: usize) -> Result<Rc<Shard>> {
-        self.get_shard(self.index.shard_of_line(line_number).unwrap())
-    }
-
-    fn get_shard(&mut self, shard_id: usize) -> Result<Rc<Shard>> {
-        let range = self.index.data_range_of_shard(shard_id).unwrap();
-        self.shards.try_get_or_insert(shard_id, || {
-            Ok(Rc::new(Shard::new(shard_id, range, &self.file)?))
-        }).cloned()
-    }
-
     pub fn get_line(&mut self, line_number: usize) -> Result<ShardStr> {
         assert!(line_number <= self.line_count());
-        let shard = self.get_shard_of_line(line_number)?;
+        match &mut self.shards {
+            ShardRepr::File { file, shards } => {
+                let shard_id = self.index.shard_of_line(line_number).unwrap();
 
-        if usize::from(self.shards.cap()) > 3 {
-            let shard_id = shard.id();
-            if shard_id > 0 {
-                self.get_shard(shard_id - 1).ok();
+                let range = self.index.data_range_of_shard(shard_id).unwrap();
+                let shard = shards
+                    .try_get_or_insert(shard_id, || {
+                        Ok::<Rc<Shard>, anyhow::Error>(Rc::new(Shard::map_file(
+                            shard_id, range, file,
+                        )?))
+                    })
+                    .cloned()?;
+
+                let (start, end) = shard.translate_inner_data_range(
+                    self.index.start_of_line(line_number),
+                    self.index.start_of_line(line_number + 1),
+                );
+                // Trim the newline
+                let start = if line_number == 0 { 0 } else { start + 1 };
+                Ok(shard.get_shard_line(start, end))
             }
-            if shard_id < self.index.shard_count() - 1 {
-                self.get_shard(shard_id + 1).ok();
+            ShardRepr::Stream {
+                pending_shards,
+                shards,
+            } => {
+                if let Some(rx) = pending_shards {
+                    loop {
+                        match rx.try_recv() {
+                            Ok(shard) => {
+                                assert_eq!(shard.id(), shards.len());
+                                shards.push(Rc::new(shard))
+                            }
+                            Err(tokio::sync::mpsc::error::TryRecvError::Empty) => break,
+                            Err(tokio::sync::mpsc::error::TryRecvError::Disconnected) => {
+                                *pending_shards = None;
+                                break;
+                            }
+                        }
+                    }
+                }
+
+                // TODO: this can fail because we can index more than for a shard we currently have!!!
+                //       handle the race condition somehow
+
+                let data_start = self.index.start_of_line(line_number);
+                let data_end = self.index.start_of_line(line_number + 1);
+                let shard_start = data_start / crate::INDEXING_VIEW_SIZE;
+                let shard_end = data_end / crate::INDEXING_VIEW_SIZE;
+                if shard_start == shard_end {
+                    // The data is in a single shard
+                    let shard = &shards[shard_start as usize];
+                    let (start, end) = shard.translate_inner_data_range(data_start, data_end);
+                    let start = if line_number == 0 { 0 } else { start + 1 };
+                    Ok(shard.get_shard_line(start, end))
+                } else {
+                    // The data may cross several shards
+                    Ok(ShardStr::new_owned(String::from(
+                        "THIS LINE CROSSES SHARDS; TODO",
+                    )))
+                }
             }
         }
-
-        Ok(self.get_line_from_shard(&shard, line_number))
-    }
-
-    fn get_line_from_shard(
-        &self,
-        shard: &Rc<Shard>,
-        line_number: usize,
-    ) -> ShardStr {
-        let (start, end) = shard.translate_inner_data_range(
-            self.index.start_of_line(line_number),
-            self.index.start_of_line(line_number + 1),
-        );
-        // Trim the newline
-        let start = if line_number == 0 { 0 } else { start + 1 };
-        shard.get_shard_line(start, end)
     }
 }
 
@@ -107,7 +182,9 @@ mod test {
     fn what() {
         let rt = tokio::runtime::Runtime::new().unwrap();
         let file = rt.block_on(tokio::fs::File::open("./Cargo.toml")).unwrap();
-        let mut file = rt.block_on(ShardedFile::<CompleteIndex>::read_file(file, 25)).unwrap();
+        let mut file = rt
+            .block_on(ShardedFile::<CompleteIndex>::read_file(file, 25))
+            .unwrap();
         dbg!(file.line_count());
 
         for i in 0..=file.line_count() {

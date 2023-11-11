@@ -2,7 +2,7 @@ mod app;
 mod components;
 mod direction;
 
-use std::path::PathBuf;
+use std::{path::PathBuf, io::IsTerminal};
 
 use anyhow::Result;
 use app::App;
@@ -14,7 +14,7 @@ use clap::Parser;
 #[derive(Parser, Debug)]
 #[command(author, version, about)]
 struct Args {
-    file: Option<PathBuf>,
+    files: Vec<PathBuf>,
 }
 
 fn main() -> Result<()> {
@@ -28,8 +28,12 @@ fn main() -> Result<()> {
 
     let mut app = App::new(rt);
 
-    if let Some(path) = args.file {
-        app.new_viewer(path)?;
+    for path in args.files {
+        app.open_file(path)?;
+    }
+
+    if !std::io::stdin().is_terminal() {
+        app.open_stream(Box::new(std::io::stdin()))?;
     }
 
     app.run_app(&mut terminal)

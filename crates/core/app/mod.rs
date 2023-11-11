@@ -9,7 +9,7 @@ use crate::components::{
     viewer::Instance,
 };
 use anyhow::Result;
-use bvr_file::file::ShardedFile;
+use bvr_file::{file::ShardedFile, index::sync::AsyncStream};
 use crossterm::{
     event::{
         self, DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture,
@@ -59,7 +59,7 @@ impl App {
         }
     }
 
-    pub fn new_viewer(&mut self, path: impl AsRef<Path>) -> Result<()> {
+    pub fn open_file(&mut self, path: impl AsRef<Path>) -> Result<()> {
         let path = path.as_ref();
         let file = self.rt.block_on(tokio::fs::File::open(path))?;
         let name = path
@@ -67,6 +67,13 @@ impl App {
             .map(|str| str.to_string_lossy().into_owned())
             .unwrap_or_else(|| String::from("Unnamed File"));
         let viewer = Instance::new(name, self.rt.block_on(ShardedFile::read_file(file, 25))?);
+        self.mux.push_viewer(viewer);
+        Ok(())
+    }
+
+    pub fn open_stream(&mut self, stream: AsyncStream) -> Result<()> {
+        let name = String::from("Stream");
+        let viewer = Instance::new(name, self.rt.block_on(ShardedFile::read_stream(stream))?);
         self.mux.push_viewer(viewer);
         Ok(())
     }
@@ -158,7 +165,7 @@ impl App {
                             break;
                         } else if command.starts_with("open ") {
                             let path = &command[5..];
-                            match self.new_viewer(path) {
+                            match self.open_file(path) {
                                 Ok(_) => {}
                                 Err(err) => self.status.submit_message(
                                     format!("Error opening file `{path}`: {err}"),
@@ -172,6 +179,10 @@ impl App {
                         } else if command == "clearmask" {
                             if let Some(viewer) = self.mux.active_viewer_mut() {
                                 viewer.clear_mask()
+                            }
+                        } else if command == "e" {
+                            if let Some(viewer) = self.mux.active_viewer_mut() {
+                                viewer.viewport_mut().pan_view(crate::direction::VDirection::Down, usize::MAX);
                             }
                         } else {
                             self.status.submit_message(

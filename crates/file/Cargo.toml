@@ -1,6 +1,6 @@
 [package]
 name = "bvr-file"
-description = "File indexing for bvr."
+description = "File engine for bvr."
 authors = ["An Tran <antranprm@gmail.com>"]
 version = "0.0.2"
 edition = "2021"
@@ -14,5 +14,5 @@ lru = "0.12.0"
 bvr-vec = { path = "../vec" }
 
 [dev-dependencies]
-tokio = { version = "1", features = ["sync", "fs", "rt-multi-thread", "io-std"] }
+tokio = { version = "1", features = ["sync", "fs", "rt-multi-thread", "io-util"] }
 tempfile = "3.8"

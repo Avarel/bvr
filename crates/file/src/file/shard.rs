@@ -4,12 +4,12 @@ use crate::Mmappable;
 
 pub struct Shard {
     id: usize,
-    data: memmap2::Mmap,
     start: u64,
+    data: memmap2::Mmap,
 }
 
 impl Shard {
-    pub fn new<F: Mmappable>(id: usize, range: Range<u64>, file: &F) -> Result<Self> {
+    pub fn map_file<F: Mmappable>(id: usize, range: Range<u64>, file: &F) -> Result<Self> {
         let data = unsafe {
             memmap2::MmapOptions::new()
                 .offset(range.start)
@@ -18,11 +18,15 @@ impl Shard {
         };
         #[cfg(unix)]
         data.advise(memmap2::Advice::WillNeed)?;
-        Ok(Self {
+        Ok(Self::new(id, range.start, data))
+    }
+
+    pub fn new(id: usize, start: u64, data: memmap2::Mmap) -> Self {
+        Self {
             id,
             data,
-            start: range.start,
-        })
+            start,
+        }
     }
 
     pub fn id(&self) -> usize {
@@ -80,8 +84,13 @@ impl ShardStr {
                 ptr: unsafe { NonNull::new(data.as_ptr() as *mut _).unwrap_unchecked() },
                 len: data.len(),
             }),
-            Cow::Owned(s) => Self(ShardStrRepr::Owned(s)),
+            Cow::Owned(s) => Self::new_owned(s),
         }
+    }
+
+    /// Constructs a string that owns its data.
+    pub fn new_owned(s: String) -> Self {
+        Self(ShardStrRepr::Owned(s))
     }
 
     /// Returns a byte slice of this [ShardStr]'s components.
@@ -125,5 +134,11 @@ impl std::convert::AsRef<str> for ShardStr {
 impl std::fmt::Display for ShardStr {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(self)
+    }
+}
+
+impl std::fmt::Debug for ShardStr {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        std::fmt::Debug::fmt(&**self, f)
     }
 }
