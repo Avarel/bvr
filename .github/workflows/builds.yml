@@ -1,15 +1,15 @@
-name: Master Build Job
+name: Main Build Job
 on:
   push:
     branches:
-      - master
+      - main
 
 env:
   BIN_NAME: bvr
 
 jobs:
   build_job:
-    name: Build master branch
+    name: Build main branch
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
