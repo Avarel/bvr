@@ -1,10 +1,10 @@
 pub mod shard;
 
-use std::{num::NonZeroUsize, rc::Rc};
+use std::{num::NonZeroUsize, rc::Rc, fs::File};
 
 use anyhow::Result;
 use lru::LruCache;
-use tokio::{fs::File, sync::mpsc::Receiver};
+use tokio::sync::mpsc::Receiver;
 
 use self::shard::{Shard, ShardStr};
 use crate::index::{
@@ -37,7 +37,7 @@ impl ShardedBuffer<CompleteIndex> {
     /// to completion by the async runtime.
     pub async fn read_file(file: File, shard_count: usize) -> Result<Self> {
         let (mut index, indexer) = InflightIndex::new(InflightIndexMode::File);
-        indexer.index_file(file.try_clone().await?).await?;
+        indexer.index_file(file.try_clone()?).await?;
         assert!(index.try_finalize());
 
         Ok(Self {
@@ -72,7 +72,7 @@ impl ShardedBuffer<InflightIndex> {
     /// asyncronously by the async runtime.
     pub async fn read_file(file: File, shard_count: usize) -> Result<Self> {
         let (index, indexer) = InflightIndex::new(InflightIndexMode::File);
-        tokio::spawn(indexer.index_file(file.try_clone().await?));
+        tokio::spawn(indexer.index_file(file.try_clone()?));
 
         Ok(Self {
             index,
@@ -154,6 +154,7 @@ impl<Idx> ShardedBuffer<Idx>
 where
     Idx: BufferIndex,
 {
+    /// Return the line count of this [ShardedBuffer].
     pub fn line_count(&self) -> usize {
         self.index.line_count()
     }
@@ -197,6 +198,7 @@ where
         }
     }
 
+    /// Get a [ShardStr] from this [ShardedBuffer].
     pub fn get_line(&mut self, line_number: usize) -> Result<ShardStr> {
         assert!(line_number <= self.line_count());
         match &mut self.shards {
@@ -236,7 +238,7 @@ mod test {
     #[test]
     fn what() {
         let rt = tokio::runtime::Runtime::new().unwrap();
-        let file = rt.block_on(tokio::fs::File::open("./Cargo.toml")).unwrap();
+        let file = std::fs::File::open("./Cargo.toml").unwrap();
         let mut file = rt
             .block_on(ShardedBuffer::<CompleteIndex>::read_file(file, 25))
             .unwrap();
@@ -253,7 +255,7 @@ mod test {
         let rt = tokio::runtime::Runtime::new().unwrap();
         let file = std::fs::File::open(path).unwrap();
         let stream = BufReader::new(file);
-        let file = rt.block_on(tokio::fs::File::open(path)).unwrap();
+        let file = std::fs::File::open(path).unwrap();
 
         let mut file_index = rt
             .block_on(ShardedBuffer::<CompleteIndex>::read_file(file, 25))

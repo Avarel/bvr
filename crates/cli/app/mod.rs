@@ -64,7 +64,7 @@ impl App {
 
     pub fn open_file(&mut self, path: impl AsRef<Path>) -> Result<()> {
         let path = path.as_ref();
-        let file = self.rt.block_on(tokio::fs::File::open(path))?;
+        let file = std::fs::File::open(path)?;
         let name = path
             .file_name()
             .map(|str| str.to_string_lossy().into_owned())

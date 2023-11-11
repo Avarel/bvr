@@ -4,7 +4,7 @@ use super::{CompleteIndex, BufferIndex, IncompleteIndex};
 
 use anyhow::Result;
 use tokio::sync::mpsc::{Receiver, Sender};
-use std::sync::{atomic::AtomicU64, Arc};
+use std::{sync::{atomic::AtomicU64, Arc}, fs::File};
 
 struct IndexingTask {
     /// This is the sender side of the channel that receives byte indexes of `\n`.
@@ -78,14 +78,14 @@ impl InflightIndexImpl {
         })
     }
 
-    async fn index_file(self: Arc<Self>, file: tokio::fs::File) -> Result<()> {
+    async fn index_file(self: Arc<Self>, file: File) -> Result<()> {
         assert_eq!(self.mode, InflightIndexMode::File);
         assert_eq!(Arc::strong_count(&self), 2);
         // Build line & shard index
         let (sx, mut rx) = tokio::sync::mpsc::channel(4);
 
-        let len = file.metadata().await?.len();
-        let file = file.try_clone().await?;
+        let len = file.metadata()?.len();
+        let file = file.try_clone()?;
 
         // Indexing worker
         let spawner = tokio::task::spawn(async move {
@@ -226,7 +226,7 @@ impl BufferIndex for InflightIndexImpl {
 pub struct InflightIndexIndexer(Arc<InflightIndexImpl>);
 
 impl InflightIndexIndexer {
-    pub(crate) async fn index_file(self, file: tokio::fs::File) -> Result<()> {
+    pub(crate) async fn index_file(self, file: File) -> Result<()> {
         self.0.index_file(file).await
     }
 
@@ -253,9 +253,9 @@ impl InflightIndex {
     }
 
     /// Create an index and drive it to completion using inflight async mechanisms.
-    pub async fn new_complete(file: &tokio::fs::File) -> Result<CompleteIndex> {
+    pub async fn new_complete(file: &File) -> Result<CompleteIndex> {
         let (result, indexer) = Self::new(InflightIndexMode::File);
-        indexer.index_file(file.try_clone().await?).await?;
+        indexer.index_file(file.try_clone()?).await?;
         Ok(result.unwrap())
     }
 
