@@ -99,7 +99,7 @@ impl IncompleteIndex {
 
             for i in memchr::memchr_iter(b'\n', &data) {
                 let line_data = start + i as u64;
-                self.push_line_data(line_data);
+                self.push_line_data(line_data + 1);
             }
 
             start = end;

@@ -148,24 +148,38 @@ impl<Idx: FileIndex> ShardedFile<Idx> {
                     }
                 }
 
-                // TODO: this can fail because we can index more than for a shard we currently have!!!
-                //       handle the race condition somehow
-
                 let data_start = self.index.start_of_line(line_number);
                 let data_end = self.index.start_of_line(line_number + 1);
                 let shard_start = data_start / crate::INDEXING_VIEW_SIZE;
                 let shard_end = data_end / crate::INDEXING_VIEW_SIZE;
+
+                assert!(shard_start < shards.len() as u64);
+                assert!(shard_end < shards.len() as u64);
                 if shard_start == shard_end {
                     // The data is in a single shard
                     let shard = &shards[shard_start as usize];
                     let (start, end) = shard.translate_inner_data_range(data_start, data_end);
-                    let start = if line_number == 0 { 0 } else { start + 1 };
                     Ok(shard.get_shard_line(start, end))
                 } else {
-                    // The data may cross several shards
-                    Ok(ShardStr::new_owned(String::from(
-                        "THIS LINE CROSSES SHARDS; TODO",
-                    )))
+                    debug_assert!(shard_start < shard_end);
+                    // The data may cross several shards, so we must piece together
+                    // the data from across the shards.
+                    let mut buf = Vec::with_capacity((data_end - data_start) as usize);
+
+                    let shard_first = &shards[shard_start as usize];
+                    let shard_last = &shards[shard_end as usize];
+                    let (start, end) = (
+                        shard_first.translate_inner_data_index(data_start),
+                        shard_last.translate_inner_data_index(data_end)
+                    );
+                    buf.extend_from_slice(&shard_first[start as usize..]);
+                    for shard_id in shard_start + 1..shard_end {
+                        buf.extend_from_slice(&shards[shard_id as usize]);
+                    }
+                    buf.extend_from_slice(&shard_last[..end as usize]);
+
+                    let buf = String::from_utf8_lossy(&buf).into_owned();
+                    Ok(ShardStr::new_owned(buf))
                 }
             }
         }

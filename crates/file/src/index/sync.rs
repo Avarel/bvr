@@ -68,7 +68,7 @@ impl AsyncIndexImpl {
                 // Poll for more data to avoid locking and relocking
                 for _ in 0..IndexingTask::LINES_PER_MB {
                     if let Ok(line_data) = task_rx.try_recv() {
-                        inner.push_line_data(line_data);
+                        inner.push_line_data(line_data + 1);
                     } else {
                         break;
                     }
@@ -114,7 +114,7 @@ impl AsyncIndexImpl {
             let mut inner = self.inner.lock().await;
             for i in memchr::memchr_iter(b'\n', &data) {
                 let line_data = len + i as u64;
-                inner.push_line_data(line_data);
+                inner.push_line_data(line_data + 1);
             }
 
             outgoing

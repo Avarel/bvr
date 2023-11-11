@@ -33,8 +33,16 @@ impl Shard {
         self.id
     }
 
+    pub fn as_slice(&self) -> &[u8] {
+        &self
+    }
+
+    pub fn translate_inner_data_index(&self, start: u64) -> u64 {
+        start - self.start
+    }
+
     pub fn translate_inner_data_range(&self, start: u64, end: u64) -> (u64, u64) {
-        (start - self.start, end - self.start)
+        (self.translate_inner_data_index(start), self.translate_inner_data_index(end))
     }
 
     pub fn get_shard_line(self: &Rc<Self>, start: u64, end: u64) -> ShardStr {
@@ -43,6 +51,14 @@ impl Shard {
         //         index. It is undefined behavior if the file changes
         //         in a non-appending way after the index is created.
         ShardStr::new(self.clone(), data)
+    }
+}
+
+impl std::ops::Deref for Shard {
+    type Target = [u8];
+
+    fn deref(&self) -> &Self::Target {
+        &self.data
     }
 }
 
