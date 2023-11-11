@@ -1,5 +1,4 @@
-mod partition;
-pub mod sync;
+pub mod inflight;
 
 use crate::Mmappable;
 use std::fs::File;
@@ -8,7 +7,7 @@ use std::ops::Range;
 use anyhow::Result;
 use tokio::sync::mpsc::Receiver;
 
-use partition::RangePartition;
+// use partition::RangePartition;
 
 use crate::cowvec::CowVec;
 
@@ -19,7 +18,7 @@ struct IndexingTask {
 }
 
 impl IndexingTask {
-    const LINES_PER_MB: usize = 1 << 13;
+    const HEURISTIC_LINES_PER_MB: usize = 1 << 13;
 
     fn get_data<T: Mmappable>(file: &T, start: u64, end: u64) -> Result<memmap2::Mmap> {
         let data = unsafe {
@@ -35,7 +34,7 @@ impl IndexingTask {
 
     fn new<T: Mmappable>(file: &T, start: u64, end: u64) -> Result<(Self, Receiver<u64>)> {
         let data = Self::get_data(file, start, end)?;
-        let (sx, rx) = tokio::sync::mpsc::channel(Self::LINES_PER_MB);
+        let (sx, rx) = tokio::sync::mpsc::channel(Self::HEURISTIC_LINES_PER_MB);
         Ok((Self { sx, data, start }, rx))
     }
 
@@ -50,33 +49,19 @@ impl IndexingTask {
 
 pub trait FileIndex {
     fn line_count(&self) -> usize;
-    fn shard_count(&self) -> usize;
     fn start_of_line(&self, line_number: usize) -> u64;
-    fn shard_of_line(&self, line_number: usize) -> Option<usize>;
     fn translate_data_from_line_range(&self, line_range: Range<usize>) -> Range<u64>;
-    fn line_range_of_shard(&self, shard_id: usize) -> Option<Range<usize>>;
-    
-    fn data_range_of_shard(&self, shard_id: usize) -> Option<Range<u64>> {
-        Some(self.translate_data_from_line_range(self.line_range_of_shard(shard_id)?))
-    }
 }
 
 pub struct IncompleteIndex {
     inner: CompleteIndex,
-    data_size: u64,
     finished: bool,
 }
 
 impl IncompleteIndex {
-    /// Constant to determine how much data is stored in each shard.
-    /// Note that the shard likely contains more than the threshold,
-    /// this is just a cutoff.
-    const SHARD_DATA_THRESHOLD: u64 = 1 << 20;
-
     pub fn new() -> Self {
         Self {
             inner: CompleteIndex::empty(),
-            data_size: 0,
             finished: false,
         }
     }
@@ -110,22 +95,11 @@ impl IncompleteIndex {
     }
 
     fn push_line_data(&mut self, line_data: u64) {
-        let line_number = self.inner.line_index.len();
         self.inner.line_index.push(line_data);
-
-        self.data_size += line_data;
-        if self.data_size > Self::SHARD_DATA_THRESHOLD {
-            self.inner.shard_partition.partition(line_number);
-            self.data_size = 0;
-        }
     }
 
     fn finalize(&mut self, len: u64) {
         self.inner.line_index.push(len);
-        // In case the shard boundary did not end on the very last line we iterated through
-        self.inner
-            .shard_partition
-            .partition(self.inner.line_index.len() - 1);
 
         self.finished = true;
     }
@@ -140,15 +114,12 @@ impl IncompleteIndex {
 pub struct CompleteIndex {
     /// Store the byte location of the start of the indexed line
     line_index: CowVec<u64>,
-    /// Allow queries from line number in a line range to shard
-    shard_partition: RangePartition,
 }
 
 impl CompleteIndex {
     fn empty() -> Self {
         Self {
             line_index: CowVec::new_one_elem(0),
-            shard_partition: RangePartition::new(),
         }
     }
 }
@@ -158,23 +129,11 @@ impl FileIndex for CompleteIndex {
         self.line_index.len().saturating_sub(1)
     }
 
-    fn shard_count(&self) -> usize {
-        self.shard_partition.len()
-    }
-
     fn start_of_line(&self, line_number: usize) -> u64 {
         self.line_index[line_number]
     }
 
-    fn shard_of_line(&self, line_number: usize) -> Option<usize> {
-        self.shard_partition.lookup(line_number)
-    }
-
     fn translate_data_from_line_range(&self, line_range: Range<usize>) -> Range<u64> {
         self.start_of_line(line_range.start)..self.start_of_line(line_range.end)
-    }
-
-    fn line_range_of_shard(&self, shard_id: usize) -> Option<Range<usize>> {
-        self.shard_partition.reverse_lookup(shard_id)
     }
 }

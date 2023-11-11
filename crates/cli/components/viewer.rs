@@ -1,4 +1,4 @@
-use bvr_core::file::shard::ShardStr;
+use bvr_core::ShardStr;
 use std::{collections::HashMap, ops::Range};
 
 use crate::direction::VDirection;
@@ -109,7 +109,7 @@ impl Mask {
     }
 }
 
-type ShardedFile = bvr_core::file::ShardedFile<bvr_core::index::sync::AsyncIndex>;
+type ShardedFile = bvr_core::ShardedBuffer<bvr_core::InflightIndex>;
 
 pub struct Instance {
     name: String,

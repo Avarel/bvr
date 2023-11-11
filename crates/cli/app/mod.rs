@@ -10,8 +10,8 @@ use crate::components::{
 };
 use anyhow::Result;
 use bvr_core::{
-    file::ShardedFile,
-    index::sync::{AsyncIndex, AsyncStream},
+    buf::ShardedBuffer,
+    index::inflight::{InflightIndex, InflightStream},
 };
 use crossterm::{
     event::{
@@ -72,20 +72,20 @@ impl App {
         Ok(self.push_instance(
             name,
             self.rt
-                .block_on(ShardedFile::<AsyncIndex>::read_file(file, 25))?,
+                .block_on(ShardedBuffer::<InflightIndex>::read_file(file, 25))?,
         ))
     }
 
-    pub fn open_stream(&mut self, stream: AsyncStream) -> Result<()> {
+    pub fn open_stream(&mut self, stream: InflightStream) -> Result<()> {
         let name = String::from("Stream");
         Ok(self.push_instance(
             name,
             self.rt
-                .block_on(ShardedFile::<AsyncIndex>::read_stream(stream))?,
+                .block_on(ShardedBuffer::<InflightIndex>::read_stream(stream))?,
         ))
     }
 
-    fn push_instance(&mut self, name: String, file: ShardedFile<AsyncIndex>) {
+    fn push_instance(&mut self, name: String, file: ShardedBuffer<InflightIndex>) {
         let viewer = Instance::new(name, file);
         self.mux.push_viewer(viewer);
     }
