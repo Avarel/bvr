@@ -1,8 +1,0 @@
-[package]
-name = "bvr-vec"
-description = "Copy-on-write vector for bvr."
-authors = ["An Tran <antranprm@gmail.com>"]
-version = "0.0.2"
-edition = "2021"
-
-[dependencies]

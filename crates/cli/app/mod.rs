@@ -9,7 +9,7 @@ use crate::components::{
     viewer::Instance,
 };
 use anyhow::Result;
-use bvr_file::{
+use bvr_core::{
     file::ShardedFile,
     index::sync::{AsyncIndex, AsyncStream},
 };

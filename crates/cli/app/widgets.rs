@@ -4,7 +4,7 @@ use crate::components::{
     status::StatusApp,
     viewer::{Instance, LineType},
 };
-use bvr_file::index::sync::AsyncIndexProgress;
+use bvr_core::index::sync::AsyncIndexProgress;
 use ratatui::{prelude::*, widgets::*};
 
 use super::InputMode;

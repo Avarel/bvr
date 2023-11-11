@@ -1,4 +1,4 @@
-use bvr_file::index::{sync::AsyncIndex, FileIndex};
+use bvr_core::index::{sync::AsyncIndex, FileIndex};
 
 fn main() {
     let rt = tokio::runtime::Runtime::new().unwrap();

@@ -127,8 +127,7 @@ name = "bvr"
 version = "0.0.2"
 dependencies = [
  "anyhow",
- "bvr-file",
- "bvr-vec",
+ "bvr-core",
  "clap",
  "crossterm",
  "libc",
@@ -139,21 +138,16 @@ dependencies = [
 ]
 
 [[package]]
-name = "bvr-file"
+name = "bvr-core"
 version = "0.0.2"
 dependencies = [
  "anyhow",
- "bvr-vec",
  "lru",
  "memchr",
  "memmap2",
  "tempfile",
  "tokio",
 ]
-
-[[package]]
-name = "bvr-vec"
-version = "0.0.2"
 
 [[package]]
 name = "bytes"
