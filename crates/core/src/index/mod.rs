@@ -1,3 +1,7 @@
+//! Contains [IncompleteIndex], [CompleteIndex] and the trait [BufferIndex].
+//! These abstractions allow for cheap clones of the append-only indices,
+//! fast access to its information, and synchronous indexing operations.
+
 pub mod inflight;
 
 use crate::cowvec::CowVec;
@@ -8,29 +12,73 @@ pub trait BufferIndex {
     /// Returns the total number of lines that the [BufferIndex] can see.
     ///
     /// # Examples
-    ///
     /// ```
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// use bvr_core::index::IncompleteIndex;
+    /// use bvr_core::index::BufferIndex;
+    ///
     /// let index = IncompleteIndex::new();
     /// let index = index.index(&std::fs::File::open("./Cargo.toml")?)?;
-    /// dbg!(index.line_count());   
+    /// dbg!(index.line_count());
+    /// # Ok(())
+    /// # }
     /// ```
     fn line_count(&self) -> usize;
 
     /// Returns the line number that corresponds to the start of the line
     /// that contains the given byte index.
-    /// 
+    ///
     /// This is the inverse of `BufferIndex::data_of_line`.
+    ///
+    /// # Examples
+    /// ```
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// use bvr_core::index::IncompleteIndex;
+    /// use bvr_core::index::BufferIndex;
+    ///
+    /// let index = IncompleteIndex::new();
+    /// let index = index.index(&std::fs::File::open("./Cargo.toml")?)?;
+    /// // First line is 9 characters long, so 10 bytes with \n
+    /// assert_eq!(index.line_of_data(0), Some(0));
+    /// assert_eq!(index.line_of_data(4), Some(0));
+    /// // Second line begins at byte 10
+    /// assert_eq!(index.line_of_data(10), Some(1));
+    /// assert_eq!(index.line_of_data(11), Some(1));
+    /// // Out of bounds access is a None
+    /// assert_eq!(index.line_of_data(1_000_000), None);
+    /// # Ok(())
+    /// # }
+    /// ```
     fn line_of_data(&self, start: u64) -> Option<usize>;
 
     /// Returns the byte index that indicates start of the given line.
     /// Note that if `line_number` is equal to `BufferIndex::line_count`,
     /// then the result must be valid and the byte index must be the
     /// last index (exclusive) of the buffer.
-    /// 
+    ///
     /// This is the inverse of `BufferIndex::line_of_data`.
+    ///
+    /// # Examples
+    /// ```
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// use bvr_core::index::IncompleteIndex;
+    /// use bvr_core::index::BufferIndex;
+    ///
+    /// let index = IncompleteIndex::new();
+    /// let index = index.index(&std::fs::File::open("./Cargo.toml")?)?;
+    /// // First line is 9 characters long, so 10 bytes with \n
+    /// assert_eq!(index.data_of_line(0), Some(0));
+    /// // Second line begins at byte 11
+    /// assert_eq!(index.data_of_line(1), Some(10));
+    /// // Out of bounds access is a None
+    /// assert_eq!(index.data_of_line(1_000_000), None);
+    /// # Ok(())
+    /// # }
+    /// ```
     fn data_of_line(&self, line_number: usize) -> Option<u64>;
 }
 
+/// An index that can be built into a [CompleteIndex].
 pub struct IncompleteIndex {
     inner: CompleteIndex,
     finished: bool,
@@ -40,6 +88,12 @@ impl IncompleteIndex {
     /// Create a new [IncompleteIndex]. This can be used to build a
     /// [CompleteIndex] by using the `index(&File)` method or manually
     /// using `push_line_data`.
+    /// 
+    /// # Example
+    /// ```
+    /// use bvr_core::index::IncompleteIndex;
+    /// let mut index = IncompleteIndex::new();
+    /// ```
     pub fn new() -> Self {
         Self {
             inner: CompleteIndex::empty(),
@@ -48,12 +102,24 @@ impl IncompleteIndex {
     }
 
     /// Index a [File] and return a [CompleteIndex].
+    /// 
+    /// # Examples
+    /// ```
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// use bvr_core::index::IncompleteIndex;
+    /// use bvr_core::index::BufferIndex;
+    ///
+    /// let index = IncompleteIndex::new();
+    /// let index = index.index(&std::fs::File::open("./Cargo.toml")?)?;
+    /// # Ok(())
+    /// # }
+    /// ```
     pub fn index(mut self, file: &File) -> Result<CompleteIndex> {
         let len = file.metadata()?.len();
         let mut start = 0;
 
         while start < len {
-            let end = (start + crate::INDEXING_VIEW_SIZE).min(len);
+            let end = (start + crate::SHARD_SIZE).min(len);
 
             let data = unsafe {
                 memmap2::MmapOptions::new()

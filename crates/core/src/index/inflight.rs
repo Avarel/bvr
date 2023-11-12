@@ -1,3 +1,7 @@
+//! Contains the [InflightIndex] and [InflightIndexIndexer], which are abstractions
+//! that allow the use of [IncompleteIndex] functionalities while it is "inflight"
+//! or in the middle of the indexing operation.
+
 use crate::buf::shard::Shard;
 
 use super::{CompleteIndex, BufferIndex, IncompleteIndex};
@@ -6,6 +10,7 @@ use anyhow::Result;
 use tokio::sync::mpsc::{Receiver, Sender};
 use std::{sync::{atomic::AtomicU64, Arc}, fs::File};
 
+/// Internal indexing task used by [InflightIndexImpl].
 struct IndexingTask {
     /// This is the sender side of the channel that receives byte indexes of `\n`.
     sx: Sender<u64>,
@@ -45,6 +50,7 @@ impl IndexingTask {
     }
 }
 
+#[doc(hidden)]
 pub struct InflightIndexImpl {
     inner: tokio::sync::Mutex<IncompleteIndex>,
     progress: AtomicU64,
@@ -52,20 +58,30 @@ pub struct InflightIndexImpl {
     mode: InflightIndexMode,
 }
 
-/// Inflight index's progress.
+/// Progress report by [InflightIndex]'s `progress()` method.
 pub enum InflightIndexProgress {
+    /// The indexing process is complete. This value can only be returned if
+    /// `InflightIndex::try_finalize` has returned true.
     Done,
+    /// The indexing process is working with a stream. There is no known end
+    /// to the stream, just that it is working through the stream.
     Streaming,
+    /// The indexing process is working with a file. There is a known end
+    /// to the file, and the float value is bounded between `0.0..1.0` and
+    /// represents the progress made on the file.
     File(f64),
 }
 
-/// Mainly used for progress reports.
+/// The mode to be used by the [InflightIndexIndexer]. This has no effect
+/// besides contraining what the [InflightIndexIndexer] can be used for
+/// and progress reports from [`InflightIndex::progress()`]. 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum InflightIndexMode {
     Stream,
     File,
 }
 
+/// Generalized type for streams passed into [InflightIndexIndexer].
 pub type InflightStream = Box<dyn std::io::Read + Send>;
 
 impl InflightIndexImpl {
@@ -92,7 +108,7 @@ impl InflightIndexImpl {
             let mut curr = 0;
 
             while curr < len {
-                let end = (curr + crate::INDEXING_VIEW_SIZE).min(len);
+                let end = (curr + crate::SHARD_SIZE).min(len);
                 let (task, task_rx) = IndexingTask::new(&file, curr, end)?;
                 sx.send(task_rx).await?;
                 tokio::task::spawn(task.worker_async());
@@ -138,21 +154,18 @@ impl InflightIndexImpl {
 
         loop {
             let mut data = memmap2::MmapOptions::new()
-                .len(crate::INDEXING_VIEW_SIZE as usize)
+                .len(crate::SHARD_SIZE as usize)
                 .map_anon()?;
             #[cfg(unix)]
             data.advise(memmap2::Advice::Sequential)?;
 
-            let mut buf_start = 0;
+            let mut buf_len = 0;
             loop {
-                match stream.read(&mut data[buf_start..crate::INDEXING_VIEW_SIZE as usize])? {
+                match stream.read(&mut data[buf_len..crate::SHARD_SIZE as usize])? {
                     0 => break,
-                    l => buf_start += l,
+                    l => buf_len += l,
                 }
             };
-            if buf_start == 0 {
-                break;
-            }
 
             let mut inner = self.inner.lock().await;
             for i in memchr::memchr_iter(b'\n', &data) {
@@ -164,8 +177,12 @@ impl InflightIndexImpl {
                 .send(Shard::new(shard_id, len, data.make_read_only()?))
                 .await?;
 
+            if buf_len == 0 {
+                break;
+            }
+
             shard_id += 1;
-            len += buf_start as u64;
+            len += buf_len as u64;
         }
 
         let mut inner = self.inner.lock().await;
@@ -223,14 +240,18 @@ impl BufferIndex for InflightIndexImpl {
     }
 }
 
+/// A remote type that can be used to set off the indexing process of a
+/// file or a stream.
 pub struct InflightIndexIndexer(Arc<InflightIndexImpl>);
 
 impl InflightIndexIndexer {
-    pub(crate) async fn index_file(self, file: File) -> Result<()> {
+    /// Index a file and load the data into the associated [InflightIndex].
+    pub async fn index_file(self, file: File) -> Result<()> {
         self.0.index_file(file).await
     }
 
-    pub(crate) async fn index_stream(
+    /// Index a stream and load the data into the associated [InflightIndex].
+    pub async fn index_stream(
         self,
         stream: InflightStream,
         outgoing: Sender<Shard>,
@@ -239,29 +260,44 @@ impl InflightIndexIndexer {
     }
 }
 
+/// An index that may be "inflight." This means that the information in this
+/// index may be incomplete and in the middle of processing.
+/// 
+/// However, the present data is still reliable, just that it may not represent
+/// the complete picture.
 pub enum InflightIndex {
-    Incomplete(Arc<InflightIndexImpl>),
+    /// The indexing process is incomplete. The process must be started using
+    /// the associated [InflightIndexIndexer]. Accesses to the data inside
+    /// are relatively cheap, with atomic copies of the ref-counted pointers
+    /// to the internal buffers.
+    Incomplete(#[doc(hidden)] Arc<InflightIndexImpl>),
+    /// The indexing process is finalized, and the internal representation is
+    /// replaced with a [CompleteIndex]. This can be obtained through
+    /// [`Self::try_finalize()`].
     Complete(CompleteIndex),
 }
 
 impl InflightIndex {
-    /// Create an empty inflight index with a remote that can be used
-    /// to set off the indexing process asyncronously.
+    /// Create an empty inflight index with an associated [InflightIndexIndexer]
+    /// that can be used to set off the indexing process asyncronously.
     pub fn new(mode: InflightIndexMode) -> (Self, InflightIndexIndexer) {
         let inner = InflightIndexImpl::new(mode);
         (Self::Incomplete(inner.clone()), InflightIndexIndexer(inner))
     }
 
-    /// Create an index and drive it to completion using inflight async mechanisms.
+    /// Create an index and drive it to completion.
     pub async fn new_complete(file: &File) -> Result<CompleteIndex> {
         let (result, indexer) = Self::new(InflightIndexMode::File);
         indexer.index_file(file.try_clone()?).await?;
         Ok(result.unwrap())
     }
 
-    /// Transparently replace inner atomically ref-counted [IncompleteIndex] with a [CompleteIndex].
-    /// If the function is successful, future accesses will not pay the cost of atomics
-    /// and mutexes to access the inner data of this index.
+    /// Transparently replace inner atomically ref-counted [IncompleteIndex]
+    /// with a [CompleteIndex]. If the function is successful, future accesses
+    /// will not pay the cost of atomics and mutexes to access the inner data of this index.
+    /// 
+    /// This function cannot succeed until the associated [InflightIndexIndexer]
+    /// has been dropped.
     pub fn try_finalize(&mut self) -> bool {
         match self {
             InflightIndex::Incomplete(inner) if Arc::strong_count(inner) == 1 => {
@@ -280,7 +316,9 @@ impl InflightIndex {
         }
     }
 
-    pub(crate) fn unwrap(mut self) -> CompleteIndex {
+    /// Unwrap the [InflightIndex] into a [CompleteIndex]. This method panics if
+    /// [`Self::try_finalize()`] fails.
+    pub fn unwrap(mut self) -> CompleteIndex {
         match self {
             InflightIndex::Incomplete { .. } => {
                 if self.try_finalize() {

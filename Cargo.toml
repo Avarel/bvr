@@ -38,7 +38,7 @@ bvr-core = { path = "crates/core" }
 libc = "0.2.150"
 
 [dev-dependencies]
-rand = "0.8"
+rand = { version = "0.8", features = ["small_rng"] }
 time = "0.3"
 
 [profile.release]

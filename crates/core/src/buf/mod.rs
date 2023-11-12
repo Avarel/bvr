@@ -1,10 +1,10 @@
 pub mod shard;
 
-use std::{num::NonZeroUsize, rc::Rc, fs::File};
+use std::{fs::File, num::NonZeroUsize, rc::Rc};
 
 use anyhow::Result;
 use lru::LruCache;
-use tokio::sync::mpsc::Receiver;
+use tokio::sync::mpsc::{Receiver, error::TryRecvError};
 
 use self::shard::{Shard, ShardStr};
 use crate::index::{
@@ -134,7 +134,7 @@ impl ShardContainer for &mut LruShardedFile {
     fn fetch(&mut self, shard_id: usize) -> Result<Rc<Shard>> {
         let range = {
             let shard_id = shard_id as u64;
-            (shard_id * crate::INDEXING_VIEW_SIZE)..((shard_id + 1) * crate::INDEXING_VIEW_SIZE)
+            (shard_id * crate::SHARD_SIZE)..((shard_id + 1) * crate::SHARD_SIZE)
         };
         self.shards
             .try_get_or_insert(shard_id, || {
@@ -166,8 +166,8 @@ where
     ) -> Result<ShardStr> {
         let data_start = index.data_of_line(line_number).unwrap();
         let data_end = index.data_of_line(line_number + 1).unwrap();
-        let shard_start = (data_start / crate::INDEXING_VIEW_SIZE) as usize;
-        let shard_end = (data_end / crate::INDEXING_VIEW_SIZE) as usize;
+        let shard_start = (data_start / crate::SHARD_SIZE) as usize;
+        let shard_end = (data_end / crate::SHARD_SIZE) as usize;
 
         if shard_start == shard_end {
             // The data is in a single shard
@@ -176,13 +176,13 @@ where
             Ok(shard.get_shard_line(start, end))
         } else {
             debug_assert!(shard_start < shard_end);
-            assert!(shard_end - shard_start + 1 > container.cap());
+            assert!(shard_end - shard_start + 1 <= container.cap());
             // The data may cross several shards, so we must piece together
             // the data from across the shards.
             let mut buf = Vec::with_capacity((data_end - data_start) as usize);
 
             let shard_first = container.fetch(shard_start as usize)?;
-            let shard_last = container.fetch(shard_start as usize)?;
+            let shard_last = container.fetch(shard_end as usize)?;
             let (start, end) = (
                 shard_first.translate_inner_data_index(data_start),
                 shard_last.translate_inner_data_index(data_end),
@@ -214,8 +214,8 @@ where
                                 assert_eq!(shard.id(), shards.len());
                                 shards.push(Rc::new(shard))
                             }
-                            Err(tokio::sync::mpsc::error::TryRecvError::Empty) => break,
-                            Err(tokio::sync::mpsc::error::TryRecvError::Disconnected) => {
+                            Err(TryRecvError::Empty) => break,
+                            Err(TryRecvError::Disconnected) => {
                                 *pending_shards = None;
                                 break;
                             }
@@ -231,7 +231,8 @@ where
 
 #[cfg(test)]
 mod test {
-    use std::io::BufReader;
+    use anyhow::Result;
+    use std::{fs::File, io::BufReader};
 
     use crate::{buf::ShardedBuffer, index::CompleteIndex};
 
@@ -250,12 +251,23 @@ mod test {
     }
 
     #[test]
-    fn file_stream_consistency() {
-        let path = "./Cargo.toml";
-        let rt = tokio::runtime::Runtime::new().unwrap();
-        let file = std::fs::File::open(path).unwrap();
-        let stream = BufReader::new(file);
-        let file = std::fs::File::open(path).unwrap();
+    fn file_stream_consistency_1() -> Result<()> {
+        file_stream_consistency_base(File::open("../../tests/test_10.log")?, 10)
+    }
+
+    #[test]
+    fn file_stream_consistency_2() -> Result<()> {
+        file_stream_consistency_base(File::open("../../tests/test_50_long.log")?, 50)
+    }
+
+    #[test]
+    fn file_stream_consistency_3() -> Result<()> {
+        file_stream_consistency_base(File::open("../../tests/test_5000000.log")?, 5_000_000)
+    }
+
+    fn file_stream_consistency_base(file: File, line_count: usize) -> Result<()> {
+        let rt = tokio::runtime::Runtime::new()?;
+        let stream = BufReader::new(file.try_clone()?);
 
         let mut file_index = rt
             .block_on(ShardedBuffer::<CompleteIndex>::read_file(file, 25))
@@ -267,11 +279,14 @@ mod test {
             .unwrap();
 
         assert_eq!(file_index.line_count(), stream_index.line_count());
+        assert_eq!(file_index.line_count(), line_count);
         for i in 0..file_index.line_count() {
             assert_eq!(
                 file_index.get_line(i).unwrap().as_str(),
                 stream_index.get_line(i).unwrap().as_str()
             );
         }
+
+        Ok(())
     }
 }

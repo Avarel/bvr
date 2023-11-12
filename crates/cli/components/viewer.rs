@@ -73,16 +73,16 @@ impl Viewport {
 
 pub struct Mask {
     lines: Vec<usize>,
-    viewport: Viewport,
-    settings: HashMap<usize, ()>,
+    _viewport: Viewport,
+    _settings: HashMap<usize, ()>,
 }
 
 impl Mask {
     pub fn new() -> Self {
         Self {
-            viewport: Viewport::new(),
+            _viewport: Viewport::new(),
             lines: vec![],
-            settings: HashMap::new(),
+            _settings: HashMap::new(),
         }
     }
 

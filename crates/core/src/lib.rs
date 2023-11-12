@@ -7,7 +7,7 @@ use std::os::fd::AsRawFd as Mmappable;
 #[cfg(windows)]
 use std::os::windows::io::AsRawHandle as Mmappable;
 
-const INDEXING_VIEW_SIZE: u64 = 1 << 20;
+const SHARD_SIZE: u64 = 1 << 20;
 
 pub use index::inflight::InflightIndex;
 pub use buf::ShardedBuffer;

@@ -1,0 +1,54 @@
+name: Main Unit Tests
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  build_job:
+    name: Test main branch
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        build:
+          [
+            x86_64-linux,
+            x86_64-macos,
+            x86_64-windows
+          ]
+        include:
+          - build: x86_64-linux
+            os: ubuntu-latest
+            rust: stable
+            target: x86_64-unknown-linux-gnu
+            cross: false
+          - build: x86_64-macos
+            os: macos-latest
+            rust: stable
+            target: x86_64-apple-darwin
+            cross: false
+          - build: x86_64-windows
+            os: windows-latest
+            rust: stable
+            target: x86_64-pc-windows-msvc
+            cross: false
+
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v3
+
+      - name: Install ${{ matrix.rust }} toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: ${{ matrix.rust }}
+          target: ${{ matrix.target }}
+
+      - name: Rust cache
+        uses: Swatinem/rust-cache@v2
+      
+      - name: Write test log files
+        run: cargo run --example test_gen --release
+
+      - name: Test workspace
+        run: cargo test --workspace

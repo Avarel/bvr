@@ -1,3 +1,6 @@
+//! Contains the [CowVec], which is an append-only vector for [Copy]-elements
+//! based on the standard library's [Vec].
+
 use std::{
     alloc::{self, Layout},
     fmt::Debug,
@@ -13,28 +16,14 @@ use std::{
     },
 };
 
-enum CowVecRepr<T> {
-    /// Snapshot form of the [`CowVec`]. Reads must be done using
-    /// the saved length field.
-    Borrowed {
-        buf: Arc<AtomicAllocation<T>>,
-        len: usize,
-    },
-    /// Owned form of the [`CowVec`]. Reads must be done using the
-    /// atomic length.
-    Owned {
-        buf: Arc<AtomicAllocation<T>>,
-    },
-}
-
 /// An allocation used in a [`CowVec`].
-struct AtomicAllocation<T> {
+struct RawBuf<T> {
     ptr: NonNull<T>,
     len: AtomicUsize,
     cap: usize,
 }
 
-impl<T> AtomicAllocation<T> {
+impl<T> RawBuf<T> {
     const fn empty() -> Self {
         Self::new(std::ptr::NonNull::dangling(), 0, 0)
     }
@@ -48,14 +37,14 @@ impl<T> AtomicAllocation<T> {
     }
 }
 
-impl<T> Deref for AtomicAllocation<T> {
+impl<T> Deref for RawBuf<T> {
     type Target = NonNull<T>;
     fn deref(&self) -> &Self::Target {
         &self.ptr
     }
 }
 
-impl<T> Drop for AtomicAllocation<T> {
+impl<T> Drop for RawBuf<T> {
     fn drop(&mut self) {
         let cap = self.cap;
         if cap != 0 {
@@ -76,13 +65,27 @@ impl<T> Drop for AtomicAllocation<T> {
     }
 }
 
-unsafe impl<T: Send> Send for AtomicAllocation<T> {}
-unsafe impl<T: Sync> Sync for AtomicAllocation<T> {}
+unsafe impl<T: Send> Send for RawBuf<T> {}
+unsafe impl<T: Sync> Sync for RawBuf<T> {}
 
-/// A copy-on-write vector for Copy-only elements. Cloning this vector will give
-/// a snapshot of the vector's content at the time of clone. The snapshot shares
-/// the buffer with the original owning `CowVec` until it reallocates or until
-/// the user attempts to mutably alter the data.
+enum CowVecRepr<T> {
+    /// Snapshot form of the [`CowVec`]. Reads must be done using
+    /// the saved length field.
+    Snapshot { buf: Arc<RawBuf<T>>, len: usize },
+    /// Owned form of the [`CowVec`]. Reads must be done using the
+    /// atomic length.
+    Owned { buf: Arc<RawBuf<T>> },
+}
+
+/// A contiguous, growable, append-only array type, written as `CowVec<T>`,
+/// short for copy-on-write vector.
+///
+/// Cloning this vector will give a snapshot of the vector's content at the time
+/// of clone. The snapshot shares the buffer with the original owning [CowVec]
+/// until it reallocates or until the user attempts to mutably alter the data.
+///
+/// This vector has **amortized O(1)** `push()` operation and **O(1)** `clone()`
+/// operations.
 pub struct CowVec<T> {
     repr: CowVecRepr<T>,
 }
@@ -95,13 +98,13 @@ impl<T> Debug for CowVec<T> {
 
 impl<T> CowVec<T> {
     /// Constructs a new, empty `CowVec<T>`.
-    /// 
+    ///
     /// The vector will not allocate until elements are pushed onto it.
     pub fn new() -> Self {
         assert!(std::mem::size_of::<T>() != 0);
         Self {
             repr: CowVecRepr::Owned {
-                buf: Arc::new(AtomicAllocation::empty()),
+                buf: Arc::new(RawBuf::empty()),
             },
         }
     }
@@ -111,7 +114,7 @@ impl<T> CowVec<T> {
         // No matter what len we load, it will be valid since the length
         // is only incremented after the data is written.
         match &self.repr {
-            CowVecRepr::Borrowed { len, .. } => *len,
+            CowVecRepr::Snapshot { len, .. } => *len,
             CowVecRepr::Owned { buf } => buf.len.load(Relaxed),
         }
     }
@@ -129,7 +132,7 @@ impl<T: Copy> CowVec<T> {
     /// an owned state.
     pub fn push(&mut self, elem: T) {
         let (buf, len) = match &self.repr {
-            &CowVecRepr::Borrowed { len, .. } => (self.grow(), len),
+            &CowVecRepr::Snapshot { len, .. } => (self.grow(), len),
             CowVecRepr::Owned { buf } => {
                 let len = buf.len.load(Acquire);
                 let cap = buf.cap;
@@ -147,9 +150,9 @@ impl<T: Copy> CowVec<T> {
     }
 
     /// Grow will return a buffer that the caller can write to.
-    fn grow(&mut self) -> &Arc<AtomicAllocation<T>> {
+    fn grow(&mut self) -> &Arc<RawBuf<T>> {
         let (buf, len) = match &self.repr {
-            CowVecRepr::Borrowed { buf, len } => (buf, *len),
+            CowVecRepr::Snapshot { buf, len } => (buf, *len),
             CowVecRepr::Owned { buf } => (buf, buf.len.load(SeqCst)),
         };
         let cap = buf.cap;
@@ -199,7 +202,7 @@ impl<T: Copy> CowVec<T> {
             Some(p) => {
                 debug_assert_ne!(p, buf.ptr);
                 CowVecRepr::Owned {
-                    buf: Arc::new(AtomicAllocation::new(p, len, new_cap)),
+                    buf: Arc::new(RawBuf::new(p, len, new_cap)),
                 }
             }
             None => alloc::handle_alloc_error(new_layout),
@@ -208,7 +211,7 @@ impl<T: Copy> CowVec<T> {
         // Safety: we just assigned an owned repr in the previous statement
         //         to an exclusive reference
         match &self.repr {
-            CowVecRepr::Borrowed { .. } => unsafe { unreachable_unchecked() },
+            CowVecRepr::Snapshot { .. } => unsafe { unreachable_unchecked() },
             CowVecRepr::Owned { buf } => buf,
         }
     }
@@ -217,22 +220,15 @@ impl<T: Copy> CowVec<T> {
 impl<T: Copy> Clone for CowVec<T> {
     fn clone(&self) -> Self {
         let (buf, len) = match &self.repr {
-            CowVecRepr::Borrowed { buf, len } => (buf.clone(), *len),
-            CowVecRepr::Owned { buf } => {
-                // Load using seqcst so it doesn't magically get reordered in the CPU
-                // instruction buffer to after the Arc atomic clone (which uses relaxed)
-                let len = buf.len.load(Relaxed);
-                // Imagine that we clone the allocation information, atomically grow
-                // the array, push an element, and then load the length. We would have
-                // a length that's invalid for the old allocation. Therefore,
-                // we must load the length before we clone, otherwise we can load a
-                // bigger length than the capacity of the buffer we cloned.
-                let buf = buf.clone();
-                (buf, len)
-            }
+            // Safety: Proven by the previous construction of the CowVec::Borrowed state.
+            CowVecRepr::Snapshot { buf, len } => (buf.clone(), *len),
+            // Safety: We are holding a shared ref, and the ref-counted buf
+            //         can only be swapped if there is a exclusive ref.
+            //         So, this access is safe.
+            CowVecRepr::Owned { buf } => (buf.clone(), buf.len.load(Relaxed)),
         };
         CowVec {
-            repr: CowVecRepr::Borrowed { buf, len },
+            repr: CowVecRepr::Snapshot { buf, len },
         }
     }
 }
@@ -242,11 +238,12 @@ impl<T: Copy> Deref for CowVec<T> {
 
     fn deref(&self) -> &Self::Target {
         let (ptr, len) = match &self.repr {
-            CowVecRepr::Borrowed { buf, len } => (buf.as_ptr(), *len),
-            CowVecRepr::Owned { buf } => {
-                let len = buf.len.load(Relaxed);
-                (buf.as_ptr(), len)
-            }
+            // Safety: Proven by the previous construction of the CowVec::Borrowed state.
+            CowVecRepr::Snapshot { buf, len } => (buf.as_ptr(), *len),
+            // Safety: We are holding a shared ref, and the ref-counted buf
+            //         can only be swapped if there is a exclusive ref.
+            //         So, this access is safe.
+            CowVecRepr::Owned { buf } => (buf.as_ptr(), buf.len.load(Relaxed)),
         };
         unsafe { std::slice::from_raw_parts(ptr, len) }
     }
