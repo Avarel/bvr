@@ -43,6 +43,7 @@ impl ShardedBuffer<CompleteIndex> {
         Ok(Self {
             index: index.unwrap(),
             shards: Repr::File(LruShardedFile {
+                len: file.metadata()?.len(),
                 file,
                 shards: LruCache::new(NonZeroUsize::new(shard_count).unwrap()),
             }),
@@ -77,6 +78,7 @@ impl ShardedBuffer<InflightIndex> {
         Ok(Self {
             index,
             shards: Repr::File(LruShardedFile {
+                len: file.metadata()?.len(),
                 file,
                 shards: LruCache::new(NonZeroUsize::new(shard_count).unwrap()),
             }),
@@ -127,6 +129,7 @@ impl ShardContainer for &[Rc<Shard>] {
 
 struct LruShardedFile {
     file: File,
+    len: u64,
     shards: LruCache<usize, Rc<Shard>>,
 }
 
@@ -134,7 +137,7 @@ impl ShardContainer for &mut LruShardedFile {
     fn fetch(&mut self, shard_id: usize) -> Result<Rc<Shard>> {
         let range = {
             let shard_id = shard_id as u64;
-            (shard_id * crate::SHARD_SIZE)..((shard_id + 1) * crate::SHARD_SIZE)
+            (shard_id * crate::SHARD_SIZE)..((shard_id + 1) * crate::SHARD_SIZE).min(self.len)
         };
         self.shards
             .try_get_or_insert(shard_id, || {

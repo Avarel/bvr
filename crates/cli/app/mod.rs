@@ -136,9 +136,9 @@ impl App {
                         }
                     }
                     ViewerAction::SwitchActive(direction) => self.mux.move_active(direction),
-                    ViewerAction::Move(direction) => {
+                    ViewerAction::Move { direction, delta } => {
                         if let Some(viewer) = self.mux.active_viewer_mut() {
-                            viewer.viewport_mut().move_select(direction, 1)
+                            viewer.viewport_mut().move_select(direction, delta as usize)
                         }
                     }
                     ViewerAction::ToggleLine => {
