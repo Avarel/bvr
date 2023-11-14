@@ -114,7 +114,7 @@ impl IncompleteIndex {
     /// # Ok(())
     /// # }
     /// ```
-    pub fn index(mut self, file: &File) -> Result<CompleteIndex> {
+    pub fn index_file(mut self, file: &File) -> Result<CompleteIndex> {
         let len = file.metadata()?.len();
         let mut start = 0;
 
