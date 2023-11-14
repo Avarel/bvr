@@ -18,7 +18,7 @@ pub trait BufferIndex {
     /// use bvr_core::index::BufferIndex;
     ///
     /// let index = IncompleteIndex::new();
-    /// let index = index.index(&std::fs::File::open("./Cargo.toml")?)?;
+    /// let index = index.index_file(&std::fs::File::open("./Cargo.toml")?)?;
     /// dbg!(index.line_count());
     /// # Ok(())
     /// # }
@@ -37,13 +37,21 @@ pub trait BufferIndex {
     /// use bvr_core::index::BufferIndex;
     ///
     /// let index = IncompleteIndex::new();
-    /// let index = index.index(&std::fs::File::open("./Cargo.toml")?)?;
+    /// let index = index.index_file(&std::fs::File::open("./Cargo.toml")?)?;
     /// // First line is 9 characters long, so 10 bytes with \n
     /// assert_eq!(index.line_of_data(0), Some(0));
     /// assert_eq!(index.line_of_data(4), Some(0));
     /// // Second line begins at byte 10
-    /// assert_eq!(index.line_of_data(10), Some(1));
-    /// assert_eq!(index.line_of_data(11), Some(1));
+    /// #[cfg(unix)]
+    /// {
+    ///     assert_eq!(index.line_of_data(10), Some(1));
+    ///     assert_eq!(index.line_of_data(11), Some(1));
+    /// }
+    /// #[cfg(windows)]
+    /// {
+    ///     assert_eq!(index.line_of_data(11), Some(1));
+    ///     assert_eq!(index.line_of_data(12), Some(1));
+    /// }
     /// // Out of bounds access is a None
     /// assert_eq!(index.line_of_data(1_000_000), None);
     /// # Ok(())
@@ -65,11 +73,14 @@ pub trait BufferIndex {
     /// use bvr_core::index::BufferIndex;
     ///
     /// let index = IncompleteIndex::new();
-    /// let index = index.index(&std::fs::File::open("./Cargo.toml")?)?;
+    /// let index = index.index_file(&std::fs::File::open("./Cargo.toml")?)?;
     /// // First line is 9 characters long, so 10 bytes with \n
     /// assert_eq!(index.data_of_line(0), Some(0));
-    /// // Second line begins at byte 11
+    /// // Second line begins at byte 10 (11 for windows)
+    /// #[cfg(unix)]
     /// assert_eq!(index.data_of_line(1), Some(10));
+    /// #[cfg(windows)]
+    /// assert_eq!(index.data_of_line(1), Some(11));
     /// // Out of bounds access is a None
     /// assert_eq!(index.data_of_line(1_000_000), None);
     /// # Ok(())
@@ -110,7 +121,7 @@ impl IncompleteIndex {
     /// use bvr_core::index::BufferIndex;
     ///
     /// let index = IncompleteIndex::new();
-    /// let index = index.index(&std::fs::File::open("./Cargo.toml")?)?;
+    /// let index = index.index_file(&std::fs::File::open("./Cargo.toml")?)?;
     /// # Ok(())
     /// # }
     /// ```

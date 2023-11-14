@@ -4,11 +4,15 @@
 
 use crate::buf::shard::Shard;
 
-use super::{CompleteIndex, BufferIndex, IncompleteIndex};
+use super::{BufferIndex, CompleteIndex, IncompleteIndex};
 
 use anyhow::Result;
-use tokio::sync::mpsc::{Receiver, Sender};
-use std::{sync::{atomic::AtomicU64, Arc}, fs::File};
+use std::sync::mpsc::{Receiver, Sender};
+use std::thread::JoinHandle;
+use std::{
+    fs::File,
+    sync::{atomic::AtomicU64, Arc},
+};
 
 /// Internal indexing task used by [InflightIndexImpl].
 struct IndexingTask {
@@ -21,8 +25,6 @@ struct IndexingTask {
 }
 
 impl IndexingTask {
-    const HEURISTIC_LINES_PER_MB: usize = 1 << 13;
-
     fn map<T: crate::Mmappable>(file: &T, start: u64, end: u64) -> Result<memmap2::Mmap> {
         let data = unsafe {
             memmap2::MmapOptions::new()
@@ -37,13 +39,13 @@ impl IndexingTask {
 
     fn new<T: crate::Mmappable>(file: &T, start: u64, end: u64) -> Result<(Self, Receiver<u64>)> {
         let data = Self::map(file, start, end)?;
-        let (sx, rx) = tokio::sync::mpsc::channel(Self::HEURISTIC_LINES_PER_MB);
+        let (sx, rx) = std::sync::mpsc::channel();
         Ok((Self { sx, data, start }, rx))
     }
 
-    async fn worker_async(self) -> Result<()> {
+    fn compute(self) -> Result<()> {
         for i in memchr::memchr_iter(b'\n', &self.data) {
-            self.sx.send(self.start + i as u64 + 1).await?;
+            self.sx.send(self.start + i as u64 + 1)?;
         }
 
         Ok(())
@@ -52,7 +54,7 @@ impl IndexingTask {
 
 #[doc(hidden)]
 pub struct InflightIndexImpl {
-    inner: tokio::sync::Mutex<IncompleteIndex>,
+    inner: std::sync::Mutex<IncompleteIndex>,
     progress: AtomicU64,
     cache: std::sync::Mutex<Option<CompleteIndex>>,
     mode: InflightIndexMode,
@@ -74,7 +76,7 @@ pub enum InflightIndexProgress {
 
 /// The mode to be used by the [InflightIndexIndexer]. This has no effect
 /// besides contraining what the [InflightIndexIndexer] can be used for
-/// and progress reports from [`InflightIndex::progress()`]. 
+/// and progress reports from [`InflightIndex::progress()`].
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum InflightIndexMode {
     Stream,
@@ -82,55 +84,56 @@ pub enum InflightIndexMode {
 }
 
 /// Generalized type for streams passed into [InflightIndexIndexer].
-pub type InflightStream = Box<dyn std::io::Read + Send>;
+pub type Stream = Box<dyn std::io::Read + Send>;
 
 impl InflightIndexImpl {
     fn new(mode: InflightIndexMode) -> Arc<Self> {
         Arc::new(InflightIndexImpl {
-            inner: tokio::sync::Mutex::new(IncompleteIndex::new()),
+            inner: std::sync::Mutex::new(IncompleteIndex::new()),
             progress: AtomicU64::new(0),
             cache: std::sync::Mutex::new(None),
             mode,
         })
     }
 
-    async fn index_file(self: Arc<Self>, file: File) -> Result<()> {
+    fn index_file(self: Arc<Self>, file: File) -> Result<()> {
         assert_eq!(self.mode, InflightIndexMode::File);
         assert_eq!(Arc::strong_count(&self), 2);
         // Build line & shard index
-        let (sx, mut rx) = tokio::sync::mpsc::channel(4);
+        let (sx, rx) = std::sync::mpsc::sync_channel(4);
 
         let len = file.metadata()?.len();
         let file = file.try_clone()?;
 
         // Indexing worker
-        let spawner = tokio::task::spawn(async move {
+        let spawner: JoinHandle<anyhow::Result<()>> = std::thread::spawn(move || {
             let mut curr = 0;
 
             while curr < len {
                 let end = (curr + crate::SHARD_SIZE).min(len);
                 let (task, task_rx) = IndexingTask::new(&file, curr, end)?;
-                sx.send(task_rx).await?;
-                tokio::task::spawn(task.worker_async());
+                sx.send(task_rx).unwrap();
+
+                std::thread::spawn(|| task.compute());
 
                 curr = end;
             }
 
-            Ok::<(), anyhow::Error>(())
+            Ok(())
         });
 
-        while let Some(mut task_rx) = rx.recv().await {
-            while let Some(line_data) = task_rx.recv().await {
-                let mut inner = self.inner.lock().await;
+        while let Ok(task_rx) = rx.recv() {
+            while let Ok(line_data) = task_rx.recv() {
+                let mut inner = self.inner.lock().unwrap();
                 inner.push_line_data(line_data);
-                // Poll for more data to avoid locking and relocking
-                for _ in 0..IndexingTask::HEURISTIC_LINES_PER_MB {
-                    if let Ok(line_data) = task_rx.try_recv() {
-                        inner.push_line_data(line_data);
-                    } else {
-                        break;
-                    }
-                }
+                // // Poll for more data to avoid locking and relocking
+                // for _ in 0..IndexingTask::HEURISTIC_LINES_PER_MB {
+                //     if let Ok(line_data) = task_rx.try_recv() {
+                //         inner.push_line_data(line_data);
+                //     } else {
+                //         break;
+                //     }
+                // }
                 self.progress.store(
                     (line_data as f64 / len as f64).to_bits(),
                     std::sync::atomic::Ordering::SeqCst,
@@ -138,14 +141,14 @@ impl InflightIndexImpl {
             }
         }
 
-        spawner.await??;
-        let mut inner = self.inner.lock().await;
+        spawner.join().unwrap().unwrap();
+        let mut inner = self.inner.lock().unwrap();
         Ok(inner.finalize(len))
     }
 
-    async fn index_stream(
+    fn index_stream(
         self: Arc<Self>,
-        mut stream: InflightStream,
+        mut stream: Stream,
         outgoing: Sender<Shard>,
     ) -> Result<()> {
         assert_eq!(self.mode, InflightIndexMode::Stream);
@@ -165,17 +168,15 @@ impl InflightIndexImpl {
                     0 => break,
                     l => buf_len += l,
                 }
-            };
+            }
 
-            let mut inner = self.inner.lock().await;
+            let mut inner = self.inner.lock().unwrap();
             for i in memchr::memchr_iter(b'\n', &data) {
                 let line_data = len + i as u64;
                 inner.push_line_data(line_data + 1);
             }
 
-            outgoing
-                .send(Shard::new(shard_id, len, data.make_read_only()?))
-                .await?;
+            outgoing.send(Shard::new(shard_id, len, data.make_read_only()?))?;
 
             if buf_len == 0 {
                 break;
@@ -185,7 +186,7 @@ impl InflightIndexImpl {
             len += buf_len as u64;
         }
 
-        let mut inner = self.inner.lock().await;
+        let mut inner = self.inner.lock().unwrap();
         Ok(inner.finalize(len))
     }
 
@@ -217,7 +218,7 @@ impl InflightIndexImpl {
                 }
                 drop(lock);
 
-                let clone = self.inner.blocking_lock().inner.clone();
+                let clone = self.inner.lock().unwrap().inner.clone();
                 let val = cb(&clone);
                 *self.cache.lock().unwrap() = Some(clone);
                 val
@@ -246,23 +247,19 @@ pub struct InflightIndexIndexer(Arc<InflightIndexImpl>);
 
 impl InflightIndexIndexer {
     /// Index a file and load the data into the associated [InflightIndex].
-    pub async fn index_file(self, file: File) -> Result<()> {
-        self.0.index_file(file).await
+    pub fn index_file(self, file: File) -> Result<()> {
+        self.0.index_file(file)
     }
 
     /// Index a stream and load the data into the associated [InflightIndex].
-    pub async fn index_stream(
-        self,
-        stream: InflightStream,
-        outgoing: Sender<Shard>,
-    ) -> Result<()> {
-        self.0.index_stream(stream, outgoing).await
+    pub fn index_stream(self, stream: Stream, outgoing: Sender<Shard>) -> Result<()> {
+        self.0.index_stream(stream, outgoing)
     }
 }
 
 /// An index that may be "inflight." This means that the information in this
 /// index may be incomplete and in the middle of processing.
-/// 
+///
 /// However, the present data is still reliable, just that it may not represent
 /// the complete picture.
 pub enum InflightIndex {
@@ -286,16 +283,16 @@ impl InflightIndex {
     }
 
     /// Create an index and drive it to completion.
-    pub async fn new_complete(file: &File) -> Result<CompleteIndex> {
+    pub fn new_complete(file: &File) -> Result<CompleteIndex> {
         let (result, indexer) = Self::new(InflightIndexMode::File);
-        indexer.index_file(file.try_clone()?).await?;
+        indexer.index_file(file.try_clone()?)?;
         Ok(result.unwrap())
     }
 
     /// Transparently replace inner atomically ref-counted [IncompleteIndex]
     /// with a [CompleteIndex]. If the function is successful, future accesses
     /// will not pay the cost of atomics and mutexes to access the inner data of this index.
-    /// 
+    ///
     /// This function cannot succeed until the associated [InflightIndexIndexer]
     /// has been dropped.
     pub fn try_finalize(&mut self) -> bool {
@@ -308,7 +305,7 @@ impl InflightIndex {
                     ))
                     .unwrap_unchecked()
                 };
-                *self = InflightIndex::Complete(inner.inner.into_inner().finish());
+                *self = InflightIndex::Complete(inner.inner.into_inner().unwrap().finish());
                 true
             }
             InflightIndex::Incomplete(_) => false,

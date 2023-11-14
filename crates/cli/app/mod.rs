@@ -11,7 +11,7 @@ use crate::components::{
 use anyhow::Result;
 use bvr_core::{
     buf::ShardedBuffer,
-    index::inflight::{InflightIndex, InflightStream},
+    index::inflight::{InflightIndex, Stream},
 };
 use crossterm::{
     event::{
@@ -47,18 +47,16 @@ pub struct App {
     status: StatusApp,
     command: CommandApp,
     keybinds: Keybinding,
-    rt: tokio::runtime::Runtime,
 }
 
 impl App {
-    pub fn new(rt: tokio::runtime::Runtime) -> Self {
+    pub fn new() -> Self {
         Self {
             input_mode: InputMode::Viewer,
             command: CommandApp::new(),
             mux: MultiplexerApp::new(),
             status: StatusApp::new(),
             keybinds: Keybinding::Default,
-            rt,
         }
     }
 
@@ -69,20 +67,12 @@ impl App {
             .file_name()
             .map(|str| str.to_string_lossy().into_owned())
             .unwrap_or_else(|| String::from("Unnamed File"));
-        Ok(self.push_instance(
-            name,
-            self.rt
-                .block_on(ShardedBuffer::<InflightIndex>::read_file(file, 25))?,
-        ))
+        Ok(self.push_instance(name, ShardedBuffer::<InflightIndex>::read_file(file, 25)?))
     }
 
-    pub fn open_stream(&mut self, stream: InflightStream) -> Result<()> {
+    pub fn open_stream(&mut self, stream: Stream) -> Result<()> {
         let name = String::from("Stream");
-        Ok(self.push_instance(
-            name,
-            self.rt
-                .block_on(ShardedBuffer::<InflightIndex>::read_stream(stream))?,
-        ))
+        Ok(self.push_instance(name, ShardedBuffer::<InflightIndex>::read_stream(stream)?))
     }
 
     fn push_instance(&mut self, name: String, file: ShardedBuffer<InflightIndex>) {

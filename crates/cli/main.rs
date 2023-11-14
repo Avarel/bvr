@@ -10,7 +10,6 @@ use ratatui::{prelude::CrosstermBackend, Terminal};
 
 use clap::Parser;
 
-/// Simple program to greet a person
 #[derive(Parser, Debug)]
 #[command(author, version, about)]
 struct Args {
@@ -24,9 +23,7 @@ fn main() -> Result<()> {
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
 
-    let rt = tokio::runtime::Runtime::new().unwrap();
-
-    let mut app = App::new(rt);
+    let mut app = App::new();
 
     for path in args.files {
         app.open_file(path)?;

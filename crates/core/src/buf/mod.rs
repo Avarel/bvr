@@ -1,14 +1,18 @@
 pub mod shard;
 
-use std::{fs::File, num::NonZeroUsize, rc::Rc};
+use std::{
+    fs::File,
+    num::NonZeroUsize,
+    rc::Rc,
+    sync::mpsc::{Receiver, TryRecvError},
+};
 
 use anyhow::Result;
 use lru::LruCache;
-use tokio::sync::mpsc::{Receiver, error::TryRecvError};
 
 use self::shard::{Shard, ShardStr};
 use crate::index::{
-    inflight::{InflightIndex, InflightIndexMode, InflightIndexProgress, InflightStream},
+    inflight::{InflightIndex, InflightIndexMode, InflightIndexProgress, Stream},
     BufferIndex, CompleteIndex,
 };
 
@@ -33,11 +37,10 @@ enum Repr {
 }
 
 impl ShardedBuffer<CompleteIndex> {
-    /// Read a [ShardedBuffer] from a [File]. The indexing process is driven
-    /// to completion by the async runtime.
-    pub async fn read_file(file: File, shard_count: usize) -> Result<Self> {
+    /// Read a [ShardedBuffer] from a [File].
+    pub fn read_file(file: File, shard_count: usize) -> Result<Self> {
         let (mut index, indexer) = InflightIndex::new(InflightIndexMode::File);
-        indexer.index_file(file.try_clone()?).await?;
+        indexer.index_file(file.try_clone()?)?;
         assert!(index.try_finalize());
 
         Ok(Self {
@@ -50,12 +53,11 @@ impl ShardedBuffer<CompleteIndex> {
         })
     }
 
-    /// Read a [ShardedBuffer] from an [InflightStream]. The indexing process is
-    /// driven asyncronously for this buffer, and accesses may not have the latest data.
-    pub async fn read_stream(stream: InflightStream) -> Result<Self> {
+    /// Read a [ShardedBuffer] from an [Stream].
+    pub fn read_stream(stream: Stream) -> Result<Self> {
         let (mut index, indexer) = InflightIndex::new(InflightIndexMode::Stream);
-        let (sx, rx) = tokio::sync::mpsc::channel(1024);
-        indexer.index_stream(stream, sx).await?;
+        let (sx, rx) = std::sync::mpsc::channel();
+        indexer.index_stream(stream, sx)?;
         assert!(index.try_finalize());
 
         Ok(Self {
@@ -69,11 +71,13 @@ impl ShardedBuffer<CompleteIndex> {
 }
 
 impl ShardedBuffer<InflightIndex> {
-    /// Read a [ShardedBuffer] from a [File]. The indexing process is driven
-    /// asyncronously by the async runtime.
-    pub async fn read_file(file: File, shard_count: usize) -> Result<Self> {
+    /// Read a [ShardedBuffer] from a [File].
+    pub fn read_file(file: File, shard_count: usize) -> Result<Self> {
         let (index, indexer) = InflightIndex::new(InflightIndexMode::File);
-        tokio::spawn(indexer.index_file(file.try_clone()?));
+        std::thread::spawn({
+            let file = file.try_clone()?;
+            move || indexer.index_file(file)
+        });
 
         Ok(Self {
             index,
@@ -85,12 +89,11 @@ impl ShardedBuffer<InflightIndex> {
         })
     }
 
-    /// Read a [ShardedBuffer] from an [InflightStream]. The indexing process is
-    /// driven asyncronously for this buffer, and accesses may not have the latest data.
-    pub async fn read_stream(stream: InflightStream) -> Result<Self> {
+    /// Read a [ShardedBuffer] from an [Stream].
+    pub fn read_stream(stream: Stream) -> Result<Self> {
         let (index, indexer) = InflightIndex::new(InflightIndexMode::Stream);
-        let (sx, rx) = tokio::sync::mpsc::channel(1024);
-        tokio::spawn(indexer.index_stream(stream, sx));
+        let (sx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || indexer.index_stream(stream, sx));
 
         Ok(Self {
             index,
@@ -241,11 +244,8 @@ mod test {
 
     #[test]
     fn what() {
-        let rt = tokio::runtime::Runtime::new().unwrap();
         let file = std::fs::File::open("./Cargo.toml").unwrap();
-        let mut file = rt
-            .block_on(ShardedBuffer::<CompleteIndex>::read_file(file, 25))
-            .unwrap();
+        let mut file = ShardedBuffer::<CompleteIndex>::read_file(file, 25).unwrap();
         dbg!(file.line_count());
 
         for i in 0..file.line_count() {
@@ -269,17 +269,10 @@ mod test {
     }
 
     fn file_stream_consistency_base(file: File, line_count: usize) -> Result<()> {
-        let rt = tokio::runtime::Runtime::new()?;
         let stream = BufReader::new(file.try_clone()?);
 
-        let mut file_index = rt
-            .block_on(ShardedBuffer::<CompleteIndex>::read_file(file, 25))
-            .unwrap();
-        let mut stream_index = rt
-            .block_on(ShardedBuffer::<CompleteIndex>::read_stream(Box::new(
-                stream,
-            )))
-            .unwrap();
+        let mut file_index = ShardedBuffer::<CompleteIndex>::read_file(file, 25)?;
+        let mut stream_index = ShardedBuffer::<CompleteIndex>::read_stream(Box::new(stream))?;
 
         assert_eq!(file_index.line_count(), stream_index.line_count());
         assert_eq!(file_index.line_count(), line_count);
