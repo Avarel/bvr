@@ -192,12 +192,14 @@ impl BufferIndex for CompleteIndex {
 
     fn line_of_data(&self, key: u64) -> Option<usize> {
         // Safety: this code was pulled from Vec::binary_search_by
-        let mut size = self.line_index.len();
+        let mut size = self.line_count();
         let mut left = 0;
         let mut right = size;
         while left < right {
             let mid = left + size / 2;
+            dbg!(mid);
 
+            // mid must be less than size, which is self.line_index.len() - 1
             let start = unsafe { *self.line_index.get_unchecked(mid) };
             let end = unsafe { *self.line_index.get_unchecked(mid + 1) };
 
