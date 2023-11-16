@@ -120,7 +120,7 @@ trait ShardContainer {
     fn cap(&self) -> usize;
 }
 
-impl ShardContainer for &[Rc<Shard>] {
+impl ShardContainer for Vec<Rc<Shard>> {
     fn fetch(&mut self, shard_id: usize) -> Result<Rc<Shard>> {
         Ok(self[shard_id].clone())
     }
@@ -136,7 +136,7 @@ struct LruShardedFile {
     shards: LruCache<usize, Rc<Shard>>,
 }
 
-impl ShardContainer for &mut LruShardedFile {
+impl ShardContainer for LruShardedFile {
     fn fetch(&mut self, shard_id: usize) -> Result<Rc<Shard>> {
         let range = {
             let shard_id = shard_id as u64;
@@ -165,9 +165,52 @@ where
         self.index.line_count()
     }
 
+    pub fn index(&self) -> &Idx {
+        &self.index
+    }
+
+    /// Obtain a complete vector of [Rc<Shard>].
+    pub fn render_shards(&mut self) -> Result<Vec<Rc<Shard>>> {
+        match &mut self.shards {
+            Repr::File(lru) => {
+                let last_line = self.index.line_count();
+                let last_line_data = self.index.data_of_line(last_line).unwrap();
+                let last_shard = (last_line_data / crate::SHARD_SIZE) as usize;
+
+                let mut buf = Vec::new();
+                for shard_id in 0..=last_shard {
+                    buf.push(lru.fetch(shard_id)?);
+                }
+                Ok(buf)
+            }
+            Repr::Stream {
+                pending_shards,
+                shards,
+            } => {
+                if let Some(rx) = pending_shards {
+                    loop {
+                        match rx.try_recv() {
+                            Ok(shard) => {
+                                assert_eq!(shard.id(), shards.len());
+                                shards.push(Rc::new(shard))
+                            }
+                            Err(TryRecvError::Empty) => break,
+                            Err(TryRecvError::Disconnected) => {
+                                *pending_shards = None;
+                                break;
+                            }
+                        }
+                    }
+                }
+
+                Ok(shards.clone())
+            }
+        }
+    }
+
     fn fetch_line(
         index: &Idx,
-        mut container: impl ShardContainer,
+        container: &mut impl ShardContainer,
         line_number: usize,
     ) -> Result<ShardStr> {
         let data_start = index.data_of_line(line_number).unwrap();
@@ -229,7 +272,7 @@ where
                     }
                 }
 
-                Self::fetch_line(&self.index, shards.as_slice(), line_number)
+                Self::fetch_line(&self.index, shards, line_number)
             }
         }
     }

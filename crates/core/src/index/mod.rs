@@ -197,7 +197,6 @@ impl BufferIndex for CompleteIndex {
         let mut right = size;
         while left < right {
             let mid = left + size / 2;
-            dbg!(mid);
 
             // mid must be less than size, which is self.line_index.len() - 1
             let start = unsafe { *self.line_index.get_unchecked(mid) };
