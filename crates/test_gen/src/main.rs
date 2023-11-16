@@ -3,10 +3,10 @@ use rand::{distributions::Alphanumeric, Rng, rngs::SmallRng, SeedableRng};
 use anyhow::Result;
 
 fn main() -> Result<()> {
-    std::fs::create_dir("../../tests").ok();
-    generate_log_file("../../tests/test_10.log", 10, 50..150, 1)?;
-    generate_log_file("../../tests/test_50_long.log", 50, 9000..15000, 2)?;
-    generate_log_file("../../tests/test_5000000.log", 5_000_000, 50..150, 3)?;
+    std::fs::create_dir("tests").ok();
+    generate_log_file("tests/test_10.log", 10, 50..150, 1)?;
+    generate_log_file("tests/test_50_long.log", 50, 9000..15000, 2)?;
+    generate_log_file("tests/test_5000000.log", 5_000_000, 50..150, 3)?;
     Ok(())
 }
 
