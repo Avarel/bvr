@@ -122,13 +122,13 @@ impl App {
                 Action::Viewer(action) => match action {
                     ViewerAction::Pan { direction, delta } => {
                         if let Some(viewer) = self.mux.active_viewer_mut() {
-                            viewer.viewport_mut().pan_view(direction, delta as usize)
+                            viewer.viewport_mut().pan_view(direction, usize::from(delta))
                         }
                     }
                     ViewerAction::SwitchActive(direction) => self.mux.move_active(direction),
                     ViewerAction::Move { direction, delta } => {
                         if let Some(viewer) = self.mux.active_viewer_mut() {
-                            viewer.viewport_mut().move_select(direction, delta as usize)
+                            viewer.viewport_mut().move_select(direction, usize::from(delta))
                         }
                     }
                     ViewerAction::ToggleLine => {

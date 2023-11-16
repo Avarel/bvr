@@ -9,7 +9,7 @@ env:
 
 jobs:
   build_job:
-    name: Build main branch
+    name: CI / Build
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false

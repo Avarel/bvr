@@ -6,7 +6,7 @@ on:
 
 jobs:
   build_job:
-    name: Test main branch
+    name: CI / Tests
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -47,8 +47,8 @@ jobs:
       - name: Rust cache
         uses: Swatinem/rust-cache@v2
       
-      - name: Write test log files
-        run: cargo run --example test_gen --release
+      - name: Generate test files
+        run: cargo run --package test-gen --release
 
       - name: Test workspace
         run: cargo test --workspace

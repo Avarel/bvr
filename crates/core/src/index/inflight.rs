@@ -126,14 +126,6 @@ impl InflightIndexImpl {
             while let Ok(line_data) = task_rx.recv() {
                 let mut inner = self.inner.lock().unwrap();
                 inner.push_line_data(line_data);
-                // // Poll for more data to avoid locking and relocking
-                // for _ in 0..IndexingTask::HEURISTIC_LINES_PER_MB {
-                //     if let Ok(line_data) = task_rx.try_recv() {
-                //         inner.push_line_data(line_data);
-                //     } else {
-                //         break;
-                //     }
-                // }
                 self.progress.store(
                     (line_data as f64 / len as f64).to_bits(),
                     std::sync::atomic::Ordering::SeqCst,

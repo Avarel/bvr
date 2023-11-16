@@ -149,7 +149,7 @@ pub struct ViewerWidget<'a> {
 
 impl Widget for ViewerWidget<'_> {
     fn render(self, area: Rect, buf: &mut Buffer) {
-        self.viewer.viewport_mut().fit_view(area.height as usize);
+        self.viewer.viewport_mut().fit_view(usize::from(area.height));
 
         let view = self.viewer.update_and_view();
         let rows = view.iter().map(|line| {

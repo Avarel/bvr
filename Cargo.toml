@@ -26,7 +26,7 @@ path = "crates/cli/main.rs"
 name = "bvr"
 
 [workspace]
-members = ["crates/core"]
+members = ["crates/core", "crates/test_gen"]
 
 [dependencies]
 anyhow = "1.0"
@@ -35,10 +35,6 @@ crossterm = { version = "0.27", features = ["use-dev-tty"] }
 ratatui = "0.24"
 bvr-core = { path = "crates/core" }
 libc = "0.2.150"
-
-[dev-dependencies]
-rand = { version = "0.8", features = ["small_rng"] }
-time = "0.3"
 
 [profile.release]
 strip = true

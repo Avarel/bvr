@@ -36,22 +36,16 @@ pub trait BufferIndex {
     /// use bvr_core::index::IncompleteIndex;
     /// use bvr_core::index::BufferIndex;
     ///
-    /// let index = IncompleteIndex::new();
-    /// let index = index.index_file(&std::fs::File::open("./Cargo.toml")?)?;
+    /// let mut index = IncompleteIndex::new();
+    /// index.push_line_data(10);
+    /// index.finalize(100);
+    /// let index = index.finish();
     /// // First line is 9 characters long, so 10 bytes with \n
     /// assert_eq!(index.line_of_data(0), Some(0));
     /// assert_eq!(index.line_of_data(4), Some(0));
     /// // Second line begins at byte 10
-    /// #[cfg(unix)]
-    /// {
-    ///     assert_eq!(index.line_of_data(10), Some(1));
-    ///     assert_eq!(index.line_of_data(11), Some(1));
-    /// }
-    /// #[cfg(windows)]
-    /// {
-    ///     assert_eq!(index.line_of_data(11), Some(1));
-    ///     assert_eq!(index.line_of_data(12), Some(1));
-    /// }
+    /// assert_eq!(index.line_of_data(10), Some(1));
+    /// assert_eq!(index.line_of_data(11), Some(1));
     /// // Out of bounds access is a None
     /// assert_eq!(index.line_of_data(1_000_000), None);
     /// # Ok(())
@@ -72,15 +66,13 @@ pub trait BufferIndex {
     /// use bvr_core::index::IncompleteIndex;
     /// use bvr_core::index::BufferIndex;
     ///
-    /// let index = IncompleteIndex::new();
-    /// let index = index.index_file(&std::fs::File::open("./Cargo.toml")?)?;
+    /// let mut index = IncompleteIndex::new();
+    /// index.push_line_data(10);
+    /// index.finalize(100);
+    /// let index = index.finish();
     /// // First line is 9 characters long, so 10 bytes with \n
     /// assert_eq!(index.data_of_line(0), Some(0));
-    /// // Second line begins at byte 10 (11 for windows)
-    /// #[cfg(unix)]
     /// assert_eq!(index.data_of_line(1), Some(10));
-    /// #[cfg(windows)]
-    /// assert_eq!(index.data_of_line(1), Some(11));
     /// // Out of bounds access is a None
     /// assert_eq!(index.data_of_line(1_000_000), None);
     /// # Ok(())
@@ -96,9 +88,11 @@ pub struct IncompleteIndex {
 }
 
 impl IncompleteIndex {
-    /// Create a new [IncompleteIndex]. This can be used to build a
-    /// [CompleteIndex] by using the `index(&File)` method or manually
-    /// using `push_line_data`.
+    /// Create a new [IncompleteIndex].
+    /// 
+    /// This can be used to build a [CompleteIndex] by using the 
+    /// [`IncompleteIndex::index_file()`] method or manually
+    /// using `push_line_data(u64)`, `finalize(u64)` and `finish()`.
     /// 
     /// # Example
     /// ```
@@ -154,18 +148,18 @@ impl IncompleteIndex {
     }
 
     /// Push the starting byte of a new line into the index.
-    fn push_line_data(&mut self, line_data: u64) {
+    pub fn push_line_data(&mut self, line_data: u64) {
         self.inner.line_index.push(line_data);
     }
 
     /// Finalize the index.
-    fn finalize(&mut self, len: u64) {
+    pub fn finalize(&mut self, len: u64) {
         self.inner.line_index.push(len);
         self.finished = true;
     }
 
     /// Returns a [CompleteIndex].
-    fn finish(self) -> CompleteIndex {
+    pub fn finish(self) -> CompleteIndex {
         assert!(self.finished);
         self.inner
     }
