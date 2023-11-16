@@ -1,4 +1,4 @@
-name: Main Build Job
+name: CI
 on:
   push:
     branches:
@@ -9,7 +9,7 @@ env:
 
 jobs:
   build_job:
-    name: CI / Build
+    name: Build
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
