@@ -170,7 +170,7 @@ impl Instance {
             .line_range()
             .map(|line_number| Line {
                 line_number,
-                data: self.file.get_line(line_number).unwrap(),
+                data: self.file.get_line(line_number),
                 line_type: if line_number == self.viewport.current {
                     LineType::Selected
                 } else if self

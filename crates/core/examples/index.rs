@@ -1,7 +1,7 @@
 use bvr_core::index::{inflight::InflightIndex, BufferIndex};
 
 fn main() {
-    let file = std::fs::File::open("./Cargo.toml").unwrap();
+    let file = std::fs::File::open("./tests/test_5000000.log").unwrap();
 
     let start = std::time::Instant::now();
     let index = InflightIndex::new_complete(&file).unwrap();

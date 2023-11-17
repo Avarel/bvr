@@ -3,6 +3,7 @@ pub mod shard;
 use std::{
     fs::File,
     num::NonZeroUsize,
+    ops::Range,
     rc::Rc,
     sync::mpsc::{Receiver, TryRecvError},
 };
@@ -20,20 +21,61 @@ pub struct ShardedBuffer<Idx> {
     /// The [BufferIndex] of this buffer.
     index: Idx,
     /// The internal representation of this buffer.
-    shards: Repr,
+    shards: ShardRepr,
 }
 
 /// Internal representation of the sharded buffer, which allows for working
 /// with both files and streams of data. All shards are assumed to have
 /// the same size with the exception of the last shard.
-enum Repr {
+enum ShardRepr {
     /// Data can be loaded on demand.
-    File(LruShardedFile),
+    File {
+        file: File,
+        len: u64,
+        shards: LruCache<usize, Rc<Shard>>,
+    },
     /// Data is all present in memory in multiple anonymous mmaps.
     Stream {
         pending_shards: Option<Receiver<Shard>>,
         shards: Vec<Rc<Shard>>,
     },
+}
+
+impl ShardRepr {
+    fn fetch(&mut self, shard_id: usize) -> Rc<Shard> {
+        match self {
+            ShardRepr::File { file, len, shards } => {
+                let range = {
+                    let shard_id = shard_id as u64;
+                    (shard_id * crate::SHARD_SIZE)..((shard_id + 1) * crate::SHARD_SIZE).min(*len)
+                };
+                shards
+                    .get_or_insert(shard_id, || Rc::new(Shard::map_file(shard_id, range, file)))
+                    .clone()
+            }
+            ShardRepr::Stream {
+                pending_shards,
+                shards,
+            } => {
+                if let Some(rx) = pending_shards {
+                    loop {
+                        match rx.try_recv() {
+                            Ok(shard) => {
+                                assert_eq!(shard.id(), shards.len());
+                                shards.push(Rc::new(shard))
+                            }
+                            Err(TryRecvError::Empty) => break,
+                            Err(TryRecvError::Disconnected) => {
+                                *pending_shards = None;
+                                break;
+                            }
+                        }
+                    }
+                }
+                shards[shard_id].clone()
+            }
+        }
+    }
 }
 
 impl ShardedBuffer<CompleteIndex> {
@@ -45,11 +87,11 @@ impl ShardedBuffer<CompleteIndex> {
 
         Ok(Self {
             index: index.unwrap(),
-            shards: Repr::File(LruShardedFile {
+            shards: ShardRepr::File {
                 len: file.metadata()?.len(),
                 file,
                 shards: LruCache::new(NonZeroUsize::new(shard_count).unwrap()),
-            }),
+            },
         })
     }
 
@@ -62,7 +104,7 @@ impl ShardedBuffer<CompleteIndex> {
 
         Ok(Self {
             index: index.unwrap(),
-            shards: Repr::Stream {
+            shards: ShardRepr::Stream {
                 pending_shards: Some(rx),
                 shards: Vec::new(),
             },
@@ -81,11 +123,11 @@ impl ShardedBuffer<InflightIndex> {
 
         Ok(Self {
             index,
-            shards: Repr::File(LruShardedFile {
+            shards: ShardRepr::File {
                 len: file.metadata()?.len(),
                 file,
                 shards: LruCache::new(NonZeroUsize::new(shard_count).unwrap()),
-            }),
+            },
         })
     }
 
@@ -97,7 +139,7 @@ impl ShardedBuffer<InflightIndex> {
 
         Ok(Self {
             index,
-            shards: Repr::Stream {
+            shards: ShardRepr::Stream {
                 pending_shards: Some(rx),
                 shards: Vec::new(),
             },
@@ -115,47 +157,6 @@ impl ShardedBuffer<InflightIndex> {
     }
 }
 
-trait ShardContainer {
-    fn fetch(&mut self, shard_id: usize) -> Result<Rc<Shard>>;
-    fn cap(&self) -> usize;
-}
-
-impl ShardContainer for Vec<Rc<Shard>> {
-    fn fetch(&mut self, shard_id: usize) -> Result<Rc<Shard>> {
-        Ok(self[shard_id].clone())
-    }
-
-    fn cap(&self) -> usize {
-        self.len()
-    }
-}
-
-struct LruShardedFile {
-    file: File,
-    len: u64,
-    shards: LruCache<usize, Rc<Shard>>,
-}
-
-impl ShardContainer for LruShardedFile {
-    fn fetch(&mut self, shard_id: usize) -> Result<Rc<Shard>> {
-        let range = {
-            let shard_id = shard_id as u64;
-            (shard_id * crate::SHARD_SIZE)..((shard_id + 1) * crate::SHARD_SIZE).min(self.len)
-        };
-        self.shards
-            .try_get_or_insert(shard_id, || {
-                Ok::<Rc<Shard>, anyhow::Error>(Rc::new(Shard::map_file(
-                    shard_id, range, &self.file,
-                )?))
-            })
-            .cloned()
-    }
-
-    fn cap(&self) -> usize {
-        self.shards.cap().get()
-    }
-}
-
 impl<Idx> ShardedBuffer<Idx>
 where
     Idx: BufferIndex,
@@ -169,111 +170,147 @@ where
         &self.index
     }
 
-    /// Obtain a complete vector of [Rc<Shard>].
-    pub fn render_shards(&mut self) -> Result<Vec<Rc<Shard>>> {
-        match &mut self.shards {
-            Repr::File(lru) => {
-                let last_line = self.index.line_count();
-                let last_line_data = self.index.data_of_line(last_line).unwrap();
-                let last_shard = (last_line_data / crate::SHARD_SIZE) as usize;
+    /// Get a [ShardStr] from this [ShardedBuffer].
+    pub fn get_line(&mut self, line_number: usize) -> ShardStr {
+        assert!(line_number <= self.line_count());
 
-                let mut buf = Vec::new();
-                for shard_id in 0..=last_shard {
-                    buf.push(lru.fetch(shard_id)?);
-                }
-                Ok(buf)
-            }
-            Repr::Stream {
-                pending_shards,
-                shards,
-            } => {
-                if let Some(rx) = pending_shards {
-                    loop {
-                        match rx.try_recv() {
-                            Ok(shard) => {
-                                assert_eq!(shard.id(), shards.len());
-                                shards.push(Rc::new(shard))
-                            }
-                            Err(TryRecvError::Empty) => break,
-                            Err(TryRecvError::Disconnected) => {
-                                *pending_shards = None;
-                                break;
-                            }
-                        }
-                    }
-                }
-
-                Ok(shards.clone())
-            }
-        }
-    }
-
-    fn fetch_line(
-        index: &Idx,
-        container: &mut impl ShardContainer,
-        line_number: usize,
-    ) -> Result<ShardStr> {
-        let data_start = index.data_of_line(line_number).unwrap();
-        let data_end = index.data_of_line(line_number + 1).unwrap();
+        let data_start = self.index.data_of_line(line_number).unwrap();
+        let data_end = self.index.data_of_line(line_number + 1).unwrap();
         let shard_start = (data_start / crate::SHARD_SIZE) as usize;
         let shard_end = (data_end / crate::SHARD_SIZE) as usize;
 
         if shard_start == shard_end {
             // The data is in a single shard
-            let shard = container.fetch(shard_start as usize)?;
+            let shard = self.shards.fetch(shard_start as usize);
             let (start, end) = shard.translate_inner_data_range(data_start, data_end);
-            Ok(shard.get_shard_line(start, end))
+            shard.get_shard_line(start, end)
         } else {
             debug_assert!(shard_start < shard_end);
-            assert!(shard_end - shard_start + 1 <= container.cap());
             // The data may cross several shards, so we must piece together
             // the data from across the shards.
             let mut buf = Vec::with_capacity((data_end - data_start) as usize);
 
-            let shard_first = container.fetch(shard_start as usize)?;
-            let shard_last = container.fetch(shard_end as usize)?;
+            let shard_first = self.shards.fetch(shard_start as usize);
+            let shard_last = self.shards.fetch(shard_end as usize);
             let (start, end) = (
                 shard_first.translate_inner_data_index(data_start),
                 shard_last.translate_inner_data_index(data_end),
             );
             buf.extend_from_slice(&shard_first[start as usize..]);
             for shard_id in shard_start + 1..shard_end {
-                buf.extend_from_slice(&container.fetch(shard_id)?);
+                buf.extend_from_slice(&self.shards.fetch(shard_id));
             }
             buf.extend_from_slice(&shard_last[..end as usize]);
 
             let buf = String::from_utf8_lossy(&buf).into_owned();
-            Ok(ShardStr::new_owned(buf))
+            ShardStr::new_owned(buf)
+        }
+    }
+}
+
+impl<Idx> ShardedBuffer<Idx>
+where
+    Idx: BufferIndex + Clone,
+{
+    pub fn multibuffer_iter(&self) -> Result<MultibufferIterator<Idx>> {
+        match &self.shards {
+            ShardRepr::File { file, len, .. } => Ok(MultibufferIterator::new(
+                self.index.clone(),
+                ShardRepr::File {
+                    file: file.try_clone()?,
+                    len: *len,
+                    shards: LruCache::new(NonZeroUsize::new(2).unwrap()),
+                },
+            )),
+            ShardRepr::Stream { shards, .. } => Ok(MultibufferIterator::new(
+                self.index.clone(),
+                ShardRepr::Stream {
+                    pending_shards: None,
+                    shards: shards.clone(),
+                },
+            )),
+        }
+    }
+}
+
+pub struct MultibufferIterator<Idx> {
+    index: Idx,
+    shards: ShardRepr,
+    curr_line: usize,
+    imm_buff: Vec<u8>,
+    imm_shard: Option<Rc<Shard>>,
+}
+
+impl<Idx> MultibufferIterator<Idx>
+where
+    Idx: BufferIndex,
+{
+    fn new(index: Idx, shards: ShardRepr) -> Self {
+        Self {
+            index,
+            shards,
+            curr_line: 0,
+            imm_buff: Vec::new(),
+            imm_shard: None,
         }
     }
 
-    /// Get a [ShardStr] from this [ShardedBuffer].
-    pub fn get_line(&mut self, line_number: usize) -> Result<ShardStr> {
-        assert!(line_number <= self.line_count());
-        match &mut self.shards {
-            Repr::File(file) => Self::fetch_line(&self.index, file, line_number),
-            Repr::Stream {
-                pending_shards,
-                shards,
-            } => {
-                if let Some(rx) = pending_shards {
-                    loop {
-                        match rx.try_recv() {
-                            Ok(shard) => {
-                                assert_eq!(shard.id(), shards.len());
-                                shards.push(Rc::new(shard))
-                            }
-                            Err(TryRecvError::Empty) => break,
-                            Err(TryRecvError::Disconnected) => {
-                                *pending_shards = None;
-                                break;
-                            }
-                        }
-                    }
-                }
+    pub fn next(&mut self) -> Option<(Range<usize>, &[u8])> {
+        let curr_line = self.curr_line;
+        if curr_line < self.index.line_count() {
+            let curr_line_data_start = self.index.data_of_line(curr_line).unwrap();
+            let curr_line_data_end = self.index.data_of_line(curr_line + 1).unwrap();
 
-                Self::fetch_line(&self.index, shards, line_number)
+            let curr_line_shard_start = (curr_line_data_start / crate::SHARD_SIZE) as usize;
+            let curr_line_shard_end = (curr_line_data_end / crate::SHARD_SIZE) as usize;
+
+            if curr_line_shard_end != curr_line_shard_start {
+                self.imm_buff.clear();
+                self.imm_buff
+                    .reserve((curr_line_data_end - curr_line_data_start) as usize);
+
+                let shard_first = self.shards.fetch(curr_line_shard_start);
+                let shard_last = self.shards.fetch(curr_line_shard_end);
+                let (start, end) = (
+                    shard_first.translate_inner_data_index(curr_line_data_start),
+                    shard_last.translate_inner_data_index(curr_line_data_end),
+                );
+
+                self.imm_buff
+                    .extend_from_slice(&shard_first[start as usize..]);
+                for shard_id in curr_line_shard_start + 1..curr_line_shard_end {
+                    self.imm_buff
+                        .extend_from_slice(&self.shards.fetch(shard_id));
+                }
+                self.imm_buff.extend_from_slice(&shard_last[..end as usize]);
+
+                self.curr_line += 1;
+                return Some((curr_line..curr_line + 1, &self.imm_buff));
+            } else {
+                let curr_shard_data_start = curr_line_shard_start as u64 * crate::SHARD_SIZE;
+                let curr_shard_data_end = curr_shard_data_start + crate::SHARD_SIZE;
+
+                let line_end = self
+                    .index
+                    .line_of_data(curr_shard_data_end)
+                    .unwrap_or_else(|| self.index.line_count());
+                let line_end_data_start = self.index.data_of_line(line_end).unwrap();
+
+                // this line should not cross multiple shards, else we would have caught in the first case
+                let shard = self.shards.fetch(curr_line_shard_start);
+                let (start, end) =
+                    shard.translate_inner_data_range(curr_line_data_start, line_end_data_start);
+                assert!(line_end_data_start - curr_shard_data_start <= crate::SHARD_SIZE);
+                assert!(end <= crate::SHARD_SIZE);
+
+                self.curr_line = line_end;
+                let shard = self.imm_shard.insert(shard);
+
+                // line must end at the boundary
+                return Some((curr_line..line_end, &shard[start as usize..end as usize]));
             }
+        } else {
+            None
         }
     }
 }
@@ -281,7 +318,10 @@ where
 #[cfg(test)]
 mod test {
     use anyhow::Result;
-    use std::{fs::File, io::BufReader};
+    use std::{
+        fs::File,
+        io::{BufReader, Read},
+    };
 
     use crate::{buf::ShardedBuffer, index::CompleteIndex};
 
@@ -292,7 +332,7 @@ mod test {
         dbg!(file.line_count());
 
         for i in 0..file.line_count() {
-            eprintln!("{}\t{}", i + 1, file.get_line(i).unwrap());
+            eprintln!("{}\t{}", i + 1, file.get_line(i));
         }
     }
 
@@ -321,10 +361,45 @@ mod test {
         assert_eq!(file_index.line_count(), line_count);
         for i in 0..file_index.line_count() {
             assert_eq!(
-                file_index.get_line(i).unwrap().as_str(),
-                stream_index.get_line(i).unwrap().as_str()
+                file_index.get_line(i).as_str(),
+                stream_index.get_line(i).as_str()
             );
         }
+
+        Ok(())
+    }
+
+    #[test]
+    fn multi_buffer_consistency_1() -> Result<()> {
+        multi_buffer_consistency_base(File::open("../../tests/test_10.log")?, 10)
+    }
+
+    #[test]
+    fn multi_buffer_consistency_2() -> Result<()> {
+        multi_buffer_consistency_base(File::open("../../tests/test_50_long.log")?, 50)
+    }
+
+    #[test]
+    fn multi_buffer_consistency_3() -> Result<()> {
+        multi_buffer_consistency_base(File::open("../../tests/test_5000000.log")?, 5_000_000)
+    }
+
+    fn multi_buffer_consistency_base(file: File, line_count: usize) -> Result<()> {
+        let mut reader = BufReader::new(file.try_clone()?);
+
+        let file_buffer = ShardedBuffer::<CompleteIndex>::read_file(file, 25)?;
+        let mut buffers = file_buffer.multibuffer_iter()?;
+
+        let mut total_lines = 0;
+        let mut validate_buf = Vec::new();
+        while let Some((lines, buf)) = buffers.next() {
+            // Validate that the specialized slice reader and normal sequential reads are consistent
+            total_lines += lines.end - lines.start;
+            validate_buf.resize(buf.len(), 0);
+            reader.read_exact(&mut validate_buf)?;
+            assert_eq!(buf, validate_buf);
+        }
+        assert_eq!(total_lines, line_count);
 
         Ok(())
     }

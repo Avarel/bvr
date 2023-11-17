@@ -1,4 +1,3 @@
-use anyhow::Result;
 use std::{borrow::Cow, ops::Range, ptr::NonNull, rc::Rc};
 use crate::Mmappable;
 
@@ -9,16 +8,16 @@ pub struct Shard {
 }
 
 impl Shard {
-    pub fn map_file<F: Mmappable>(id: usize, range: Range<u64>, file: &F) -> Result<Self> {
+    pub fn map_file<F: Mmappable>(id: usize, range: Range<u64>, file: &F) -> Self {
         let data = unsafe {
             memmap2::MmapOptions::new()
                 .offset(range.start)
                 .len((range.end - range.start) as usize)
-                .map(file)?
+                .map(file).expect("mmap should succeed")
         };
         #[cfg(unix)]
-        data.advise(memmap2::Advice::WillNeed)?;
-        Ok(Self::new(id, range.start, data))
+        data.advise(memmap2::Advice::WillNeed).ok();
+        Self::new(id, range.start, data)
     }
 
     pub fn new(id: usize, start: u64, data: memmap2::Mmap) -> Self {
