@@ -6,7 +6,7 @@ use crate::buf::shard::Shard;
 
 use super::{BufferIndex, CompleteIndex, IncompleteIndex};
 
-use anyhow::Result;
+use crate::err::{Error, Result};
 use std::sync::mpsc::{Receiver, Sender};
 use std::thread::JoinHandle;
 use std::{
@@ -45,7 +45,9 @@ impl IndexingTask {
 
     fn compute(self) -> Result<()> {
         for i in memchr::memchr_iter(b'\n', &self.data) {
-            self.sx.send(self.start + i as u64 + 1)?;
+            self.sx
+                .send(self.start + i as u64 + 1)
+                .map_err(|_| Error::Internal)?;
         }
 
         Ok(())
@@ -106,7 +108,7 @@ impl InflightIndexImpl {
         let file = file.try_clone()?;
 
         // Indexing worker
-        let spawner: JoinHandle<anyhow::Result<()>> = std::thread::spawn(move || {
+        let spawner: JoinHandle<Result<()>> = std::thread::spawn(move || {
             let mut curr = 0;
 
             while curr < len {
@@ -138,11 +140,7 @@ impl InflightIndexImpl {
         Ok(inner.finalize(len))
     }
 
-    fn index_stream(
-        self: Arc<Self>,
-        mut stream: Stream,
-        outgoing: Sender<Shard>,
-    ) -> Result<()> {
+    fn index_stream(self: Arc<Self>, mut stream: Stream, outgoing: Sender<Shard>) -> Result<()> {
         assert_eq!(self.mode, InflightIndexMode::Stream);
         let mut len = 0;
         let mut shard_id = 0;
@@ -168,7 +166,9 @@ impl InflightIndexImpl {
                 inner.push_line_data(line_data + 1);
             }
 
-            outgoing.send(Shard::new(shard_id, len, data.make_read_only()?))?;
+            outgoing
+                .send(Shard::new(shard_id, len, data.make_read_only()?))
+                .map_err(|_| Error::Internal)?;
 
             if buf_len == 0 {
                 break;

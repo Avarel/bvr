@@ -113,6 +113,7 @@ dependencies = [
  "memchr",
  "memmap2",
  "tempfile",
+ "thiserror",
 ]
 
 [[package]]

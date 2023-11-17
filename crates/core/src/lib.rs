@@ -1,6 +1,7 @@
 pub mod index;
 pub mod buf;
 pub mod search;
+pub mod err;
 mod cowvec;
 
 #[cfg(unix)]

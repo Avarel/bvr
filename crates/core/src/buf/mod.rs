@@ -8,7 +8,7 @@ use std::{
     sync::mpsc::{Receiver, TryRecvError},
 };
 
-use anyhow::Result;
+use crate::err::Result;
 use lru::LruCache;
 
 use self::shard::{Shard, ShardStr};

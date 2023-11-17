@@ -5,7 +5,7 @@
 pub mod inflight;
 
 use crate::cowvec::CowVec;
-use anyhow::Result;
+use crate::err::Result;
 use std::fs::File;
 
 pub trait BufferIndex {

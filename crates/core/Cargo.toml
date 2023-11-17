@@ -8,7 +8,7 @@ license = "MIT"
 readme = "README.md"
 
 [dependencies]
-anyhow = "1.0"
+thiserror = "1.0"
 memchr = "2.6"
 memmap2 = "0.9"
 lru = "0.12.0"
