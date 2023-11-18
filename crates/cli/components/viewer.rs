@@ -1,7 +1,11 @@
-use bvr_core::ShardStr;
+use bvr_core::{search::BufferSearch, ShardStr};
+use regex::bytes::Regex;
 use std::{collections::HashMap, ops::Range};
 
 use crate::direction::VDirection;
+
+type ShardedBuffer = bvr_core::ShardedBuffer<bvr_core::InflightIndex>;
+type SearchBuffer = bvr_core::search::inflight::InflightSearch;
 
 pub struct Viewport {
     max_height: usize,
@@ -71,50 +75,61 @@ impl Viewport {
     }
 }
 
+enum MaskRepr {
+    Manual(Vec<usize>),
+    Search(SearchBuffer),
+}
+
 pub struct Mask {
-    lines: Vec<usize>,
-    _viewport: Viewport,
-    _settings: HashMap<usize, ()>,
+    lines: MaskRepr,
+    // _viewport: Viewport,
+    // _settings: HashMap<usize, ()>,
 }
 
 impl Mask {
     pub fn new() -> Self {
         Self {
-            _viewport: Viewport::new(),
-            lines: vec![],
-            _settings: HashMap::new(),
+            lines: MaskRepr::Manual(vec![]),
+            // _viewport: Viewport::new(),
+            // _settings: HashMap::new(),
         }
     }
 
     pub fn toggle(&mut self, line_number: usize) {
-        match self.lines.binary_search(&line_number) {
-            Ok(idx) => {
-                self.lines.remove(idx);
-            }
-            Err(idx) => {
-                self.lines.insert(idx, line_number);
-            }
+        match &mut self.lines {
+            MaskRepr::Manual(lines) => match lines.binary_search(&line_number) {
+                Ok(idx) => {
+                    lines.remove(idx);
+                }
+                Err(idx) => {
+                    lines.insert(idx, line_number);
+                }
+            },
+            MaskRepr::Search(_) => {}
         }
     }
 
     pub fn has_line(&self, line_number: usize) -> bool {
-        if let &[first, .., last] = self.lines.as_slice() {
-            if (first..=last).contains(&line_number) {
-                return self.lines.binary_search(&line_number).is_ok();
+        match &self.lines {
+            MaskRepr::Manual(lines) => {
+                if let &[first, .., last] = lines.as_slice() {
+                    if (first..=last).contains(&line_number) {
+                        return lines.binary_search(&line_number).is_ok();
+                    }
+                } else if let &[item] = lines.as_slice() {
+                    return item == line_number;
+                }
+                false
             }
-        } else if let &[item] = self.lines.as_slice() {
-            return item == line_number;
+            MaskRepr::Search(lines) => lines.find(line_number),
         }
-        false
     }
 }
-
-type ShardedFile = bvr_core::ShardedBuffer<bvr_core::InflightIndex>;
 
 pub struct Instance {
     name: String,
     viewport: Viewport,
-    file: ShardedFile,
+    file: ShardedBuffer,
     mask: Option<Mask>,
 }
 
@@ -145,7 +160,7 @@ pub enum LineType {
 }
 
 impl Instance {
-    pub fn new(name: String, file: ShardedFile) -> Self {
+    pub fn new(name: String, file: ShardedBuffer) -> Self {
         Self {
             name,
             viewport: Viewport::new(),
@@ -154,7 +169,7 @@ impl Instance {
         }
     }
 
-    pub fn file(&self) -> &ShardedFile {
+    pub fn file(&self) -> &ShardedBuffer {
         &self.file
     }
 
@@ -197,5 +212,11 @@ impl Instance {
 
     pub fn name(&self) -> &str {
         &self.name
+    }
+
+    pub fn mask_search(&mut self, regex: Regex) {
+        self.mask = Some(Mask {
+            lines: MaskRepr::Search(SearchBuffer::search(&self.file, regex).unwrap()),
+        })
     }
 }

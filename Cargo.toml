@@ -34,7 +34,7 @@ clap = { version = "4.4", features = ["cargo", "derive"] }
 crossterm = { version = "0.27", features = ["use-dev-tty"] }
 ratatui = "0.24"
 bvr-core = { path = "crates/core" }
-libc = "0.2.150"
+regex = "1.10"
 
 [profile.release]
 strip = true

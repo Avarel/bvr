@@ -6,7 +6,7 @@ use crate::components::{
     command::{CommandApp, CursorMovement},
     mux::MultiplexerApp,
     status::StatusApp,
-    viewer::Instance,
+    viewer::{Instance, Mask},
 };
 use anyhow::Result;
 use bvr_core::{
@@ -21,6 +21,7 @@ use crossterm::{
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
 use ratatui::prelude::*;
+use regex::bytes::Regex;
 use std::{path::Path, time::Duration};
 
 use self::{
@@ -188,6 +189,23 @@ impl App {
                                 viewer
                                     .viewport_mut()
                                     .pan_view(crate::direction::VDirection::Down, usize::MAX);
+                            }
+                        } else if command.starts_with("find ") {
+                            let pat = &command[5..];
+
+                            let regex = match Regex::new(pat) {
+                                Ok(r) => r,
+                                Err(err) => {
+                                    self.status.submit_message(
+                                        format!("Invalid regex `{pat}`: {err}"),
+                                        Some(Duration::from_secs(2)),
+                                    );
+                                    continue;
+                                }
+                            };
+
+                            if let Some(viewer) = self.mux.active_viewer_mut() {
+                                viewer.mask_search(regex);
                             }
                         } else {
                             self.status.submit_message(

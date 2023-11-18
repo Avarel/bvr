@@ -118,6 +118,10 @@ impl<T> CowVec<T> {
             CowVecRepr::Owned { buf } => buf.len.load(Relaxed),
         }
     }
+
+    pub fn as_slice(&self) -> &[T] {
+        self
+    }
 }
 
 impl<T: Copy> CowVec<T> {
@@ -233,7 +237,7 @@ impl<T: Copy> Clone for CowVec<T> {
     }
 }
 
-impl<T: Copy> Deref for CowVec<T> {
+impl<T> Deref for CowVec<T> {
     type Target = [T];
 
     fn deref(&self) -> &Self::Target {

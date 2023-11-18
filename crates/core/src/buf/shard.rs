@@ -1,4 +1,4 @@
-use std::{borrow::Cow, ops::Range, ptr::NonNull, rc::Rc};
+use std::{borrow::Cow, ops::Range, ptr::NonNull, rc::Rc, sync::Arc};
 use crate::Mmappable;
 
 pub struct Shard {
@@ -44,7 +44,7 @@ impl Shard {
         (self.translate_inner_data_index(start), self.translate_inner_data_index(end))
     }
 
-    pub fn get_shard_line(self: &Rc<Self>, start: u64, end: u64) -> ShardStr {
+    pub fn get_shard_line(self: &Arc<Self>, start: u64, end: u64) -> ShardStr {
         let data = &self.data[start as usize..end as usize];
         // Safety: The length is computed by a (assumed to be correct)
         //         index. It is undefined behavior if the file changes
@@ -73,7 +73,7 @@ pub struct ShardStr(ShardStrRepr);
 enum ShardStrRepr {
     Borrowed {
         // This field pins the shard so its data does not get munmap'd and remains valid.
-        _pin: Rc<Shard>,
+        _pin: Arc<Shard>,
         // This data point to the ref-counted `_pin` field.
         // Maybe if polonius supports self-referential slices one day, this
         // spicy unsafe code can be dropped.
@@ -90,7 +90,7 @@ impl ShardStr {
     /// # Safety
     /// 1. The provided slice must point to data that lives inside the ref-counted [Shard].
     /// 2. The length must encompass a valid range of data inside the [Shard].
-    fn new<'rc>(origin: Rc<Shard>, data: &'rc [u8]) -> Self {
+    fn new<'rc>(origin: Arc<Shard>, data: &'rc [u8]) -> Self {
         // Safety: This ptr came from a slice that we prevent from
         //         being dropped by having it inside a ref counter
         match String::from_utf8_lossy(data) {

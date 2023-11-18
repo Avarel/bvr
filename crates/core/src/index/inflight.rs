@@ -57,8 +57,8 @@ impl IndexingTask {
 #[doc(hidden)]
 pub struct InflightIndexImpl {
     inner: std::sync::Mutex<IncompleteIndex>,
-    progress: AtomicU64,
     cache: std::sync::Mutex<Option<CompleteIndex>>,
+    progress: AtomicU64,
     mode: InflightIndexMode,
 }
 
@@ -194,7 +194,6 @@ impl InflightIndexImpl {
     fn read<F, T>(&self, cb: F) -> T
     where
         F: FnOnce(&CompleteIndex) -> T,
-        T: std::fmt::Debug + Clone,
     {
         match self.inner.try_lock() {
             Ok(index) => {
@@ -219,25 +218,25 @@ impl InflightIndexImpl {
     }
 }
 
-impl BufferIndex for InflightIndexImpl {
-    fn line_count(&self) -> usize {
-        self.read(|index| index.line_count())
-    }
+// impl BufferIndex for InflightIndexImpl {
+//     fn line_count(&self) -> usize {
+//         self.read(|index| index.line_count())
+//     }
 
-    fn data_of_line(&self, line_number: usize) -> Option<u64> {
-        self.read(|index| index.data_of_line(line_number))
-    }
+//     fn data_of_line(&self, line_number: usize) -> Option<u64> {
+//         self.read(|index| index.data_of_line(line_number))
+//     }
 
-    fn line_of_data(&self, start: u64) -> Option<usize> {
-        self.read(|index| index.line_of_data(start))
-    }
-}
+//     fn line_of_data(&self, start: u64) -> Option<usize> {
+//         self.read(|index| index.line_of_data(start))
+//     }
+// }
 
 /// A remote type that can be used to set off the indexing process of a
 /// file or a stream.
-pub struct InflightIndexIndexer(Arc<InflightIndexImpl>);
+pub struct InflightIndexRemote(Arc<InflightIndexImpl>);
 
-impl InflightIndexIndexer {
+impl InflightIndexRemote {
     /// Index a file and load the data into the associated [InflightIndex].
     pub fn index_file(self, file: File) -> Result<()> {
         self.0.index_file(file)
@@ -269,9 +268,9 @@ pub enum InflightIndex {
 impl InflightIndex {
     /// Create an empty inflight index with an associated [InflightIndexIndexer]
     /// that can be used to set off the indexing process asyncronously.
-    pub fn new(mode: InflightIndexMode) -> (Self, InflightIndexIndexer) {
+    pub fn new(mode: InflightIndexMode) -> (Self, InflightIndexRemote) {
         let inner = InflightIndexImpl::new(mode);
-        (Self::Incomplete(inner.clone()), InflightIndexIndexer(inner))
+        (Self::Incomplete(inner.clone()), InflightIndexRemote(inner))
     }
 
     /// Create an index and drive it to completion.
@@ -289,7 +288,7 @@ impl InflightIndex {
     /// has been dropped.
     pub fn try_finalize(&mut self) -> bool {
         match self {
-            InflightIndex::Incomplete(inner) if Arc::strong_count(inner) == 1 => {
+            Self::Incomplete(inner) if Arc::strong_count(inner) == 1 => {
                 let inner = unsafe {
                     Arc::try_unwrap(std::mem::replace(
                         inner,
@@ -297,11 +296,11 @@ impl InflightIndex {
                     ))
                     .unwrap_unchecked()
                 };
-                *self = InflightIndex::Complete(inner.inner.into_inner().unwrap().finish());
+                *self = Self::Complete(inner.inner.into_inner().unwrap().finish());
                 true
             }
-            InflightIndex::Incomplete(_) => false,
-            InflightIndex::Complete(_) => true,
+            Self::Incomplete(_) => false,
+            Self::Complete(_) => true,
         }
     }
 
@@ -309,14 +308,14 @@ impl InflightIndex {
     /// [`Self::try_finalize()`] fails.
     pub fn unwrap(mut self) -> CompleteIndex {
         match self {
-            InflightIndex::Incomplete { .. } => {
+            Self::Incomplete { .. } => {
                 if self.try_finalize() {
                     self.unwrap()
                 } else {
                     panic!("indexing is incomplete")
                 }
             }
-            InflightIndex::Complete(inner) => inner,
+            Self::Complete(inner) => inner,
         }
     }
 
@@ -329,15 +328,23 @@ impl InflightIndex {
     }
 }
 
+impl Clone for InflightIndex {
+    fn clone(&self) -> Self {
+        match self {
+            Self::Incomplete(inner) => inner.read(|index| Self::Complete(index.clone())),
+            Self::Complete(index) => Self::Complete(index.clone()),
+        }
+    }
+}
+
 macro_rules! demux {
     ($exp:expr, $index: pat, $s:expr) => {
         match $exp {
-            Self::Incomplete($index) => $s,
+            Self::Incomplete(inner) => inner.read(|$index| $s),
             Self::Complete($index) => $s,
         }
     };
 }
-
 impl BufferIndex for InflightIndex {
     fn line_count(&self) -> usize {
         demux!(self, index, index.line_count())

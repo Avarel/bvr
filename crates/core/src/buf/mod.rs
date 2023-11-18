@@ -5,11 +5,15 @@ use std::{
     num::NonZeroUsize,
     ops::Range,
     rc::Rc,
-    sync::mpsc::{Receiver, TryRecvError},
+    sync::{
+        mpsc::{Receiver, TryRecvError},
+        Arc,
+    },
 };
 
-use crate::err::Result;
+use crate::{err::Result, search::inflight::InflightSearch};
 use lru::LruCache;
+use regex::bytes::Regex;
 
 use self::shard::{Shard, ShardStr};
 use crate::index::{
@@ -32,17 +36,17 @@ enum ShardRepr {
     File {
         file: File,
         len: u64,
-        shards: LruCache<usize, Rc<Shard>>,
+        shards: LruCache<usize, Arc<Shard>>,
     },
     /// Data is all present in memory in multiple anonymous mmaps.
     Stream {
         pending_shards: Option<Receiver<Shard>>,
-        shards: Vec<Rc<Shard>>,
+        shards: Vec<Arc<Shard>>,
     },
 }
 
 impl ShardRepr {
-    fn fetch(&mut self, shard_id: usize) -> Rc<Shard> {
+    fn fetch(&mut self, shard_id: usize) -> Arc<Shard> {
         match self {
             ShardRepr::File { file, len, shards } => {
                 let range = {
@@ -50,7 +54,9 @@ impl ShardRepr {
                     (shard_id * crate::SHARD_SIZE)..((shard_id + 1) * crate::SHARD_SIZE).min(*len)
                 };
                 shards
-                    .get_or_insert(shard_id, || Rc::new(Shard::map_file(shard_id, range, file)))
+                    .get_or_insert(shard_id, || {
+                        Arc::new(Shard::map_file(shard_id, range, file))
+                    })
                     .clone()
             }
             ShardRepr::Stream {
@@ -62,7 +68,7 @@ impl ShardRepr {
                         match rx.try_recv() {
                             Ok(shard) => {
                                 assert_eq!(shard.id(), shards.len());
-                                shards.push(Rc::new(shard))
+                                shards.push(Arc::new(shard))
                             }
                             Err(TryRecvError::Empty) => break,
                             Err(TryRecvError::Disconnected) => {
@@ -81,8 +87,8 @@ impl ShardRepr {
 impl ShardedBuffer<CompleteIndex> {
     /// Read a [ShardedBuffer] from a [File].
     pub fn read_file(file: File, shard_count: usize) -> Result<Self> {
-        let (mut index, indexer) = InflightIndex::new(InflightIndexMode::File);
-        indexer.index_file(file.try_clone()?)?;
+        let (mut index, remote) = InflightIndex::new(InflightIndexMode::File);
+        remote.index_file(file.try_clone()?)?;
         assert!(index.try_finalize());
 
         Ok(Self {
@@ -97,9 +103,9 @@ impl ShardedBuffer<CompleteIndex> {
 
     /// Read a [ShardedBuffer] from an [Stream].
     pub fn read_stream(stream: Stream) -> Result<Self> {
-        let (mut index, indexer) = InflightIndex::new(InflightIndexMode::Stream);
+        let (mut index, remote) = InflightIndex::new(InflightIndexMode::Stream);
         let (sx, rx) = std::sync::mpsc::channel();
-        indexer.index_stream(stream, sx)?;
+        remote.index_stream(stream, sx)?;
         assert!(index.try_finalize());
 
         Ok(Self {
@@ -238,7 +244,7 @@ pub struct MultibufferIterator<Idx> {
     shards: ShardRepr,
     curr_line: usize,
     imm_buff: Vec<u8>,
-    imm_shard: Option<Rc<Shard>>,
+    imm_shard: Option<Arc<Shard>>,
 }
 
 impl<Idx> MultibufferIterator<Idx>
@@ -255,7 +261,7 @@ where
         }
     }
 
-    pub fn next(&mut self) -> Option<(Range<usize>, &[u8])> {
+    pub fn next(&mut self) -> Option<(&Idx, u64, &[u8])> {
         let curr_line = self.curr_line;
         if curr_line < self.index.line_count() {
             let curr_line_data_start = self.index.data_of_line(curr_line).unwrap();
@@ -285,7 +291,7 @@ where
                 self.imm_buff.extend_from_slice(&shard_last[..end as usize]);
 
                 self.curr_line += 1;
-                return Some((curr_line..curr_line + 1, &self.imm_buff));
+                return Some((&self.index, curr_line_data_start, &self.imm_buff));
             } else {
                 let curr_shard_data_start = curr_line_shard_start as u64 * crate::SHARD_SIZE;
                 let curr_shard_data_end = curr_shard_data_start + crate::SHARD_SIZE;
@@ -307,7 +313,11 @@ where
                 let shard = self.imm_shard.insert(shard);
 
                 // line must end at the boundary
-                return Some((curr_line..line_end, &shard[start as usize..end as usize]));
+                return Some((
+                    &self.index,
+                    curr_line_data_start,
+                    &shard[start as usize..end as usize],
+                ));
             }
         } else {
             None
@@ -371,35 +381,37 @@ mod test {
 
     #[test]
     fn multi_buffer_consistency_1() -> Result<()> {
-        multi_buffer_consistency_base(File::open("../../tests/test_10.log")?, 10)
+        multi_buffer_consistency_base(File::open("../../tests/test_10.log")?)
     }
 
     #[test]
     fn multi_buffer_consistency_2() -> Result<()> {
-        multi_buffer_consistency_base(File::open("../../tests/test_50_long.log")?, 50)
+        multi_buffer_consistency_base(File::open("../../tests/test_50_long.log")?)
     }
 
     #[test]
     fn multi_buffer_consistency_3() -> Result<()> {
-        multi_buffer_consistency_base(File::open("../../tests/test_5000000.log")?, 5_000_000)
+        multi_buffer_consistency_base(File::open("../../tests/test_5000000.log")?)
     }
 
-    fn multi_buffer_consistency_base(file: File, line_count: usize) -> Result<()> {
+    fn multi_buffer_consistency_base(file: File) -> Result<()> {
+        let file_len = file.metadata()?.len();
         let mut reader = BufReader::new(file.try_clone()?);
 
         let file_buffer = ShardedBuffer::<CompleteIndex>::read_file(file, 25)?;
         let mut buffers = file_buffer.multibuffer_iter()?;
 
-        let mut total_lines = 0;
+        let mut total_bytes = 0;
         let mut validate_buf = Vec::new();
-        while let Some((lines, buf)) = buffers.next() {
+        while let Some((_, start, buf)) = buffers.next() {
             // Validate that the specialized slice reader and normal sequential reads are consistent
-            total_lines += lines.end - lines.start;
+            assert_eq!(start, total_bytes);
+            total_bytes += buf.len() as u64;
             validate_buf.resize(buf.len(), 0);
             reader.read_exact(&mut validate_buf)?;
             assert_eq!(buf, validate_buf);
         }
-        assert_eq!(total_lines, line_count);
+        assert_eq!(total_bytes, file_len);
 
         Ok(())
     }
