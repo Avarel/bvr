@@ -14,12 +14,14 @@ pub struct IncompleteSearch {
 }
 
 impl IncompleteSearch {
+    /// Create a new [IncompleteSearch].
     pub fn new() -> Self {
         Self {
             inner: CompleteSearch::empty(),
         }
     }
 
+    /// Search for a regex in a buffer.
     fn search<Idx>(
         mut self,
         mut iter: MultibufferIterator<Idx>,

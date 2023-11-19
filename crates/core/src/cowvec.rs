@@ -124,16 +124,23 @@ impl<T> CowVec<T> {
     }
 }
 
-impl<T: Copy> CowVec<T> {
-    pub(crate) fn new_one_elem(elem: T) -> Self {
-        let mut vec = Self::new();
-        vec.push(elem);
+#[macro_export]
+macro_rules! cowvec {
+    () => (
+        $crate::vec::CowVec::new()
+    );
+    ($($x:expr),+ $(,)?) => ({
+        let mut vec = $crate::cowvec::CowVec::new();
+        $(vec.push($x);)+
         vec
-    }
+    });
+}
 
-    /// Appends an element to the back of this collection. If the collection
-    /// is in a borrowed state, it will copy the data underneath and become
-    /// an owned state.
+impl<T: Copy> CowVec<T> {
+    /// Appends an element to the back of this collection.
+    /// 
+    /// If the collection is in a borrowed state, it will copy the data
+    /// underlying the borrowed state and transition to an owned state.
     pub fn push(&mut self, elem: T) {
         let (buf, len) = match &self.repr {
             &CowVecRepr::Snapshot { len, .. } => (self.grow(), len),
@@ -253,16 +260,47 @@ impl<T> Deref for CowVec<T> {
     }
 }
 
+#[cfg(test)]
 mod test {
+    use super::CowVec;
+
     #[test]
-    fn simple() {
-        use super::CowVec;
+    fn test_push_and_access() {
         let mut arr = CowVec::new();
-        for i in 0..10000000 {
+        for i in 0..1000000 {
             arr.push(i);
         }
-        for i in 0..10000000 {
+        for i in 0..1000000 {
             assert_eq!(i, arr[i]);
+        }
+    }
+
+    #[test]
+    fn test_clone() {
+        let mut arr = CowVec::new();
+        for i in 0..10 {
+            arr.push(i);
+        }
+        let mut cloned_arr = arr.clone();
+        assert_eq!(arr.len(), cloned_arr.len());
+        for i in 0..10 {
+            assert_eq!(arr[i], cloned_arr[i]);
+        }
+        cloned_arr.push(11);
+        arr.push(12);
+        assert_ne!(arr[10], cloned_arr[10]);
+    }
+
+    #[test]
+    fn test_deref() {
+        let mut arr = CowVec::new();
+        for i in 0..10 {
+            arr.push(i);
+        }
+        let slice: &[i32] = &arr;
+        assert_eq!(slice.len(), arr.len());
+        for i in 0..10 {
+            assert_eq!(slice[i], arr[i]);
         }
     }
 }

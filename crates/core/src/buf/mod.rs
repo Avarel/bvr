@@ -1,19 +1,20 @@
+//! The `buf` module contains the [ShardedBuffer] struct, which is the main
+//! interface for creating and interacting with the sharded buffers.
+
 pub mod shard;
 
 use std::{
     fs::File,
     num::NonZeroUsize,
     ops::Range,
-    rc::Rc,
     sync::{
         mpsc::{Receiver, TryRecvError},
         Arc,
     },
 };
 
-use crate::{err::Result, search::inflight::InflightSearch};
+use crate::Result;
 use lru::LruCache;
-use regex::bytes::Regex;
 
 use self::shard::{Shard, ShardStr};
 use crate::index::{
@@ -21,6 +22,10 @@ use crate::index::{
     BufferIndex, CompleteIndex,
 };
 
+/// A sharded buffer that holds data in multiple shards.
+///
+/// The `ShardedBuffer` struct represents a buffer that is divided into multiple shards.
+/// It contains the [BufferIndex] and the internal representation of the shards.
 pub struct ShardedBuffer<Idx> {
     /// The [BufferIndex] of this buffer.
     index: Idx,
@@ -85,7 +90,21 @@ impl ShardRepr {
 }
 
 impl ShardedBuffer<CompleteIndex> {
-    /// Read a [ShardedBuffer] from a [File].
+    /// Reads a file and constructs a new instance of [ShardedBuffer].
+    ///
+    /// This function uses [InflightIndex] with [InflightIndexMode::File], which
+    /// then it uses to completely index the file. The index is then finalized and
+    /// the resulting [CompleteIndex] is used to construct the [ShardedBuffer].
+    /// 
+    /// # Arguments
+    ///
+    /// * `file` - The file to read.
+    /// * `shard_count` - The number of shards to create.
+    ///
+    /// # Returns
+    ///
+    /// A `Result` containing the constructed instance of [ShardedBuffer<CompleteIndex>]
+    /// if successful, or an error if the file cannot be read or the index cannot be finalized.
     pub fn read_file(file: File, shard_count: usize) -> Result<Self> {
         let (mut index, remote) = InflightIndex::new(InflightIndexMode::File);
         remote.index_file(file.try_clone()?)?;
@@ -101,7 +120,20 @@ impl ShardedBuffer<CompleteIndex> {
         })
     }
 
-    /// Read a [ShardedBuffer] from an [Stream].
+    /// Reads a stream and returns a result.
+    ///
+    /// This function uses [InflightIndex] with [InflightIndexMode::Stream], which
+    /// then it uses to completely index the stream. The index is then finalized and
+    /// the resulting [CompleteIndex] is used to construct the [ShardedBuffer].
+    ///
+    /// # Arguments
+    ///
+    /// * `stream` - The stream to be read.
+    ///
+    /// # Returns
+    ///
+    /// A `Result` containing the constructed instance of [ShardedBuffer<CompleteIndex>]
+    /// if successful, or an error if the file cannot be read or the index cannot be finalized.
     pub fn read_stream(stream: Stream) -> Result<Self> {
         let (mut index, remote) = InflightIndex::new(InflightIndexMode::Stream);
         let (sx, rx) = std::sync::mpsc::channel();
@@ -119,7 +151,24 @@ impl ShardedBuffer<CompleteIndex> {
 }
 
 impl ShardedBuffer<InflightIndex> {
-    /// Read a [ShardedBuffer] from a [File].
+    /// Reads a file and returns a `Result` containing the result of the operation.
+    /// 
+    /// This function uses [InflightIndex] with [InflightIndexMode::File], which
+    /// then it uses to set off the indexing process in the background. While the
+    /// indexing process is ongoing, the [ShardedBuffer] can be used to read the
+    /// file. The content is safe to read, though it may not represent the complete
+    /// picture until the indexing process is complete. Once the indexing process
+    /// is complete, the [ShardedBuffer] can be used to read the file as normal.
+    /// 
+    /// # Arguments
+    ///
+    /// * `file` - The file to be read.
+    /// * `shard_count` - The number of shards to be created.
+    ///
+    /// # Returns
+    ///
+    /// A `Result` containing an instance of [ShardedBuffer<InflightIndex>] if the
+    /// file was successfully read, or an error if the operation failed.
     pub fn read_file(file: File, shard_count: usize) -> Result<Self> {
         let (index, indexer) = InflightIndex::new(InflightIndexMode::File);
         std::thread::spawn({
@@ -137,22 +186,40 @@ impl ShardedBuffer<InflightIndex> {
         })
     }
 
-    /// Read a [ShardedBuffer] from an [Stream].
-    pub fn read_stream(stream: Stream) -> Result<Self> {
+    /// Reads a file and returns a `Result` containing the result of the operation.
+    /// 
+    /// This function uses [InflightIndex] with [InflightIndexMode::Stream], which
+    /// then it uses to set off the indexing process in the background. While the
+    /// indexing process is ongoing, the [ShardedBuffer] can be used to read the
+    /// file. The content is safe to read, though it may not represent the complete
+    /// picture until the indexing process is complete. Once the indexing process
+    /// is complete, the [ShardedBuffer] can be used to read the file as normal.
+    /// 
+    /// # Arguments
+    ///
+    /// * `file` - The file to be read.
+    /// * `shard_count` - The number of shards to be created.
+    ///
+    /// # Returns
+    ///
+    /// An instance of [ShardedBuffer<InflightIndex>].
+    pub fn read_stream(stream: Stream) -> Self {
         let (index, indexer) = InflightIndex::new(InflightIndexMode::Stream);
         let (sx, rx) = std::sync::mpsc::channel();
         std::thread::spawn(move || indexer.index_stream(stream, sx));
 
-        Ok(Self {
+        Self {
             index,
             shards: ShardRepr::Stream {
                 pending_shards: Some(rx),
                 shards: Vec::new(),
             },
-        })
+        }
     }
 
     /// Attempt to finalize the inner [InflightIndex].
+    /// 
+    /// See [`InflightIndex::try_finalize()`] for more information.
     pub fn try_finalize(&mut self) -> bool {
         self.index.try_finalize()
     }
@@ -172,11 +239,25 @@ where
         self.index.line_count()
     }
 
+    /// Return the index of this [ShardedBuffer].
     pub fn index(&self) -> &Idx {
         &self.index
     }
 
-    /// Get a [ShardStr] from this [ShardedBuffer].
+    /// Retrieves a line of text from the buffer based on the given line number.
+    /// 
+    /// # Arguments
+    /// 
+    /// * `line_number` - The line number to retrieve.
+    /// 
+    /// # Panics
+    /// 
+    /// This function will panic if the `line_number` is greater than the total number
+    /// of lines in the buffer's index.
+    /// 
+    /// # Returns
+    /// 
+    /// The line of text as a [ShardStr] object.
     pub fn get_line(&mut self, line_number: usize) -> ShardStr {
         assert!(line_number <= self.line_count());
 
@@ -222,6 +303,7 @@ where
         match &self.shards {
             ShardRepr::File { file, len, .. } => Ok(MultibufferIterator::new(
                 self.index.clone(),
+                0..self.index.line_count(),
                 ShardRepr::File {
                     file: file.try_clone()?,
                     len: *len,
@@ -230,6 +312,7 @@ where
             )),
             ShardRepr::Stream { shards, .. } => Ok(MultibufferIterator::new(
                 self.index.clone(),
+                0..self.index.line_count(),
                 ShardRepr::Stream {
                     pending_shards: None,
                     shards: shards.clone(),
@@ -242,8 +325,12 @@ where
 pub struct MultibufferIterator<Idx> {
     index: Idx,
     shards: ShardRepr,
-    curr_line: usize,
+    line_range: Range<usize>,
+    // Intermediate buffer for the iterator to borrow from
+    // for the case where the line crosses multiple shards
     imm_buff: Vec<u8>,
+    // Intermediate shard storage for the buffer to borrow from
+    // for when the buffer lies within a single shard
     imm_shard: Option<Arc<Shard>>,
 }
 
@@ -251,76 +338,86 @@ impl<Idx> MultibufferIterator<Idx>
 where
     Idx: BufferIndex,
 {
-    fn new(index: Idx, shards: ShardRepr) -> Self {
+    fn new(index: Idx, line_range: Range<usize>, shards: ShardRepr) -> Self {
         Self {
+            line_range,
             index,
             shards,
-            curr_line: 0,
             imm_buff: Vec::new(),
             imm_shard: None,
         }
     }
 
+    /// Get the next buffer from the [MultibufferIterator].
+    ///
+    /// This function retrieves the next buffer from the `MultibufferIterator` and returns it as an `Option`.
+    /// If there are no more buffers available, it returns `None`.
+    ///
+    /// # Returns
+    ///
+    /// - `Some((&Idx, u64, &[u8]))`: A tuple containing the index, starting data
+    ///                               position, and a slice of the buffer data.
+    /// - `None`: If there are no more buffers available.
     pub fn next(&mut self) -> Option<(&Idx, u64, &[u8])> {
-        let curr_line = self.curr_line;
-        if curr_line < self.index.line_count() {
-            let curr_line_data_start = self.index.data_of_line(curr_line).unwrap();
-            let curr_line_data_end = self.index.data_of_line(curr_line + 1).unwrap();
+        if self.line_range.is_empty() {
+            return None;
+        }
 
-            let curr_line_shard_start = (curr_line_data_start / crate::SHARD_SIZE) as usize;
-            let curr_line_shard_end = (curr_line_data_end / crate::SHARD_SIZE) as usize;
+        let curr_line = self.line_range.start;
+        let curr_line_data_start = self.index.data_of_line(curr_line).unwrap();
+        let curr_line_data_end = self.index.data_of_line(curr_line + 1).unwrap();
 
-            if curr_line_shard_end != curr_line_shard_start {
-                self.imm_buff.clear();
+        let curr_line_shard_start = (curr_line_data_start / crate::SHARD_SIZE) as usize;
+        let curr_line_shard_end = (curr_line_data_end / crate::SHARD_SIZE) as usize;
+
+        if curr_line_shard_end != curr_line_shard_start {
+            self.imm_buff.clear();
+            self.imm_buff
+                .reserve((curr_line_data_end - curr_line_data_start) as usize);
+
+            let shard_first = self.shards.fetch(curr_line_shard_start);
+            let shard_last = self.shards.fetch(curr_line_shard_end);
+            let (start, end) = (
+                shard_first.translate_inner_data_index(curr_line_data_start),
+                shard_last.translate_inner_data_index(curr_line_data_end),
+            );
+
+            self.imm_buff
+                .extend_from_slice(&shard_first[start as usize..]);
+            for shard_id in curr_line_shard_start + 1..curr_line_shard_end {
                 self.imm_buff
-                    .reserve((curr_line_data_end - curr_line_data_start) as usize);
-
-                let shard_first = self.shards.fetch(curr_line_shard_start);
-                let shard_last = self.shards.fetch(curr_line_shard_end);
-                let (start, end) = (
-                    shard_first.translate_inner_data_index(curr_line_data_start),
-                    shard_last.translate_inner_data_index(curr_line_data_end),
-                );
-
-                self.imm_buff
-                    .extend_from_slice(&shard_first[start as usize..]);
-                for shard_id in curr_line_shard_start + 1..curr_line_shard_end {
-                    self.imm_buff
-                        .extend_from_slice(&self.shards.fetch(shard_id));
-                }
-                self.imm_buff.extend_from_slice(&shard_last[..end as usize]);
-
-                self.curr_line += 1;
-                return Some((&self.index, curr_line_data_start, &self.imm_buff));
-            } else {
-                let curr_shard_data_start = curr_line_shard_start as u64 * crate::SHARD_SIZE;
-                let curr_shard_data_end = curr_shard_data_start + crate::SHARD_SIZE;
-
-                let line_end = self
-                    .index
-                    .line_of_data(curr_shard_data_end)
-                    .unwrap_or_else(|| self.index.line_count());
-                let line_end_data_start = self.index.data_of_line(line_end).unwrap();
-
-                // this line should not cross multiple shards, else we would have caught in the first case
-                let shard = self.shards.fetch(curr_line_shard_start);
-                let (start, end) =
-                    shard.translate_inner_data_range(curr_line_data_start, line_end_data_start);
-                assert!(line_end_data_start - curr_shard_data_start <= crate::SHARD_SIZE);
-                assert!(end <= crate::SHARD_SIZE);
-
-                self.curr_line = line_end;
-                let shard = self.imm_shard.insert(shard);
-
-                // line must end at the boundary
-                return Some((
-                    &self.index,
-                    curr_line_data_start,
-                    &shard[start as usize..end as usize],
-                ));
+                    .extend_from_slice(&self.shards.fetch(shard_id));
             }
+            self.imm_buff.extend_from_slice(&shard_last[..end as usize]);
+
+            self.line_range.start += 1;
+            return Some((&self.index, curr_line_data_start, &self.imm_buff));
         } else {
-            None
+            let curr_shard_data_start = curr_line_shard_start as u64 * crate::SHARD_SIZE;
+            let curr_shard_data_end = curr_shard_data_start + crate::SHARD_SIZE;
+
+            let line_end = self
+                .index
+                .line_of_data(curr_shard_data_end)
+                .unwrap_or_else(|| self.index.line_count());
+            let line_end_data_start = self.index.data_of_line(line_end).unwrap();
+
+            // this line should not cross multiple shards, else we would have caught in the first case
+            let shard = self.shards.fetch(curr_line_shard_start);
+            let (start, end) =
+                shard.translate_inner_data_range(curr_line_data_start, line_end_data_start);
+            assert!(line_end_data_start - curr_shard_data_start <= crate::SHARD_SIZE);
+            assert!(end <= crate::SHARD_SIZE);
+
+            self.line_range.start = line_end;
+            let shard = self.imm_shard.insert(shard);
+
+            // line must end at the boundary
+            return Some((
+                &self.index,
+                curr_line_data_start,
+                &shard[start as usize..end as usize],
+            ));
         }
     }
 }
@@ -334,17 +431,6 @@ mod test {
     };
 
     use crate::{buf::ShardedBuffer, index::CompleteIndex};
-
-    #[test]
-    fn what() {
-        let file = std::fs::File::open("./Cargo.toml").unwrap();
-        let mut file = ShardedBuffer::<CompleteIndex>::read_file(file, 25).unwrap();
-        dbg!(file.line_count());
-
-        for i in 0..file.line_count() {
-            eprintln!("{}\t{}", i + 1, file.get_line(i));
-        }
-    }
 
     #[test]
     fn file_stream_consistency_1() -> Result<()> {

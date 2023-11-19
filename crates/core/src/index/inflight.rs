@@ -1,4 +1,4 @@
-//! Contains the [InflightIndex] and [InflightIndexIndexer], which are abstractions
+//! Contains the [InflightIndex] and [InflightIndexRemote], which are abstractions
 //! that allow the use of [IncompleteIndex] functionalities while it is "inflight"
 //! or in the middle of the indexing operation.
 
@@ -76,16 +76,21 @@ pub enum InflightIndexProgress {
     File(f64),
 }
 
-/// The mode to be used by the [InflightIndexIndexer]. This has no effect
-/// besides contraining what the [InflightIndexIndexer] can be used for
+/// The mode to be used by the [InflightIndexRemote]. This has no effect
+/// besides contraining what the [InflightIndexRemote] can be used for
 /// and progress reports from [`InflightIndex::progress()`].
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum InflightIndexMode {
+    /// The [InflightIndexRemote] can only be used to index files.
+    /// The progress reports are bounded between `0.0..1.0` and
+    /// represents the progress made on the file.
     Stream,
+    /// The [InflightIndexRemote] can only be used to index streams.
+    /// There are no progress reports for this mode.
     File,
 }
 
-/// Generalized type for streams passed into [InflightIndexIndexer].
+/// Generalized type for streams passed into [InflightIndexRemote].
 pub type Stream = Box<dyn std::io::Read + Send>;
 
 impl InflightIndexImpl {
@@ -218,20 +223,6 @@ impl InflightIndexImpl {
     }
 }
 
-// impl BufferIndex for InflightIndexImpl {
-//     fn line_count(&self) -> usize {
-//         self.read(|index| index.line_count())
-//     }
-
-//     fn data_of_line(&self, line_number: usize) -> Option<u64> {
-//         self.read(|index| index.data_of_line(line_number))
-//     }
-
-//     fn line_of_data(&self, start: u64) -> Option<usize> {
-//         self.read(|index| index.line_of_data(start))
-//     }
-// }
-
 /// A remote type that can be used to set off the indexing process of a
 /// file or a stream.
 pub struct InflightIndexRemote(Arc<InflightIndexImpl>);
@@ -255,7 +246,7 @@ impl InflightIndexRemote {
 /// the complete picture.
 pub enum InflightIndex {
     /// The indexing process is incomplete. The process must be started using
-    /// the associated [InflightIndexIndexer]. Accesses to the data inside
+    /// the associated [InflightIndexRemote]. Accesses to the data inside
     /// are relatively cheap, with atomic copies of the ref-counted pointers
     /// to the internal buffers.
     Incomplete(#[doc(hidden)] Arc<InflightIndexImpl>),
@@ -266,14 +257,45 @@ pub enum InflightIndex {
 }
 
 impl InflightIndex {
-    /// Create an empty inflight index with an associated [InflightIndexIndexer]
-    /// that can be used to set off the indexing process asyncronously.
+    /// This function creates a new instance of [InflightIndex] and its associated [InflightIndexRemote].
+    /// The [InflightIndex] is responsible for managing the state of an ongoing indexing operation,
+    /// while the [InflightIndexRemote] provides a remote interface for starting off the indexing operation.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use bvr_core::index::inflight::{InflightIndex, InflightIndexMode};
+    ///
+    /// let inflight_index = InflightIndex::new(InflightIndexMode::File);
+    /// ```
+    /// 
+    /// # Arguments
+    ///
+    /// * `mode` - The mode of the `InflightIndex`. See [InflightIndexMode] for more information.
+    ///
+    /// # Returns
+    ///
+    /// A tuple containing the newly created `InflightIndex` and the associated `InflightIndexRemote`.
     pub fn new(mode: InflightIndexMode) -> (Self, InflightIndexRemote) {
         let inner = InflightIndexImpl::new(mode);
         (Self::Incomplete(inner.clone()), InflightIndexRemote(inner))
     }
 
-    /// Create an index and drive it to completion.
+    
+    /// Creates a new complete index from a file.
+    ///
+    /// This function creates a new complete index from the provided file. It internally
+    /// initializes an [InflightIndex] in file mode, indexes the file, and returns the
+    /// resulting [CompleteIndex].
+    ///
+    /// # Arguments
+    ///
+    /// * `file` - A reference to the file to be indexed.
+    ///
+    /// # Returns
+    ///
+    /// A `Result` containing the `CompleteIndex` if successful, or an error if the
+    /// indexing process fails.
     pub fn new_complete(file: &File) -> Result<CompleteIndex> {
         let (result, indexer) = Self::new(InflightIndexMode::File);
         indexer.index_file(file.try_clone()?)?;
@@ -284,7 +306,7 @@ impl InflightIndex {
     /// with a [CompleteIndex]. If the function is successful, future accesses
     /// will not pay the cost of atomics and mutexes to access the inner data of this index.
     ///
-    /// This function cannot succeed until the associated [InflightIndexIndexer]
+    /// This function cannot succeed until the associated [InflightIndexRemote]
     /// has been dropped.
     pub fn try_finalize(&mut self) -> bool {
         match self {

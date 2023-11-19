@@ -80,7 +80,7 @@ impl InflightSearchRemote {
 
 pub enum InflightSearch {
     /// The indexing process is incomplete. The process must be started using
-    /// the associated [InflightIndexIndexer]. Accesses to the data inside
+    /// the associated [InflightIndexRemote]. Accesses to the data inside
     /// are relatively cheap, with atomic copies of the ref-counted pointers
     /// to the internal buffers.
     Incomplete(#[doc(hidden)] Arc<InflightSearchImpl>),
@@ -91,6 +91,17 @@ pub enum InflightSearch {
 }
 
 impl InflightSearch {
+    /// This function creates a new instance of [InflightSearch] and its associated [InflightSearchRemote].
+    /// The [InflightSearch] is responsible for managing the state of an ongoing search operation,
+    /// while the [InflightSearchRemote] provides a remote interface for starting off the search operation.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use bvr_core::search::inflight::InflightSearch;
+    ///
+    /// let inflight_search = InflightSearch::new();
+    /// ```
     pub fn new() -> (Self, InflightSearchRemote) {
         let inner = InflightSearchImpl::new();
         (
@@ -99,6 +110,21 @@ impl InflightSearch {
         )
     }
 
+    /// Searches for a regular expression pattern in a sharded buffer.
+    ///
+    /// # Arguments
+    ///
+    /// * `buf` - The sharded buffer to search in.
+    /// * `regex` - The regular expression pattern to search for.
+    ///
+    /// # Returns
+    ///
+    /// Returns a `Result` containing the `InflightSearch` object if the search is successful,
+    /// or an error if the search fails.
+    ///
+    /// # Generic Parameters
+    ///
+    /// * `Idx` - The type of the buffer index.
     pub fn search<Idx>(buf: &ShardedBuffer<Idx>, regex: Regex) -> Result<Self>
     where
         Idx: BufferIndex + Clone + Send + 'static,

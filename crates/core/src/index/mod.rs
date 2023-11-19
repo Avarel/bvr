@@ -8,10 +8,12 @@ use crate::cowvec::CowVec;
 use crate::err::Result;
 use std::fs::File;
 
+/// The `BufferIndex` trait defines methods for working with line-based indexing of buffers.
 pub trait BufferIndex {
-    /// Returns the total number of lines that the [BufferIndex] can see.
+    /// Returns the total number of lines that the `BufferIndex` can see.
     ///
     /// # Examples
+    ///
     /// ```
     /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use bvr_core::index::IncompleteIndex;
@@ -31,6 +33,7 @@ pub trait BufferIndex {
     /// This is the inverse of `BufferIndex::data_of_line`.
     ///
     /// # Examples
+    ///
     /// ```
     /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use bvr_core::index::IncompleteIndex;
@@ -61,6 +64,7 @@ pub trait BufferIndex {
     /// This is the inverse of `BufferIndex::line_of_data`.
     ///
     /// # Examples
+    ///
     /// ```
     /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use bvr_core::index::IncompleteIndex;
@@ -176,7 +180,7 @@ impl CompleteIndex {
     /// Create an empty [CompleteIndex].
     fn empty() -> Self {
         Self {
-            line_index: CowVec::new_one_elem(0),
+            line_index: crate::cowvec![0],
         }
     }
 }

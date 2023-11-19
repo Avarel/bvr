@@ -1,4 +1,4 @@
-use std::{borrow::Cow, ops::Range, ptr::NonNull, rc::Rc, sync::Arc};
+use std::{borrow::Cow, ops::Range, ptr::NonNull, sync::Arc};
 use crate::Mmappable;
 
 pub struct Shard {
@@ -8,7 +8,7 @@ pub struct Shard {
 }
 
 impl Shard {
-    pub fn map_file<F: Mmappable>(id: usize, range: Range<u64>, file: &F) -> Self {
+    pub(crate) fn map_file<F: Mmappable>(id: usize, range: Range<u64>, file: &F) -> Self {
         let data = unsafe {
             memmap2::MmapOptions::new()
                 .offset(range.start)
@@ -20,7 +20,7 @@ impl Shard {
         Self::new(id, range.start, data)
     }
 
-    pub fn new(id: usize, start: u64, data: memmap2::Mmap) -> Self {
+    pub(crate) fn new(id: usize, start: u64, data: memmap2::Mmap) -> Self {
         Self {
             id,
             data,
