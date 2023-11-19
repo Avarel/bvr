@@ -9,14 +9,21 @@ pub enum Action {
     Viewer(ViewerAction),
 }
 
+pub enum Delta {
+    Number(u16),
+    Page,
+    HalfPage,
+    Boundary
+}
+
 pub enum ViewerAction {
     Pan {
         direction: VDirection,
-        delta: u16
+        delta: Delta
     },
     Move {
         direction: VDirection,
-        delta: u16
+        delta: Delta
     },
     ToggleLine,
     SwitchActive(HDirection),

@@ -6,7 +6,7 @@ use crate::components::{
     command::{CommandApp, CursorMovement},
     mux::MultiplexerApp,
     status::StatusApp,
-    viewer::{Instance, Mask},
+    viewer::Instance,
 };
 use anyhow::Result;
 use bvr_core::{
@@ -25,7 +25,7 @@ use regex::bytes::Regex;
 use std::{path::Path, time::Duration};
 
 use self::{
-    actions::{Action, CommandAction, ViewerAction},
+    actions::{Action, CommandAction, ViewerAction, Delta},
     keybinding::Keybinding,
     widgets::{CommandWidget, MultiplexerWidget},
 };
@@ -40,10 +40,8 @@ pub enum InputMode {
     Select,
 }
 
-/// App holds the state of the application
 pub struct App {
-    /// Current input mode
-    input_mode: InputMode,
+    mode: InputMode,
     mux: MultiplexerApp,
     status: StatusApp,
     command: CommandApp,
@@ -53,11 +51,11 @@ pub struct App {
 impl App {
     pub fn new() -> Self {
         Self {
-            input_mode: InputMode::Viewer,
+            mode: InputMode::Viewer,
             command: CommandApp::new(),
             mux: MultiplexerApp::new(),
             status: StatusApp::new(),
-            keybinds: Keybinding::Default,
+            keybinds: Keybinding::Hardcoded,
         }
     }
 
@@ -73,7 +71,7 @@ impl App {
 
     pub fn open_stream(&mut self, stream: Stream) -> Result<()> {
         let name = String::from("Stream");
-        Ok(self.push_instance(name, ShardedBuffer::<InflightIndex>::read_stream(stream)?))
+        Ok(self.push_instance(name, ShardedBuffer::<InflightIndex>::read_stream(stream)))
     }
 
     fn push_instance(&mut self, name: String, file: ShardedBuffer<InflightIndex>) {
@@ -113,23 +111,35 @@ impl App {
                 continue;
             }
 
-            let key = self.keybinds.map_key(self.input_mode, event::read()?);
+            let key = self.keybinds.map_key(self.mode, event::read()?);
 
             let Some(action) = key else { continue };
 
             match action {
                 Action::Exit => break,
-                Action::SwitchMode(new_mode) => self.input_mode = new_mode,
+                Action::SwitchMode(new_mode) => self.mode = new_mode,
                 Action::Viewer(action) => match action {
                     ViewerAction::Pan { direction, delta } => {
                         if let Some(viewer) = self.mux.active_viewer_mut() {
-                            viewer.viewport_mut().pan_view(direction, usize::from(delta))
+                            let delta = match delta {
+                                Delta::Number(n) => usize::from(n),
+                                Delta::Page => viewer.viewport().height(),
+                                Delta::HalfPage => viewer.viewport().height().div_ceil(2),
+                                Delta::Boundary => usize::MAX,
+                            };
+                            viewer.viewport_mut().pan_view(direction, delta);
                         }
                     }
                     ViewerAction::SwitchActive(direction) => self.mux.move_active(direction),
                     ViewerAction::Move { direction, delta } => {
                         if let Some(viewer) = self.mux.active_viewer_mut() {
-                            viewer.viewport_mut().move_select(direction, usize::from(delta))
+                            let delta = match delta {
+                                Delta::Number(n) => usize::from(n),
+                                Delta::Page => viewer.viewport().height(),
+                                Delta::HalfPage => viewer.viewport().height().div_ceil(2),
+                                Delta::Boundary => usize::MAX,
+                            };
+                            viewer.viewport_mut().move_select(direction, delta)
                         }
                     }
                     ViewerAction::ToggleLine => {
@@ -161,7 +171,7 @@ impl App {
                     CommandAction::Paste(s) => self.command.enter_str(&s),
                     CommandAction::Backspace => {
                         if !self.command.delete() {
-                            self.input_mode = InputMode::Viewer;
+                            self.mode = InputMode::Viewer;
                         }
                     }
                     CommandAction::Submit => {
@@ -213,7 +223,7 @@ impl App {
                                 Some(Duration::from_secs(2)),
                             );
                         }
-                        self.input_mode = InputMode::Viewer;
+                        self.mode = InputMode::Viewer;
                     }
                 },
             }
@@ -231,7 +241,7 @@ impl App {
             MultiplexerWidget {
                 mux: &mut self.mux,
                 status: &mut self.status,
-                input_mode: self.input_mode,
+                mode: self.mode,
             },
             chunks[0],
         );
@@ -239,7 +249,7 @@ impl App {
         let mut cursor = None;
         f.render_widget(
             CommandWidget {
-                active: self.input_mode == InputMode::Command,
+                active: self.mode == InputMode::Command,
                 inner: &self.command,
                 cursor: &mut cursor,
             },

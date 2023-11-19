@@ -176,7 +176,7 @@ impl Widget for ViewerWidget<'_> {
 pub struct MultiplexerWidget<'a> {
     pub mux: &'a mut MultiplexerApp,
     pub status: &'a mut StatusApp,
-    pub(super) input_mode: InputMode,
+    pub(super) mode: InputMode,
 }
 
 impl MultiplexerWidget<'_> {
@@ -265,13 +265,13 @@ impl Widget for MultiplexerWidget<'_> {
 
         match self.status.get_message_update() {
             Some(message) => StatusWidget {
-                input_mode: self.input_mode,
+                input_mode: self.mode,
                 state: StatusWidgetState::Message { message: &message },
             }
             .render(chunks[1], buf),
             None => match self.mux.active_viewer_mut() {
                 Some(viewer) => StatusWidget {
-                    input_mode: self.input_mode,
+                    input_mode: self.mode,
                     state: StatusWidgetState::Normal {
                         progress: viewer.file().progress(),
                         line_count: viewer.file().line_count(),
@@ -280,7 +280,7 @@ impl Widget for MultiplexerWidget<'_> {
                 }
                 .render(chunks[1], buf),
                 None => StatusWidget {
-                    input_mode: self.input_mode,
+                    input_mode: self.mode,
                     state: StatusWidgetState::None,
                 }
                 .render(chunks[1], buf),

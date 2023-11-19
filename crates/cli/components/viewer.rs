@@ -1,6 +1,6 @@
 use bvr_core::{search::BufferSearch, ShardStr};
 use regex::bytes::Regex;
-use std::{collections::HashMap, ops::Range};
+use std::ops::Range;
 
 use crate::direction::VDirection;
 
@@ -22,6 +22,10 @@ impl Viewport {
             height: 0,
             current: 0,
         }
+    }
+
+    pub fn height(&self) -> usize {
+        self.height
     }
 
     fn bottom(&self) -> usize {
@@ -171,6 +175,10 @@ impl Instance {
 
     pub fn file(&self) -> &ShardedBuffer {
         &self.file
+    }
+
+    pub fn viewport(&mut self) -> &Viewport {
+        &self.viewport
     }
 
     pub fn viewport_mut(&mut self) -> &mut Viewport {

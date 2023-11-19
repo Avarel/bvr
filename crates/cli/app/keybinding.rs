@@ -3,23 +3,24 @@ use crossterm::event::{Event, KeyCode, KeyModifiers, MouseEventKind, KeyEventKin
 use crate::direction::{HDirection, VDirection};
 
 use super::{
-    actions::{Action, CommandAction, Jump, ViewerAction},
+    actions::{Action, CommandAction, Jump, ViewerAction, Delta},
     InputMode,
 };
 
 pub enum Keybinding {
-    Default,
+    // The keybindings are hardcoded into the program.
+    Hardcoded,
 }
 
 impl Keybinding {
     pub fn map_key(&self, input_mode: InputMode, event: Event) -> Option<Action> {
         match self {
-            Self::Default => self.map_key_default(input_mode, event),
+            Self::Hardcoded => self.native_keys(input_mode, event),
             // TODO: custom keybinding feature gate
         }
     }
 
-    fn map_key_default(&self, input_mode: InputMode, event: Event) -> Option<Action> {
+    fn native_keys(&self, input_mode: InputMode, event: Event) -> Option<Action> {
         if let Event::Key(key) = event {
             if key.kind != KeyEventKind::Press {
                 return None;
@@ -31,7 +32,7 @@ impl Keybinding {
                     MouseEventKind::ScrollUp | MouseEventKind::ScrollDown => {
                         Some(Action::Viewer(ViewerAction::Pan {
                             direction: VDirection::up_if(mouse.kind == MouseEventKind::ScrollUp),
-                            delta: 2,
+                            delta: Delta::Number(2),
                         }))
                     }
                     _ => None,
@@ -42,14 +43,23 @@ impl Keybinding {
                     KeyCode::Esc => Some(Action::Exit),
                     KeyCode::Up | KeyCode::Down => Some(Action::Viewer(ViewerAction::Pan {
                         direction: VDirection::up_if(key.code == KeyCode::Up),
-                        delta: 1,
+                        delta: Delta::Number(1),
                     })),
-                    KeyCode::Right => Some(Action::Viewer(ViewerAction::SwitchActive(
-                        HDirection::Right,
-                    ))),
-                    KeyCode::Left => {
-                        Some(Action::Viewer(ViewerAction::SwitchActive(HDirection::Left)))
-                    }
+                    KeyCode::Home | KeyCode::End => Some(Action::Viewer(ViewerAction::Pan {
+                        direction: VDirection::up_if(key.code == KeyCode::Home),
+                        delta: Delta::Boundary,
+                    })),
+                    KeyCode::PageUp | KeyCode::PageDown => Some(Action::Viewer(ViewerAction::Pan {
+                        direction: VDirection::up_if(key.code == KeyCode::PageUp),
+                        delta: Delta::Page,
+                    })),
+                    KeyCode::Char(c @ ('u' | 'd')) => Some(Action::Viewer(ViewerAction::Pan {
+                        direction: VDirection::up_if(c == 'u'),
+                        delta: Delta::HalfPage,
+                    })),
+                    KeyCode::Left | KeyCode::Right => Some(Action::Viewer(ViewerAction::SwitchActive(
+                        HDirection::left_if(key.code == KeyCode::Left)),
+                    )),
                     _ => None,
                 },
                 _ => None,
@@ -60,7 +70,7 @@ impl Keybinding {
                     MouseEventKind::ScrollUp | MouseEventKind::ScrollDown => {
                         Some(Action::Viewer(ViewerAction::Move {
                             direction: VDirection::up_if(mouse.kind == MouseEventKind::ScrollUp),
-                            delta: 1,
+                            delta: Delta::Number(1),
                         }))
                     }
                     _ => None,
@@ -70,7 +80,7 @@ impl Keybinding {
                     KeyCode::Esc => Some(Action::SwitchMode(InputMode::Viewer)),
                     KeyCode::Up | KeyCode::Down => Some(Action::Viewer(ViewerAction::Move {
                         direction: VDirection::up_if(key.code == KeyCode::Up),
-                        delta: 1,
+                        delta: Delta::Number(1),
                     })),
                     KeyCode::Char(' ') | KeyCode::Enter => {
                         Some(Action::Viewer(ViewerAction::ToggleLine))
