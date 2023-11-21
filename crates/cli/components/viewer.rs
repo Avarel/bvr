@@ -1,11 +1,11 @@
-use bvr_core::{search::BufferSearch, ShardStr};
+use bvr_core::{search::BufferSearch, SegStr};
 use regex::bytes::Regex;
 use std::ops::Range;
 
 use crate::direction::VDirection;
 
-type ShardedBuffer = bvr_core::ShardedBuffer<bvr_core::InflightIndex>;
-type SearchBuffer = bvr_core::search::inflight::InflightSearch;
+type Buffer = bvr_core::SegBuffer<bvr_core::InflightIndex>;
+type SearchResults = bvr_core::search::inflight::InflightSearch;
 
 pub struct Viewport {
     max_height: usize,
@@ -81,7 +81,7 @@ impl Viewport {
 
 enum MaskRepr {
     Manual(Vec<usize>),
-    Search(SearchBuffer),
+    Search(SearchResults),
 }
 
 pub struct Mask {
@@ -133,13 +133,13 @@ impl Mask {
 pub struct Instance {
     name: String,
     viewport: Viewport,
-    file: ShardedBuffer,
+    file: Buffer,
     mask: Option<Mask>,
 }
 
 pub struct Line {
     line_number: usize,
-    data: ShardStr,
+    data: SegStr,
     line_type: LineType,
 }
 impl Line {
@@ -147,7 +147,7 @@ impl Line {
         self.line_number
     }
 
-    pub fn data(&self) -> &ShardStr {
+    pub fn data(&self) -> &SegStr {
         &self.data
     }
 
@@ -164,7 +164,7 @@ pub enum LineType {
 }
 
 impl Instance {
-    pub fn new(name: String, file: ShardedBuffer) -> Self {
+    pub fn new(name: String, file: Buffer) -> Self {
         Self {
             name,
             viewport: Viewport::new(),
@@ -173,7 +173,7 @@ impl Instance {
         }
     }
 
-    pub fn file(&self) -> &ShardedBuffer {
+    pub fn file(&self) -> &Buffer {
         &self.file
     }
 
@@ -224,7 +224,7 @@ impl Instance {
 
     pub fn mask_search(&mut self, regex: Regex) {
         self.mask = Some(Mask {
-            lines: MaskRepr::Search(SearchBuffer::search(&self.file, regex).unwrap()),
+            lines: MaskRepr::Search(SearchResults::search(&self.file, regex).unwrap()),
         })
     }
 }

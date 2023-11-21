@@ -1,7 +1,7 @@
-//! The `buf` module contains the [ShardedBuffer] struct, which is the main
-//! interface for creating and interacting with the sharded buffers.
+//! The `buf` module contains the [Buffer] struct, which is the main
+//! interface for creating and interacting with the segmented buffers.
 
-pub mod shard;
+pub mod segment;
 
 use std::{
     fs::File,
@@ -16,106 +16,103 @@ use std::{
 use crate::Result;
 use lru::LruCache;
 
-use self::shard::{Shard, ShardStr};
+use self::segment::{SegStr, Segment};
 use crate::index::{
     inflight::{InflightIndex, InflightIndexMode, InflightIndexProgress, Stream},
     BufferIndex, CompleteIndex,
 };
 
-/// A sharded buffer that holds data in multiple shards.
+/// A segmented buffer that holds data in multiple segments.
 ///
-/// The `ShardedBuffer` struct represents a buffer that is divided into multiple shards.
-/// It contains the [BufferIndex] and the internal representation of the shards.
-pub struct ShardedBuffer<Idx> {
+/// The `Buffer` struct represents a buffer that is divided into multiple segments.
+/// It contains the [BufferIndex] and the internal representation of the segments.
+pub struct SegBuffer<Idx> {
     /// The [BufferIndex] of this buffer.
     index: Idx,
     /// The internal representation of this buffer.
-    shards: ShardRepr,
+    repr: BufferRepr,
 }
 
-/// Internal representation of the sharded buffer, which allows for working
-/// with both files and streams of data. All shards are assumed to have
-/// the same size with the exception of the last shard.
-enum ShardRepr {
+/// Internal representation of the segmented buffer, which allows for working
+/// with both files and streams of data. All segments are assumed to have
+/// the same size with the exception of the last segment.
+enum BufferRepr {
     /// Data can be loaded on demand.
     File {
         file: File,
         len: u64,
-        shards: LruCache<usize, Arc<Shard>>,
+        segments: LruCache<usize, Arc<Segment>>,
     },
     /// Data is all present in memory in multiple anonymous mmaps.
     Stream {
-        pending_shards: Option<Receiver<Shard>>,
-        shards: Vec<Arc<Shard>>,
+        pending_segs: Option<Receiver<Segment>>,
+        segments: Vec<Arc<Segment>>,
     },
 }
 
-impl ShardRepr {
-    fn fetch(&mut self, shard_id: usize) -> Arc<Shard> {
+impl BufferRepr {
+    fn fetch(&mut self, seg_id: usize) -> Arc<Segment> {
         match self {
-            ShardRepr::File { file, len, shards } => {
+            BufferRepr::File {
+                file,
+                len,
+                segments,
+            } => {
                 let range = {
-                    let shard_id = shard_id as u64;
-                    (shard_id * crate::SHARD_SIZE)..((shard_id + 1) * crate::SHARD_SIZE).min(*len)
+                    let seg_id = seg_id as u64;
+                    (seg_id * crate::SEG_SIZE)..((seg_id + 1) * crate::SEG_SIZE).min(*len)
                 };
-                shards
-                    .get_or_insert(shard_id, || {
-                        Arc::new(Shard::map_file(shard_id, range, file))
-                    })
+                segments
+                    .get_or_insert(seg_id, || Arc::new(Segment::map_file(seg_id, range, file)))
                     .clone()
             }
-            ShardRepr::Stream {
-                pending_shards,
-                shards,
+            BufferRepr::Stream {
+                pending_segs,
+                segments,
             } => {
-                if let Some(rx) = pending_shards {
+                if let Some(rx) = pending_segs {
                     loop {
                         match rx.try_recv() {
-                            Ok(shard) => {
-                                assert_eq!(shard.id(), shards.len());
-                                shards.push(Arc::new(shard))
+                            Ok(segment) => {
+                                assert_eq!(segment.id(), segments.len());
+                                segments.push(Arc::new(segment))
                             }
                             Err(TryRecvError::Empty) => break,
                             Err(TryRecvError::Disconnected) => {
-                                *pending_shards = None;
+                                *pending_segs = None;
                                 break;
                             }
                         }
                     }
                 }
-                shards[shard_id].clone()
+                segments[seg_id].clone()
             }
         }
     }
 }
 
-impl ShardedBuffer<CompleteIndex> {
-    /// Reads a file and constructs a new instance of [ShardedBuffer].
+impl SegBuffer<CompleteIndex> {
+    /// Reads a file and constructs a new instance of [Buffer].
     ///
     /// This function uses [InflightIndex] with [InflightIndexMode::File], which
     /// then it uses to completely index the file. The index is then finalized and
-    /// the resulting [CompleteIndex] is used to construct the [ShardedBuffer].
-    /// 
-    /// # Arguments
-    ///
-    /// * `file` - The file to read.
-    /// * `shard_count` - The number of shards to create.
+    /// the resulting [CompleteIndex] is used to construct the [Buffer].
     ///
     /// # Returns
     ///
-    /// A `Result` containing the constructed instance of [ShardedBuffer<CompleteIndex>]
+    /// A `Result` containing the constructed instance of [Buffer<CompleteIndex>]
     /// if successful, or an error if the file cannot be read or the index cannot be finalized.
-    pub fn read_file(file: File, shard_count: usize) -> Result<Self> {
+    pub fn read_file(file: File, seg_count: usize) -> Result<Self> {
         let (mut index, remote) = InflightIndex::new(InflightIndexMode::File);
         remote.index_file(file.try_clone()?)?;
         assert!(index.try_finalize());
 
         Ok(Self {
             index: index.unwrap(),
-            shards: ShardRepr::File {
+            repr: BufferRepr::File {
                 len: file.metadata()?.len(),
                 file,
-                shards: LruCache::new(NonZeroUsize::new(shard_count).unwrap()),
+                segments: LruCache::new(NonZeroUsize::new(seg_count).unwrap()),
             },
         })
     }
@@ -124,15 +121,11 @@ impl ShardedBuffer<CompleteIndex> {
     ///
     /// This function uses [InflightIndex] with [InflightIndexMode::Stream], which
     /// then it uses to completely index the stream. The index is then finalized and
-    /// the resulting [CompleteIndex] is used to construct the [ShardedBuffer].
-    ///
-    /// # Arguments
-    ///
-    /// * `stream` - The stream to be read.
+    /// the resulting [CompleteIndex] is used to construct the [Buffer].
     ///
     /// # Returns
     ///
-    /// A `Result` containing the constructed instance of [ShardedBuffer<CompleteIndex>]
+    /// A `Result` containing the constructed instance of [Buffer<CompleteIndex>]
     /// if successful, or an error if the file cannot be read or the index cannot be finalized.
     pub fn read_stream(stream: Stream) -> Result<Self> {
         let (mut index, remote) = InflightIndex::new(InflightIndexMode::Stream);
@@ -142,34 +135,29 @@ impl ShardedBuffer<CompleteIndex> {
 
         Ok(Self {
             index: index.unwrap(),
-            shards: ShardRepr::Stream {
-                pending_shards: Some(rx),
-                shards: Vec::new(),
+            repr: BufferRepr::Stream {
+                pending_segs: Some(rx),
+                segments: Vec::new(),
             },
         })
     }
 }
 
-impl ShardedBuffer<InflightIndex> {
+impl SegBuffer<InflightIndex> {
     /// Reads a file and returns a `Result` containing the result of the operation.
-    /// 
+    ///
     /// This function uses [InflightIndex] with [InflightIndexMode::File], which
     /// then it uses to set off the indexing process in the background. While the
-    /// indexing process is ongoing, the [ShardedBuffer] can be used to read the
+    /// indexing process is ongoing, the [Buffer] can be used to read the
     /// file. The content is safe to read, though it may not represent the complete
     /// picture until the indexing process is complete. Once the indexing process
-    /// is complete, the [ShardedBuffer] can be used to read the file as normal.
-    /// 
-    /// # Arguments
-    ///
-    /// * `file` - The file to be read.
-    /// * `shard_count` - The number of shards to be created.
+    /// is complete, the [Buffer] can be used to read the file as normal.
     ///
     /// # Returns
     ///
-    /// A `Result` containing an instance of [ShardedBuffer<InflightIndex>] if the
+    /// A `Result` containing an instance of [Buffer<InflightIndex>] if the
     /// file was successfully read, or an error if the operation failed.
-    pub fn read_file(file: File, shard_count: usize) -> Result<Self> {
+    pub fn read_file(file: File, seg_count: usize) -> Result<Self> {
         let (index, indexer) = InflightIndex::new(InflightIndexMode::File);
         std::thread::spawn({
             let file = file.try_clone()?;
@@ -178,31 +166,26 @@ impl ShardedBuffer<InflightIndex> {
 
         Ok(Self {
             index,
-            shards: ShardRepr::File {
+            repr: BufferRepr::File {
                 len: file.metadata()?.len(),
                 file,
-                shards: LruCache::new(NonZeroUsize::new(shard_count).unwrap()),
+                segments: LruCache::new(NonZeroUsize::new(seg_count).unwrap()),
             },
         })
     }
 
     /// Reads a file and returns a `Result` containing the result of the operation.
-    /// 
+    ///
     /// This function uses [InflightIndex] with [InflightIndexMode::Stream], which
     /// then it uses to set off the indexing process in the background. While the
-    /// indexing process is ongoing, the [ShardedBuffer] can be used to read the
+    /// indexing process is ongoing, the [Buffer] can be used to read the
     /// file. The content is safe to read, though it may not represent the complete
     /// picture until the indexing process is complete. Once the indexing process
-    /// is complete, the [ShardedBuffer] can be used to read the file as normal.
-    /// 
-    /// # Arguments
-    ///
-    /// * `file` - The file to be read.
-    /// * `shard_count` - The number of shards to be created.
+    /// is complete, the [Buffer] can be used to read the file as normal.
     ///
     /// # Returns
     ///
-    /// An instance of [ShardedBuffer<InflightIndex>].
+    /// An instance of [Buffer<InflightIndex>].
     pub fn read_stream(stream: Stream) -> Self {
         let (index, indexer) = InflightIndex::new(InflightIndexMode::Stream);
         let (sx, rx) = std::sync::mpsc::channel();
@@ -210,15 +193,15 @@ impl ShardedBuffer<InflightIndex> {
 
         Self {
             index,
-            shards: ShardRepr::Stream {
-                pending_shards: Some(rx),
-                shards: Vec::new(),
+            repr: BufferRepr::Stream {
+                pending_segs: Some(rx),
+                segments: Vec::new(),
             },
         }
     }
 
     /// Attempt to finalize the inner [InflightIndex].
-    /// 
+    ///
     /// See [`InflightIndex::try_finalize()`] for more information.
     pub fn try_finalize(&mut self) -> bool {
         self.index.try_finalize()
@@ -230,127 +213,133 @@ impl ShardedBuffer<InflightIndex> {
     }
 }
 
-impl<Idx> ShardedBuffer<Idx>
+impl<Idx> SegBuffer<Idx>
 where
     Idx: BufferIndex,
 {
-    /// Return the line count of this [ShardedBuffer].
+    /// Return the line count of this [Buffer].
     pub fn line_count(&self) -> usize {
         self.index.line_count()
     }
 
-    /// Return the index of this [ShardedBuffer].
+    /// Return the index of this [Buffer].
     pub fn index(&self) -> &Idx {
         &self.index
     }
 
     /// Retrieves a line of text from the buffer based on the given line number.
     /// 
+    /// 
+    /// # Arguments
+    /// 
+    /// * `line_number` - The line number to retrieve.
+    /// 
+    ///
     /// # Arguments
     /// 
     /// * `line_number` - The line number to retrieve.
     /// 
     /// # Panics
-    /// 
+    ///
     /// This function will panic if the `line_number` is greater than the total number
     /// of lines in the buffer's index.
-    /// 
+    ///
     /// # Returns
-    /// 
-    /// The line of text as a [ShardStr] object.
-    pub fn get_line(&mut self, line_number: usize) -> ShardStr {
+    ///
+    /// The line of text as a [SegStr] object.
+    pub fn get_line(&mut self, line_number: usize) -> SegStr {
         assert!(line_number <= self.line_count());
 
         let data_start = self.index.data_of_line(line_number).unwrap();
         let data_end = self.index.data_of_line(line_number + 1).unwrap();
-        let shard_start = (data_start / crate::SHARD_SIZE) as usize;
-        let shard_end = (data_end / crate::SHARD_SIZE) as usize;
+        let seg_start = (data_start / crate::SEG_SIZE) as usize;
+        let seg_end = (data_end / crate::SEG_SIZE) as usize;
 
-        if shard_start == shard_end {
-            // The data is in a single shard
-            let shard = self.shards.fetch(shard_start as usize);
-            let (start, end) = shard.translate_inner_data_range(data_start, data_end);
-            shard.get_shard_line(start, end)
+        if seg_start == seg_end {
+            // The data is in a single segment
+            let seg = self.repr.fetch(seg_start);
+            let (start, end) = seg.translate_inner_data_range(data_start, data_end);
+            seg.get_line(start, end)
         } else {
-            debug_assert!(shard_start < shard_end);
-            // The data may cross several shards, so we must piece together
-            // the data from across the shards.
+            debug_assert!(seg_start < seg_end);
+            // The data may cross several segments, so we must piece together
+            // the data from across the segments.
             let mut buf = Vec::with_capacity((data_end - data_start) as usize);
 
-            let shard_first = self.shards.fetch(shard_start as usize);
-            let shard_last = self.shards.fetch(shard_end as usize);
+            let seg_first = self.repr.fetch(seg_start);
+            let seg_last = self.repr.fetch(seg_end);
             let (start, end) = (
-                shard_first.translate_inner_data_index(data_start),
-                shard_last.translate_inner_data_index(data_end),
+                seg_first.translate_inner_data_index(data_start),
+                seg_last.translate_inner_data_index(data_end),
             );
-            buf.extend_from_slice(&shard_first[start as usize..]);
-            for shard_id in shard_start + 1..shard_end {
-                buf.extend_from_slice(&self.shards.fetch(shard_id));
+            buf.extend_from_slice(&seg_first[start as usize..]);
+            for seg_id in seg_start + 1..seg_end {
+                buf.extend_from_slice(&self.repr.fetch(seg_id));
             }
-            buf.extend_from_slice(&shard_last[..end as usize]);
+            buf.extend_from_slice(&seg_last[..end as usize]);
 
             let buf = String::from_utf8_lossy(&buf).into_owned();
-            ShardStr::new_owned(buf)
+            SegStr::new_owned(buf)
         }
     }
 }
 
-impl<Idx> ShardedBuffer<Idx>
+impl<Idx> SegBuffer<Idx>
 where
     Idx: BufferIndex + Clone,
 {
-    pub fn multibuffer_iter(&self) -> Result<MultibufferIterator<Idx>> {
-        match &self.shards {
-            ShardRepr::File { file, len, .. } => Ok(MultibufferIterator::new(
+    pub fn segment_iter(&self) -> Result<ContiguousSegmentIterator<Idx>> {
+        match &self.repr {
+            BufferRepr::File { file, len, .. } => Ok(ContiguousSegmentIterator::new(
                 self.index.clone(),
                 0..self.index.line_count(),
-                ShardRepr::File {
+                BufferRepr::File {
                     file: file.try_clone()?,
                     len: *len,
-                    shards: LruCache::new(NonZeroUsize::new(2).unwrap()),
+                    segments: LruCache::new(NonZeroUsize::new(2).unwrap()),
                 },
             )),
-            ShardRepr::Stream { shards, .. } => Ok(MultibufferIterator::new(
+            BufferRepr::Stream { segments, .. } => Ok(ContiguousSegmentIterator::new(
                 self.index.clone(),
                 0..self.index.line_count(),
-                ShardRepr::Stream {
-                    pending_shards: None,
-                    shards: shards.clone(),
+                BufferRepr::Stream {
+                    pending_segs: None,
+                    segments: segments.clone(),
                 },
             )),
         }
     }
 }
 
-pub struct MultibufferIterator<Idx> {
+pub struct ContiguousSegmentIterator<Idx> {
     index: Idx,
-    shards: ShardRepr,
+    repr: BufferRepr,
     line_range: Range<usize>,
     // Intermediate buffer for the iterator to borrow from
-    // for the case where the line crosses multiple shards
-    imm_buff: Vec<u8>,
-    // Intermediate shard storage for the buffer to borrow from
-    // for when the buffer lies within a single shard
-    imm_shard: Option<Arc<Shard>>,
+    // for the case where the line crosses multiple segments
+    imm_buf: Vec<u8>,
+    // Intermediate segment storage for the buffer to borrow from
+    // for when the buffer lies within a single segment
+    imm_seg: Option<Arc<Segment>>,
 }
 
-impl<Idx> MultibufferIterator<Idx>
+impl<Idx> ContiguousSegmentIterator<Idx>
 where
     Idx: BufferIndex,
 {
-    fn new(index: Idx, line_range: Range<usize>, shards: ShardRepr) -> Self {
+    fn new(index: Idx, line_range: Range<usize>, repr: BufferRepr) -> Self {
         Self {
             line_range,
             index,
-            shards,
-            imm_buff: Vec::new(),
-            imm_shard: None,
+            repr,
+            imm_buf: Vec::new(),
+            imm_seg: None,
         }
     }
 
-    /// Get the next buffer from the [MultibufferIterator].
+    /// Get the next buffer from the [ContiguousSegmentIterator].
     ///
-    /// This function retrieves the next buffer from the `MultibufferIterator` and returns it as an `Option`.
+    /// This function retrieves the next buffer from the `ContiguousSegmentIterator` and returns it as an `Option`.
     /// If there are no more buffers available, it returns `None`.
     ///
     /// # Returns
@@ -367,56 +356,54 @@ where
         let curr_line_data_start = self.index.data_of_line(curr_line).unwrap();
         let curr_line_data_end = self.index.data_of_line(curr_line + 1).unwrap();
 
-        let curr_line_shard_start = (curr_line_data_start / crate::SHARD_SIZE) as usize;
-        let curr_line_shard_end = (curr_line_data_end / crate::SHARD_SIZE) as usize;
+        let curr_line_seg_start = (curr_line_data_start / crate::SEG_SIZE) as usize;
+        let curr_line_seg_end = (curr_line_data_end / crate::SEG_SIZE) as usize;
 
-        if curr_line_shard_end != curr_line_shard_start {
-            self.imm_buff.clear();
-            self.imm_buff
+        if curr_line_seg_end != curr_line_seg_start {
+            self.imm_buf.clear();
+            self.imm_buf
                 .reserve((curr_line_data_end - curr_line_data_start) as usize);
 
-            let shard_first = self.shards.fetch(curr_line_shard_start);
-            let shard_last = self.shards.fetch(curr_line_shard_end);
+            let seg_first = self.repr.fetch(curr_line_seg_start);
+            let seg_last = self.repr.fetch(curr_line_seg_end);
             let (start, end) = (
-                shard_first.translate_inner_data_index(curr_line_data_start),
-                shard_last.translate_inner_data_index(curr_line_data_end),
+                seg_first.translate_inner_data_index(curr_line_data_start),
+                seg_last.translate_inner_data_index(curr_line_data_end),
             );
 
-            self.imm_buff
-                .extend_from_slice(&shard_first[start as usize..]);
-            for shard_id in curr_line_shard_start + 1..curr_line_shard_end {
-                self.imm_buff
-                    .extend_from_slice(&self.shards.fetch(shard_id));
+            self.imm_buf.extend_from_slice(&seg_first[start as usize..]);
+            for seg_id in curr_line_seg_start + 1..curr_line_seg_end {
+                self.imm_buf.extend_from_slice(&self.repr.fetch(seg_id));
             }
-            self.imm_buff.extend_from_slice(&shard_last[..end as usize]);
+            self.imm_buf.extend_from_slice(&seg_last[..end as usize]);
 
             self.line_range.start += 1;
-            return Some((&self.index, curr_line_data_start, &self.imm_buff));
+            return Some((&self.index, curr_line_data_start, &self.imm_buf));
         } else {
-            let curr_shard_data_start = curr_line_shard_start as u64 * crate::SHARD_SIZE;
-            let curr_shard_data_end = curr_shard_data_start + crate::SHARD_SIZE;
+            let curr_seg_data_start = curr_line_seg_start as u64 * crate::SEG_SIZE;
+            let curr_seg_data_end = curr_seg_data_start + crate::SEG_SIZE;
 
             let line_end = self
                 .index
-                .line_of_data(curr_shard_data_end)
+                .line_of_data(curr_seg_data_end)
                 .unwrap_or_else(|| self.index.line_count());
             let line_end_data_start = self.index.data_of_line(line_end).unwrap();
 
-            // this line should not cross multiple shards, else we would have caught in the first case
-            let shard = self.shards.fetch(curr_line_shard_start);
+            // this line should not cross multiple segments, else we would have caught in the first case
+            let segment = self.repr.fetch(curr_line_seg_start);
             let (start, end) =
-                shard.translate_inner_data_range(curr_line_data_start, line_end_data_start);
-            assert!(line_end_data_start - curr_shard_data_start <= crate::SHARD_SIZE);
-            assert!(end <= crate::SHARD_SIZE);
+                segment.translate_inner_data_range(curr_line_data_start, line_end_data_start);
+            assert!(line_end_data_start - curr_seg_data_start <= crate::SEG_SIZE);
+            assert!(end <= crate::SEG_SIZE);
 
             self.line_range.start = line_end;
-            let shard = self.imm_shard.insert(shard);
+            let segment = self.imm_seg.insert(segment);
 
             // line must end at the boundary
             return Some((
                 &self.index,
                 curr_line_data_start,
-                &shard[start as usize..end as usize],
+                &segment[start as usize..end as usize],
             ));
         }
     }
@@ -430,7 +417,7 @@ mod test {
         io::{BufReader, Read},
     };
 
-    use crate::{buf::ShardedBuffer, index::CompleteIndex};
+    use crate::{buf::SegBuffer, index::CompleteIndex};
 
     #[test]
     fn file_stream_consistency_1() -> Result<()> {
@@ -450,8 +437,8 @@ mod test {
     fn file_stream_consistency_base(file: File, line_count: usize) -> Result<()> {
         let stream = BufReader::new(file.try_clone()?);
 
-        let mut file_index = ShardedBuffer::<CompleteIndex>::read_file(file, 25)?;
-        let mut stream_index = ShardedBuffer::<CompleteIndex>::read_stream(Box::new(stream))?;
+        let mut file_index = SegBuffer::<CompleteIndex>::read_file(file, 25)?;
+        let mut stream_index = SegBuffer::<CompleteIndex>::read_stream(Box::new(stream))?;
 
         assert_eq!(file_index.line_count(), stream_index.line_count());
         assert_eq!(file_index.line_count(), line_count);
@@ -484,8 +471,8 @@ mod test {
         let file_len = file.metadata()?.len();
         let mut reader = BufReader::new(file.try_clone()?);
 
-        let file_buffer = ShardedBuffer::<CompleteIndex>::read_file(file, 25)?;
-        let mut buffers = file_buffer.multibuffer_iter()?;
+        let file_buffer = SegBuffer::<CompleteIndex>::read_file(file, 25)?;
+        let mut buffers = file_buffer.segment_iter()?;
 
         let mut total_bytes = 0;
         let mut validate_buf = Vec::new();

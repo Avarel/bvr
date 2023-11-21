@@ -2,7 +2,7 @@ pub mod inflight;
 
 use regex::bytes::Regex;
 
-use crate::{buf::MultibufferIterator, cowvec::CowVec, index::BufferIndex, Result};
+use crate::{buf::ContiguousSegmentIterator, cowvec::CowVec, index::BufferIndex, Result};
 
 pub trait BufferSearch {
     fn find(&self, line_number: usize) -> bool;
@@ -24,7 +24,7 @@ impl IncompleteSearch {
     /// Search for a regex in a buffer.
     fn search<Idx>(
         mut self,
-        mut iter: MultibufferIterator<Idx>,
+        mut iter: ContiguousSegmentIterator<Idx>,
         regex: Regex,
     ) -> Result<CompleteSearch>
     where

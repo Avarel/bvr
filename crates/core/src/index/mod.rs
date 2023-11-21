@@ -128,7 +128,7 @@ impl IncompleteIndex {
         let mut start = 0;
 
         while start < len {
-            let end = (start + crate::SHARD_SIZE).min(len);
+            let end = (start + crate::SEG_SIZE).min(len);
 
             let data = unsafe {
                 memmap2::MmapOptions::new()

@@ -2,8 +2,8 @@ use std::sync::Arc;
 
 use regex::bytes::Regex;
 
-use crate::buf::MultibufferIterator;
-use crate::ShardedBuffer;
+use crate::buf::ContiguousSegmentIterator;
+use crate::SegBuffer;
 use crate::{index::BufferIndex, Result};
 
 use super::{BufferSearch, CompleteSearch, IncompleteSearch};
@@ -22,7 +22,7 @@ impl InflightSearchImpl {
         })
     }
 
-    fn search<Idx>(self: Arc<Self>, mut iter: MultibufferIterator<Idx>, regex: Regex) -> Result<()>
+    fn search<Idx>(self: Arc<Self>, mut iter: ContiguousSegmentIterator<Idx>, regex: Regex) -> Result<()>
     where
         Idx: BufferIndex,
     {
@@ -70,7 +70,7 @@ pub struct InflightSearchRemote(Arc<InflightSearchImpl>);
 
 impl InflightSearchRemote {
     /// Index a file and load the data into the associated [InflightIndex].
-    pub fn search<Idx>(self, iter: MultibufferIterator<Idx>, regex: Regex) -> Result<()>
+    pub fn search<Idx>(self, iter: ContiguousSegmentIterator<Idx>, regex: Regex) -> Result<()>
     where
         Idx: BufferIndex,
     {
@@ -110,28 +110,19 @@ impl InflightSearch {
         )
     }
 
-    /// Searches for a regular expression pattern in a sharded buffer.
-    ///
-    /// # Arguments
-    ///
-    /// * `buf` - The sharded buffer to search in.
-    /// * `regex` - The regular expression pattern to search for.
+    /// Searches for a regular expression pattern in a segmented buffer.
     ///
     /// # Returns
     ///
-    /// Returns a `Result` containing the `InflightSearch` object if the search is successful,
-    /// or an error if the search fails.
-    ///
-    /// # Generic Parameters
-    ///
-    /// * `Idx` - The type of the buffer index.
-    pub fn search<Idx>(buf: &ShardedBuffer<Idx>, regex: Regex) -> Result<Self>
+    /// Returns a `Result` containing the `InflightSearch` object
+    /// if the internal iterator creation was successful, and an error otherwise.
+    pub fn search<Idx>(buf: &SegBuffer<Idx>, regex: Regex) -> Result<Self>
     where
         Idx: BufferIndex + Clone + Send + 'static,
     {
         let (search, remote) = InflightSearch::new();
         std::thread::spawn({
-            let iter = buf.multibuffer_iter()?;
+            let iter = buf.segment_iter()?;
             move || remote.search(iter, regex)
         });
         Ok(search)

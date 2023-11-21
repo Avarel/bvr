@@ -10,7 +10,7 @@ use crate::components::{
 };
 use anyhow::Result;
 use bvr_core::{
-    buf::ShardedBuffer,
+    buf::SegBuffer,
     index::inflight::{InflightIndex, Stream},
 };
 use crossterm::{
@@ -66,15 +66,15 @@ impl App {
             .file_name()
             .map(|str| str.to_string_lossy().into_owned())
             .unwrap_or_else(|| String::from("Unnamed File"));
-        Ok(self.push_instance(name, ShardedBuffer::<InflightIndex>::read_file(file, 25)?))
+        Ok(self.push_instance(name, SegBuffer::<InflightIndex>::read_file(file, 25)?))
     }
 
     pub fn open_stream(&mut self, stream: Stream) -> Result<()> {
         let name = String::from("Stream");
-        Ok(self.push_instance(name, ShardedBuffer::<InflightIndex>::read_stream(stream)))
+        Ok(self.push_instance(name, SegBuffer::<InflightIndex>::read_stream(stream)))
     }
 
-    fn push_instance(&mut self, name: String, file: ShardedBuffer<InflightIndex>) {
+    fn push_instance(&mut self, name: String, file: SegBuffer<InflightIndex>) {
         let viewer = Instance::new(name, file);
         self.mux.push_viewer(viewer);
     }

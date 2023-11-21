@@ -1,13 +1,13 @@
 use std::{borrow::Cow, ops::Range, ptr::NonNull, sync::Arc};
 use crate::Mmappable;
 
-pub struct Shard {
+pub struct Segment {
     id: usize,
     start: u64,
     data: memmap2::Mmap,
 }
 
-impl Shard {
+impl Segment {
     pub(crate) fn map_file<F: Mmappable>(id: usize, range: Range<u64>, file: &F) -> Self {
         let data = unsafe {
             memmap2::MmapOptions::new()
@@ -44,16 +44,16 @@ impl Shard {
         (self.translate_inner_data_index(start), self.translate_inner_data_index(end))
     }
 
-    pub fn get_shard_line(self: &Arc<Self>, start: u64, end: u64) -> ShardStr {
+    pub fn get_line(self: &Arc<Self>, start: u64, end: u64) -> SegStr {
         let data = &self.data[start as usize..end as usize];
         // Safety: The length is computed by a (assumed to be correct)
         //         index. It is undefined behavior if the file changes
         //         in a non-appending way after the index is created.
-        ShardStr::new(self.clone(), data)
+        SegStr::new(self.clone(), data)
     }
 }
 
-impl std::ops::Deref for Shard {
+impl std::ops::Deref for Segment {
     type Target = [u8];
 
     fn deref(&self) -> &Self::Target {
@@ -61,19 +61,19 @@ impl std::ops::Deref for Shard {
     }
 }
 
-/// Line string that comes from a [Shard].
+/// Line string that comes from a [Segment].
 ///
-/// If the [ShardStr] borrows from the shard, the shard will not be dropped until
-/// all of its pin is dropped.
+/// If the [SegStr] borrows from the segment, the segment will not be dropped until
+/// all of its referents is dropped.
 ///
 /// This structure avoids cloning unnecessarily.
-pub struct ShardStr(ShardStrRepr);
+pub struct SegStr(SegStrRepr);
 
-/// Internal representation of [ShardStr].
-enum ShardStrRepr {
+/// Internal representation of [SegStr].
+enum SegStrRepr {
     Borrowed {
-        // This field pins the shard so its data does not get munmap'd and remains valid.
-        _pin: Arc<Shard>,
+        // This field refs the segment so its data does not get munmap'd and remains valid.
+        _ref: Arc<Segment>,
         // This data point to the ref-counted `_pin` field.
         // Maybe if polonius supports self-referential slices one day, this
         // spicy unsafe code can be dropped.
@@ -83,19 +83,20 @@ enum ShardStrRepr {
     Owned(String),
 }
 
-impl ShardStr {
-    /// Constructs a string that might borrows data from a [Shard]. If the data
+impl SegStr {
+    /// Constructs a string that might borrows data from a [Segment]. If the data
     /// is invalid utf-8, it will be converted into an owned [String] using `String::from_utf8_lossy`.
     ///
     /// # Safety
-    /// 1. The provided slice must point to data that lives inside the ref-counted [Shard].
-    /// 2. The length must encompass a valid range of data inside the [Shard].
-    fn new<'rc>(origin: Arc<Shard>, data: &'rc [u8]) -> Self {
+    /// 
+    /// 1. The provided slice must point to data that lives inside the ref-counted [Segment].
+    /// 2. The length must encompass a valid range of data inside the [Segment].
+    fn new<'origin>(origin: Arc<Segment>, data: &'origin [u8]) -> Self {
         // Safety: This ptr came from a slice that we prevent from
         //         being dropped by having it inside a ref counter
         match String::from_utf8_lossy(data) {
-            Cow::Borrowed(_) => Self(ShardStrRepr::Borrowed {
-                _pin: origin,
+            Cow::Borrowed(_) => Self(SegStrRepr::Borrowed {
+                _ref: origin,
                 ptr: unsafe { NonNull::new(data.as_ptr() as *mut _).unwrap_unchecked() },
                 len: data.len(),
             }),
@@ -105,34 +106,34 @@ impl ShardStr {
 
     /// Constructs a string that owns its data.
     pub fn new_owned(s: String) -> Self {
-        Self(ShardStrRepr::Owned(s))
+        Self(SegStrRepr::Owned(s))
     }
 
-    /// Returns a byte slice of this [ShardStr]'s components.
+    /// Returns a byte slice of this [SegStr]'s components.
     pub fn as_bytes(&self) -> &[u8] {
         // Safety: We have already checked in the constructor.
         match &self.0 {
-            ShardStrRepr::Borrowed { _pin, ptr, len } => unsafe {
+            SegStrRepr::Borrowed { _ref: _pin, ptr, len } => unsafe {
                 std::slice::from_raw_parts(ptr.as_ptr(), *len)
             },
-            ShardStrRepr::Owned(s) => s.as_bytes(),
+            SegStrRepr::Owned(s) => s.as_bytes(),
         }
     }
 
-    /// Extract a [str] slice backed by the pinned shard data or owned data.
+    /// Extract a [str] slice backed by the pinned segment data or owned data.
     pub fn as_str(&self) -> &str {
         // Safety: we already did utf-8 checking
         unsafe { std::str::from_utf8_unchecked(self.as_bytes()) }
     }
 }
 
-impl std::borrow::Borrow<str> for ShardStr {
+impl std::borrow::Borrow<str> for SegStr {
     fn borrow(&self) -> &str {
         self
     }
 }
 
-impl std::ops::Deref for ShardStr {
+impl std::ops::Deref for SegStr {
     type Target = str;
 
     fn deref(&self) -> &Self::Target {
@@ -140,19 +141,19 @@ impl std::ops::Deref for ShardStr {
     }
 }
 
-impl std::convert::AsRef<str> for ShardStr {
+impl std::convert::AsRef<str> for SegStr {
     fn as_ref(&self) -> &str {
         self.as_str()
     }
 }
 
-impl std::fmt::Display for ShardStr {
+impl std::fmt::Display for SegStr {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(self)
     }
 }
 
-impl std::fmt::Debug for ShardStr {
+impl std::fmt::Debug for SegStr {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         std::fmt::Debug::fmt(&**self, f)
     }

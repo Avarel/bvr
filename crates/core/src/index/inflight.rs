@@ -2,7 +2,7 @@
 //! that allow the use of [IncompleteIndex] functionalities while it is "inflight"
 //! or in the middle of the indexing operation.
 
-use crate::buf::shard::Shard;
+use crate::buf::segment::Segment;
 
 use super::{BufferIndex, CompleteIndex, IncompleteIndex};
 
@@ -106,7 +106,7 @@ impl InflightIndexImpl {
     fn index_file(self: Arc<Self>, file: File) -> Result<()> {
         assert_eq!(self.mode, InflightIndexMode::File);
         assert_eq!(Arc::strong_count(&self), 2);
-        // Build line & shard index
+        // Build index
         let (sx, rx) = std::sync::mpsc::sync_channel(4);
 
         let len = file.metadata()?.len();
@@ -117,7 +117,7 @@ impl InflightIndexImpl {
             let mut curr = 0;
 
             while curr < len {
-                let end = (curr + crate::SHARD_SIZE).min(len);
+                let end = (curr + crate::SEG_SIZE).min(len);
                 let (task, task_rx) = IndexingTask::new(&file, curr, end)?;
                 sx.send(task_rx).unwrap();
 
@@ -145,21 +145,21 @@ impl InflightIndexImpl {
         Ok(inner.finalize(len))
     }
 
-    fn index_stream(self: Arc<Self>, mut stream: Stream, outgoing: Sender<Shard>) -> Result<()> {
+    fn index_stream(self: Arc<Self>, mut stream: Stream, outgoing: Sender<Segment>) -> Result<()> {
         assert_eq!(self.mode, InflightIndexMode::Stream);
         let mut len = 0;
-        let mut shard_id = 0;
+        let mut seg_id = 0;
 
         loop {
             let mut data = memmap2::MmapOptions::new()
-                .len(crate::SHARD_SIZE as usize)
+                .len(crate::SEG_SIZE as usize)
                 .map_anon()?;
             #[cfg(unix)]
             data.advise(memmap2::Advice::Sequential)?;
 
             let mut buf_len = 0;
             loop {
-                match stream.read(&mut data[buf_len..crate::SHARD_SIZE as usize])? {
+                match stream.read(&mut data[buf_len..crate::SEG_SIZE as usize])? {
                     0 => break,
                     l => buf_len += l,
                 }
@@ -172,14 +172,14 @@ impl InflightIndexImpl {
             }
 
             outgoing
-                .send(Shard::new(shard_id, len, data.make_read_only()?))
+                .send(Segment::new(seg_id, len, data.make_read_only()?))
                 .map_err(|_| Error::Internal)?;
 
             if buf_len == 0 {
                 break;
             }
 
-            shard_id += 1;
+            seg_id += 1;
             len += buf_len as u64;
         }
 
@@ -234,7 +234,7 @@ impl InflightIndexRemote {
     }
 
     /// Index a stream and load the data into the associated [InflightIndex].
-    pub fn index_stream(self, stream: Stream, outgoing: Sender<Shard>) -> Result<()> {
+    pub fn index_stream(self, stream: Stream, outgoing: Sender<Segment>) -> Result<()> {
         self.0.index_stream(stream, outgoing)
     }
 }
@@ -269,10 +269,6 @@ impl InflightIndex {
     /// let inflight_index = InflightIndex::new(InflightIndexMode::File);
     /// ```
     /// 
-    /// # Arguments
-    ///
-    /// * `mode` - The mode of the `InflightIndex`. See [InflightIndexMode] for more information.
-    ///
     /// # Returns
     ///
     /// A tuple containing the newly created `InflightIndex` and the associated `InflightIndexRemote`.
@@ -287,10 +283,6 @@ impl InflightIndex {
     /// This function creates a new complete index from the provided file. It internally
     /// initializes an [InflightIndex] in file mode, indexes the file, and returns the
     /// resulting [CompleteIndex].
-    ///
-    /// # Arguments
-    ///
-    /// * `file` - A reference to the file to be indexed.
     ///
     /// # Returns
     ///
