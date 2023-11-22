@@ -1,63 +1,122 @@
+use crate::Result;
+use memmap2::{Mmap, MmapMut};
 use std::{borrow::Cow, ops::Range, ptr::NonNull, sync::Arc};
-use crate::Mmappable;
 
-pub struct Segment {
+#[cfg(unix)]
+pub(crate) use std::os::fd::AsRawFd as Mmappable;
+#[cfg(windows)]
+pub(crate) use std::os::windows::io::AsRawHandle as Mmappable;
+
+pub struct SegmentRaw<Buf> {
     id: usize,
-    start: u64,
-    data: memmap2::Mmap,
+    range: Range<u64>,
+    data: Buf,
 }
 
-impl Segment {
-    pub(crate) fn map_file<F: Mmappable>(id: usize, range: Range<u64>, file: &F) -> Self {
-        let data = unsafe {
-            memmap2::MmapOptions::new()
-                .offset(range.start)
-                .len((range.end - range.start) as usize)
-                .map(file).expect("mmap should succeed")
-        };
-        #[cfg(unix)]
-        data.advise(memmap2::Advice::WillNeed).ok();
-        Self::new(id, range.start, data)
-    }
+pub type SegmentMut = SegmentRaw<MmapMut>;
+pub type Segment = SegmentRaw<Mmap>;
 
-    pub(crate) fn new(id: usize, start: u64, data: memmap2::Mmap) -> Self {
-        Self {
-            id,
-            data,
-            start,
-        }
-    }
+impl<Buf> SegmentRaw<Buf>
+where
+    Buf: AsRef<[u8]>,
+{
+    pub const MAX_SIZE: u64 = 1 << 20;
 
     pub fn id(&self) -> usize {
         self.id
     }
 
-    pub fn as_slice(&self) -> &[u8] {
-        &self
+    pub fn start(&self) -> u64 {
+        self.range.start
     }
 
     pub fn translate_inner_data_index(&self, start: u64) -> u64 {
-        start - self.start
+        debug_assert!(self.range.start <= start);
+        // TODO: make this better... i don't like that its <=
+        //       but technically its fine as long as start
+        //       is the end of the buffer
+        debug_assert!(start <= self.range.end);
+        start - self.range.start
     }
 
-    pub fn translate_inner_data_range(&self, start: u64, end: u64) -> (u64, u64) {
-        (self.translate_inner_data_index(start), self.translate_inner_data_index(end))
+    pub fn translate_inner_data_range(&self, start: u64, end: u64) -> Range<u64> {
+        self.translate_inner_data_index(start)..self.translate_inner_data_index(end)
     }
 
-    pub fn get_line(self: &Arc<Self>, start: u64, end: u64) -> SegStr {
-        let data = &self.data[start as usize..end as usize];
-        // Safety: The length is computed by a (assumed to be correct)
-        //         index. It is undefined behavior if the file changes
-        //         in a non-appending way after the index is created.
-        SegStr::new(self.clone(), data)
+    pub fn id_of_data(start: u64) -> usize {
+        (start / Self::MAX_SIZE) as usize
+    }
+
+    pub fn data_range_of_id(id: usize) -> Range<u64> {
+        let start = id as u64 * Self::MAX_SIZE;
+        start..start + Self::MAX_SIZE
     }
 }
 
-impl std::ops::Deref for Segment {
+impl<Buf> std::ops::Deref for SegmentRaw<Buf>
+where
+    Buf: std::ops::Deref<Target = [u8]>,
+{
     type Target = [u8];
 
     fn deref(&self) -> &Self::Target {
         &self.data
+    }
+}
+
+impl<Buf> std::ops::DerefMut for SegmentRaw<Buf>
+where
+    Buf: std::ops::DerefMut<Target = [u8]>,
+{
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.data
+    }
+}
+
+impl SegmentMut {
+    pub(crate) fn new(id: usize, start: u64) -> Result<Self> {
+        let data = memmap2::MmapOptions::new()
+            .len(Self::MAX_SIZE as usize)
+            .map_anon()?;
+        #[cfg(unix)]
+        data.advise(memmap2::Advice::Sequential)?;
+        Ok(Self { id, data, range: start..start + Self::MAX_SIZE })
+    }
+
+    pub fn into_read_only(self) -> Result<Segment> {
+        Ok(Segment {
+            id: self.id,
+            data: self.data.make_read_only()?,
+            range: self.range,
+        })
+    }
+}
+
+impl Segment {
+    pub(crate) fn map_file<F: Mmappable>(id: usize, range: Range<u64>, file: &F) -> Result<Self> {
+        let size = range.end - range.start;
+        debug_assert!(size <= Self::MAX_SIZE);
+        let data = unsafe {
+            memmap2::MmapOptions::new()
+                .offset(range.start)
+                .len(size as usize)
+                .map(file)?
+        };
+        #[cfg(unix)]
+        data.advise(memmap2::Advice::WillNeed)?;
+        Ok(Self {
+            id,
+            data,
+            range
+        })
+    }
+
+    pub fn get_line(self: &Arc<Self>, range: Range<u64>) -> SegStr {
+        let data = &self.data[range.start as usize..range.end as usize];
+        // Safety: The length is computed by a (assumed to be correct)
+        //         index. It is undefined behavior if the file changes
+        //         in a non-appending way after the index is created.
+        SegStr::new(self.clone(), data)
     }
 }
 
@@ -88,7 +147,7 @@ impl SegStr {
     /// is invalid utf-8, it will be converted into an owned [String] using `String::from_utf8_lossy`.
     ///
     /// # Safety
-    /// 
+    ///
     /// 1. The provided slice must point to data that lives inside the ref-counted [Segment].
     /// 2. The length must encompass a valid range of data inside the [Segment].
     fn new<'origin>(origin: Arc<Segment>, data: &'origin [u8]) -> Self {
@@ -113,9 +172,11 @@ impl SegStr {
     pub fn as_bytes(&self) -> &[u8] {
         // Safety: We have already checked in the constructor.
         match &self.0 {
-            SegStrRepr::Borrowed { _ref: _pin, ptr, len } => unsafe {
-                std::slice::from_raw_parts(ptr.as_ptr(), *len)
-            },
+            SegStrRepr::Borrowed {
+                _ref: _pin,
+                ptr,
+                len,
+            } => unsafe { std::slice::from_raw_parts(ptr.as_ptr(), *len) },
             SegStrRepr::Owned(s) => s.as_bytes(),
         }
     }

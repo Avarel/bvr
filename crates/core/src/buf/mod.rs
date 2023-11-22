@@ -58,12 +58,12 @@ impl BufferRepr {
                 len,
                 segments,
             } => {
-                let range = {
-                    let seg_id = seg_id as u64;
-                    (seg_id * crate::SEG_SIZE)..((seg_id + 1) * crate::SEG_SIZE).min(*len)
-                };
+                let range = Segment::data_range_of_id(seg_id);
+                let range = range.start..range.end.min(*len);
                 segments
-                    .get_or_insert(seg_id, || Arc::new(Segment::map_file(seg_id, range, file)))
+                    .get_or_insert(seg_id, || {
+                        Arc::new(Segment::map_file(seg_id, range, file).unwrap())
+                    })
                     .clone()
             }
             BufferRepr::Stream {
@@ -228,17 +228,17 @@ where
     }
 
     /// Retrieves a line of text from the buffer based on the given line number.
-    /// 
-    /// 
-    /// # Arguments
-    /// 
-    /// * `line_number` - The line number to retrieve.
-    /// 
+    ///
     ///
     /// # Arguments
-    /// 
+    ///
     /// * `line_number` - The line number to retrieve.
-    /// 
+    ///
+    ///
+    /// # Arguments
+    ///
+    /// * `line_number` - The line number to retrieve.
+    ///
     /// # Panics
     ///
     /// This function will panic if the `line_number` is greater than the total number
@@ -252,14 +252,14 @@ where
 
         let data_start = self.index.data_of_line(line_number).unwrap();
         let data_end = self.index.data_of_line(line_number + 1).unwrap();
-        let seg_start = (data_start / crate::SEG_SIZE) as usize;
-        let seg_end = (data_end / crate::SEG_SIZE) as usize;
+        let seg_start = Segment::id_of_data(data_start);
+        let seg_end = Segment::id_of_data(data_end);
 
         if seg_start == seg_end {
             // The data is in a single segment
             let seg = self.repr.fetch(seg_start);
-            let (start, end) = seg.translate_inner_data_range(data_start, data_end);
-            seg.get_line(start, end)
+            let range = seg.translate_inner_data_range(data_start, data_end);
+            seg.get_line(range)
         } else {
             debug_assert!(seg_start < seg_end);
             // The data may cross several segments, so we must piece together
@@ -356,8 +356,8 @@ where
         let curr_line_data_start = self.index.data_of_line(curr_line).unwrap();
         let curr_line_data_end = self.index.data_of_line(curr_line + 1).unwrap();
 
-        let curr_line_seg_start = (curr_line_data_start / crate::SEG_SIZE) as usize;
-        let curr_line_seg_end = (curr_line_data_end / crate::SEG_SIZE) as usize;
+        let curr_line_seg_start = Segment::id_of_data(curr_line_data_start);
+        let curr_line_seg_end = Segment::id_of_data(curr_line_data_end);
 
         if curr_line_seg_end != curr_line_seg_start {
             self.imm_buf.clear();
@@ -380,8 +380,8 @@ where
             self.line_range.start += 1;
             return Some((&self.index, curr_line_data_start, &self.imm_buf));
         } else {
-            let curr_seg_data_start = curr_line_seg_start as u64 * crate::SEG_SIZE;
-            let curr_seg_data_end = curr_seg_data_start + crate::SEG_SIZE;
+            let curr_seg_data_start = curr_line_seg_start as u64 * Segment::MAX_SIZE;
+            let curr_seg_data_end = curr_seg_data_start + Segment::MAX_SIZE;
 
             let line_end = self
                 .index
@@ -391,10 +391,10 @@ where
 
             // this line should not cross multiple segments, else we would have caught in the first case
             let segment = self.repr.fetch(curr_line_seg_start);
-            let (start, end) =
+            let range =
                 segment.translate_inner_data_range(curr_line_data_start, line_end_data_start);
-            assert!(line_end_data_start - curr_seg_data_start <= crate::SEG_SIZE);
-            assert!(end <= crate::SEG_SIZE);
+            assert!(line_end_data_start - curr_seg_data_start <= Segment::MAX_SIZE);
+            assert!(range.end <= Segment::MAX_SIZE);
 
             self.line_range.start = line_end;
             let segment = self.imm_seg.insert(segment);
@@ -403,7 +403,7 @@ where
             return Some((
                 &self.index,
                 curr_line_data_start,
-                &segment[start as usize..end as usize],
+                &segment[range.start as usize..range.end as usize],
             ));
         }
     }

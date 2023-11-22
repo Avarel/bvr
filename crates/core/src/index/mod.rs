@@ -4,6 +4,7 @@
 
 pub mod inflight;
 
+use crate::buf::segment::Segment;
 use crate::cowvec::CowVec;
 use crate::err::Result;
 use std::fs::File;
@@ -93,11 +94,11 @@ pub struct IncompleteIndex {
 
 impl IncompleteIndex {
     /// Create a new [IncompleteIndex].
-    /// 
-    /// This can be used to build a [CompleteIndex] by using the 
+    ///
+    /// This can be used to build a [CompleteIndex] by using the
     /// [`IncompleteIndex::index_file()`] method or manually
     /// using `push_line_data(u64)`, `finalize(u64)` and `finish()`.
-    /// 
+    ///
     /// # Example
     /// ```
     /// use bvr_core::index::IncompleteIndex;
@@ -111,7 +112,7 @@ impl IncompleteIndex {
     }
 
     /// Index a [File] and return a [CompleteIndex].
-    /// 
+    ///
     /// # Examples
     /// ```
     /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -128,18 +129,11 @@ impl IncompleteIndex {
         let mut start = 0;
 
         while start < len {
-            let end = (start + crate::SEG_SIZE).min(len);
+            let end = (start + Segment::MAX_SIZE).min(len);
 
-            let data = unsafe {
-                memmap2::MmapOptions::new()
-                    .offset(start)
-                    .len((end - start) as usize)
-                    .map(file)?
-            };
-            #[cfg(unix)]
-            data.advise(memmap2::Advice::Sequential)?;
+            let segment = Segment::map_file(0, start..end, file)?;
 
-            for i in memchr::memchr_iter(b'\n', &data) {
+            for i in memchr::memchr_iter(b'\n', &segment) {
                 let line_data = start + i as u64;
                 self.push_line_data(line_data + 1);
             }

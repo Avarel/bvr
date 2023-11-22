@@ -2,11 +2,11 @@
 //! that allow the use of [IncompleteIndex] functionalities while it is "inflight"
 //! or in the middle of the indexing operation.
 
-use crate::buf::segment::Segment;
-
 use super::{BufferIndex, CompleteIndex, IncompleteIndex};
-
-use crate::err::{Error, Result};
+use crate::{
+    buf::segment::{Segment, SegmentMut},
+    err::{Error, Result},
+};
 use std::sync::mpsc::{Receiver, Sender};
 use std::thread::JoinHandle;
 use std::{
@@ -18,35 +18,20 @@ use std::{
 struct IndexingTask {
     /// This is the sender side of the channel that receives byte indexes of `\n`.
     sx: Sender<u64>,
-    /// Memmap buffer.
-    data: memmap2::Mmap,
-    /// Indicates where the buffer starts within the file.
-    start: u64,
+    segment: Segment,
 }
 
 impl IndexingTask {
-    fn map<T: crate::Mmappable>(file: &T, start: u64, end: u64) -> Result<memmap2::Mmap> {
-        let data = unsafe {
-            memmap2::MmapOptions::new()
-                .offset(start)
-                .len((end - start) as usize)
-                .map(file)?
-        };
-        #[cfg(unix)]
-        data.advise(memmap2::Advice::Sequential)?;
-        Ok(data)
-    }
-
-    fn new<T: crate::Mmappable>(file: &T, start: u64, end: u64) -> Result<(Self, Receiver<u64>)> {
-        let data = Self::map(file, start, end)?;
+    fn new(file: &File, start: u64, end: u64) -> Result<(Self, Receiver<u64>)> {
+        let segment = Segment::map_file(0, start..end, file)?;
         let (sx, rx) = std::sync::mpsc::channel();
-        Ok((Self { sx, data, start }, rx))
+        Ok((Self { sx, segment }, rx))
     }
 
     fn compute(self) -> Result<()> {
-        for i in memchr::memchr_iter(b'\n', &self.data) {
+        for i in memchr::memchr_iter(b'\n', &self.segment) {
             self.sx
-                .send(self.start + i as u64 + 1)
+                .send(self.segment.start() + i as u64 + 1)
                 .map_err(|_| Error::Internal)?;
         }
 
@@ -117,7 +102,7 @@ impl InflightIndexImpl {
             let mut curr = 0;
 
             while curr < len {
-                let end = (curr + crate::SEG_SIZE).min(len);
+                let end = (curr + Segment::MAX_SIZE).min(len);
                 let (task, task_rx) = IndexingTask::new(&file, curr, end)?;
                 sx.send(task_rx).unwrap();
 
@@ -151,28 +136,24 @@ impl InflightIndexImpl {
         let mut seg_id = 0;
 
         loop {
-            let mut data = memmap2::MmapOptions::new()
-                .len(crate::SEG_SIZE as usize)
-                .map_anon()?;
-            #[cfg(unix)]
-            data.advise(memmap2::Advice::Sequential)?;
+            let mut segment = SegmentMut::new(seg_id, len)?;
 
             let mut buf_len = 0;
             loop {
-                match stream.read(&mut data[buf_len..crate::SEG_SIZE as usize])? {
+                match stream.read(&mut segment[buf_len..])? {
                     0 => break,
                     l => buf_len += l,
                 }
             }
 
             let mut inner = self.inner.lock().unwrap();
-            for i in memchr::memchr_iter(b'\n', &data) {
+            for i in memchr::memchr_iter(b'\n', &segment) {
                 let line_data = len + i as u64;
                 inner.push_line_data(line_data + 1);
             }
 
             outgoing
-                .send(Segment::new(seg_id, len, data.make_read_only()?))
+                .send(segment.into_read_only()?)
                 .map_err(|_| Error::Internal)?;
 
             if buf_len == 0 {
@@ -268,7 +249,7 @@ impl InflightIndex {
     ///
     /// let inflight_index = InflightIndex::new(InflightIndexMode::File);
     /// ```
-    /// 
+    ///
     /// # Returns
     ///
     /// A tuple containing the newly created `InflightIndex` and the associated `InflightIndexRemote`.
@@ -277,7 +258,6 @@ impl InflightIndex {
         (Self::Incomplete(inner.clone()), InflightIndexRemote(inner))
     }
 
-    
     /// Creates a new complete index from a file.
     ///
     /// This function creates a new complete index from the provided file. It internally
