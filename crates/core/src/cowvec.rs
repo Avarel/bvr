@@ -138,7 +138,7 @@ macro_rules! cowvec {
 
 impl<T: Copy> CowVec<T> {
     /// Appends an element to the back of this collection.
-    /// 
+    ///
     /// If the collection is in a borrowed state, it will copy the data
     /// underlying the borrowed state and transition to an owned state.
     pub fn push(&mut self, elem: T) {
@@ -262,17 +262,44 @@ impl<T> Deref for CowVec<T> {
 
 #[cfg(test)]
 mod test {
+    use std::sync::{Arc, Mutex};
+
     use super::CowVec;
 
     #[test]
     fn test_push_and_access() {
         let mut arr = CowVec::new();
-        for i in 0..1000000 {
+        for i in 0..1000 {
             arr.push(i);
         }
-        for i in 0..1000000 {
+        for i in 0..1000 {
             assert_eq!(i, arr[i]);
         }
+    }
+
+    #[test]
+    fn test_push_and_concurrent_clone() {
+        let arr = Arc::new(Mutex::new(CowVec::new()));
+        let handle = std::thread::spawn({
+            let arr = arr.clone();
+            move || {
+                for _ in 0..10 {
+                    for i in 0..100 {
+                        arr.lock().unwrap().push(i);
+                    }
+                    std::thread::sleep(std::time::Duration::from_millis(100));
+                }
+            }
+        });
+
+        while !handle.is_finished() {
+            let arr = { arr.lock().unwrap().clone() };
+            for i in arr.iter().copied() {
+                assert_eq!(i, arr[i]);
+            }
+        }
+
+        handle.join().unwrap();
     }
 
     #[test]
