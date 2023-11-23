@@ -1,4 +1,4 @@
-//! Contains the [CowVec], which is an append-only vector for [Copy]-elements
+//! Contains the [`CowVec`], which is an append-only vector for [Copy]-elements
 //! based on the standard library's [Vec].
 
 use std::{
@@ -53,11 +53,11 @@ impl<T> Drop for RawBuf<T> {
                 std::ptr::drop_in_place(std::ptr::slice_from_raw_parts_mut(
                     self.ptr.as_ptr(),
                     self.len.load(Relaxed),
-                ))
+                ));
             }
             unsafe {
                 alloc::dealloc(
-                    self.ptr.as_ptr() as *mut u8,
+                    self.ptr.as_ptr().cast::<u8>(),
                     Layout::array::<T>(cap).unwrap(),
                 );
             }
@@ -81,18 +81,19 @@ enum CowVecRepr<T> {
 /// short for copy-on-write vector.
 ///
 /// Cloning this vector will give a snapshot of the vector's content at the time
-/// of clone. The snapshot shares the buffer with the original owning [CowVec]
+/// of clone. The snapshot shares the buffer with the original owning [`CowVec`]
 /// until it reallocates or until the user attempts to mutably alter the data.
 ///
 /// This vector has **amortized O(1)** `push()` operation and **O(1)** `clone()`
 /// operations.
 pub struct CowVec<T> {
+    #[doc(hidden)]
     repr: CowVecRepr<T>,
 }
 
 impl<T> Debug for CowVec<T> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "[..., {}]", self.len())
+    fn fmt(&self, fmt: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(fmt, "[..., {}]", self.len())
     }
 }
 
@@ -151,9 +152,7 @@ impl<T: Copy> CowVec<T> {
             }
         };
 
-        unsafe {
-            std::ptr::write_volatile(buf.ptr.as_ptr().add(len), elem);
-        }
+        unsafe { std::ptr::write_volatile(buf.ptr.as_ptr().add(len), elem) }
 
         // Can't fail, we'll OOM first.
         // There should be no other writers, but lets be safe.
@@ -194,26 +193,24 @@ impl<T: Copy> CowVec<T> {
         let new_ptr = if cap == 0 {
             unsafe { alloc::alloc(new_layout) }
         } else {
-            let old_ptr = buf.ptr.as_ptr() as *mut u8;
+            let old_ptr = buf.ptr.as_ptr().cast::<u8>();
             // Cannot use realloc here since it may drop the old pointer
-            unsafe {
-                let old_layout = Layout::array::<T>(cap).unwrap();
-                let new_ptr = alloc::alloc(new_layout);
-                if NonNull::new(new_ptr as *mut T).is_none() {
-                    alloc::handle_alloc_error(new_layout)
-                }
-                // This is fine since our elements are Copy
-                std::ptr::copy_nonoverlapping(old_ptr, new_ptr, old_layout.size());
-                new_ptr
+            let old_layout = Layout::array::<T>(cap).unwrap();
+            let new_ptr = unsafe { alloc::alloc(new_layout) };
+            if NonNull::new(new_ptr.cast::<T>()).is_none() {
+                alloc::handle_alloc_error(new_layout)
             }
+            // This is fine since our elements are Copy
+            unsafe { std::ptr::copy_nonoverlapping(old_ptr, new_ptr, old_layout.size()) };
+            new_ptr
         };
 
         // If allocation fails, `new_ptr` will be null, in which case we abort.
-        self.repr = match NonNull::new(new_ptr as *mut T) {
-            Some(p) => {
-                debug_assert_ne!(p, buf.ptr);
+        self.repr = match NonNull::new(new_ptr.cast::<T>()) {
+            Some(new_ptr) => {
+                debug_assert_ne!(new_ptr, buf.ptr);
                 CowVecRepr::Owned {
-                    buf: Arc::new(RawBuf::new(p, len, new_cap)),
+                    buf: Arc::new(RawBuf::new(new_ptr, len, new_cap)),
                 }
             }
             None => alloc::handle_alloc_error(new_layout),
@@ -238,7 +235,7 @@ impl<T: Copy> Clone for CowVec<T> {
             //         So, this access is safe.
             CowVecRepr::Owned { buf } => (buf.clone(), buf.len.load(Relaxed)),
         };
-        CowVec {
+        Self {
             repr: CowVecRepr::Snapshot { buf, len },
         }
     }
@@ -256,6 +253,7 @@ impl<T> Deref for CowVec<T> {
             //         So, this access is safe.
             CowVecRepr::Owned { buf } => (buf.as_ptr(), buf.len.load(Relaxed)),
         };
+        // Safety: see above
         unsafe { std::slice::from_raw_parts(ptr, len) }
     }
 }
@@ -267,24 +265,24 @@ mod test {
     use super::CowVec;
 
     #[test]
-    fn test_push_and_access() {
+    fn test_miri_push_and_access() {
         let mut arr = CowVec::new();
-        for i in 0..1000 {
+        for i in 0..10000 {
             arr.push(i);
         }
-        for i in 0..1000 {
+        for i in 0..10000 {
             assert_eq!(i, arr[i]);
         }
     }
 
     #[test]
-    fn test_push_and_concurrent_clone() {
+    fn test_miri_push_and_concurrent_clone() {
         let arr = Arc::new(Mutex::new(CowVec::new()));
         let handle = std::thread::spawn({
             let arr = arr.clone();
             move || {
                 for _ in 0..10 {
-                    for i in 0..100 {
+                    for i in 0..1000 {
                         arr.lock().unwrap().push(i);
                     }
                     std::thread::sleep(std::time::Duration::from_millis(100));
@@ -293,7 +291,8 @@ mod test {
         });
 
         while !handle.is_finished() {
-            let arr = { arr.lock().unwrap().clone() };
+            let mut arr = { arr.lock().unwrap().clone() };
+            arr.push(arr.len());
             for i in arr.iter().copied() {
                 assert_eq!(i, arr[i]);
             }
@@ -303,7 +302,7 @@ mod test {
     }
 
     #[test]
-    fn test_clone() {
+    fn test_miri_clone() {
         let mut arr = CowVec::new();
         for i in 0..10 {
             arr.push(i);
@@ -319,7 +318,7 @@ mod test {
     }
 
     #[test]
-    fn test_deref() {
+    fn test_miri_deref() {
         let mut arr = CowVec::new();
         for i in 0..10 {
             arr.push(i);

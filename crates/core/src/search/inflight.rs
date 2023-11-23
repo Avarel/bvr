@@ -28,7 +28,7 @@ impl InflightSearchImpl {
     {
         assert_eq!(Arc::strong_count(&self), 2);
 
-        while let Some((idx, start, buf)) = iter.next() {
+        while let Some((idx, start, buf)) = iter.next_buf() {
             let mut lock = self.inner.lock().unwrap();
             for res in regex.find_iter(buf) {
                 let match_start = res.start() as u64 + start;
@@ -53,7 +53,7 @@ impl InflightSearchImpl {
             Err(_) => {
                 let lock = self.cache.lock().unwrap();
                 if let Some(v) = lock.as_ref() {
-                    return cb(&v);
+                    return cb(v);
                 }
                 drop(lock);
 

@@ -127,7 +127,8 @@ impl InflightIndexImpl {
 
         spawner.join().unwrap().unwrap();
         let mut inner = self.inner.lock().unwrap();
-        Ok(inner.finalize(len))
+        inner.finalize(len);
+        Ok(())
     }
 
     fn index_stream(self: Arc<Self>, mut stream: Stream, outgoing: Sender<Segment>) -> Result<()> {
@@ -165,7 +166,8 @@ impl InflightIndexImpl {
         }
 
         let mut inner = self.inner.lock().unwrap();
-        Ok(inner.finalize(len))
+        inner.finalize(len);
+        Ok(())
     }
 
     fn progress(&self) -> InflightIndexProgress {
@@ -191,7 +193,7 @@ impl InflightIndexImpl {
             Err(_) => {
                 let lock = self.cache.lock().unwrap();
                 if let Some(v) = lock.as_ref() {
-                    return cb(&v);
+                    return cb(v);
                 }
                 drop(lock);
 

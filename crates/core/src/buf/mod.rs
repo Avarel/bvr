@@ -337,7 +337,7 @@ where
     /// - `Some((&Idx, u64, &[u8]))`: A tuple containing the index, starting data
     ///                               position, and a slice of the buffer data.
     /// - `None`: If there are no more buffers available.
-    pub fn next(&mut self) -> Option<(&Idx, u64, &[u8])> {
+    pub fn next_buf(&mut self) -> Option<(&Idx, u64, &[u8])> {
         if self.line_range.is_empty() {
             return None;
         }
@@ -368,7 +368,7 @@ where
             self.imm_buf.extend_from_slice(&seg_last[..end as usize]);
 
             self.line_range.start += 1;
-            return Some((&self.index, curr_line_data_start, &self.imm_buf));
+            Some((&self.index, curr_line_data_start, &self.imm_buf))
         } else {
             let curr_seg_data_start = curr_line_seg_start as u64 * Segment::MAX_SIZE;
             let curr_seg_data_end = curr_seg_data_start + Segment::MAX_SIZE;
@@ -390,11 +390,11 @@ where
             let segment = self.imm_seg.insert(segment);
 
             // line must end at the boundary
-            return Some((
+            Some((
                 &self.index,
                 curr_line_data_start,
                 &segment[range.start as usize..range.end as usize],
-            ));
+            ))
         }
     }
 }
@@ -410,19 +410,16 @@ mod test {
     use crate::{buf::SegBuffer, index::CompleteIndex};
 
     #[test]
-    #[cfg_attr(miri, ignore)]
     fn file_stream_consistency_1() -> Result<()> {
         file_stream_consistency_base(File::open("../../tests/test_10.log")?, 10)
     }
 
     #[test]
-    #[cfg_attr(miri, ignore)]
     fn file_stream_consistency_2() -> Result<()> {
         file_stream_consistency_base(File::open("../../tests/test_50_long.log")?, 50)
     }
 
     #[test]
-    #[cfg_attr(miri, ignore)]
     fn file_stream_consistency_3() -> Result<()> {
         file_stream_consistency_base(File::open("../../tests/test_5000000.log")?, 5_000_000)
     }
@@ -472,7 +469,7 @@ mod test {
 
         let mut total_bytes = 0;
         let mut validate_buf = Vec::new();
-        while let Some((_, start, buf)) = buffers.next() {
+        while let Some((_, start, buf)) = buffers.next_buf() {
             // Validate that the specialized slice reader and normal sequential reads are consistent
             assert_eq!(start, total_bytes);
             total_bytes += buf.len() as u64;

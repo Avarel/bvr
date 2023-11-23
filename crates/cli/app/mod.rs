@@ -66,12 +66,14 @@ impl App {
             .file_name()
             .map(|str| str.to_string_lossy().into_owned())
             .unwrap_or_else(|| String::from("Unnamed File"));
-        Ok(self.push_instance(name, SegBuffer::<InflightIndex>::read_file(file, 25)?))
+        self.push_instance(name, SegBuffer::<InflightIndex>::read_file(file, 25)?);
+        Ok(())
     }
 
     pub fn open_stream(&mut self, stream: Stream) -> Result<()> {
         let name = String::from("Stream");
-        Ok(self.push_instance(name, SegBuffer::<InflightIndex>::read_stream(stream)))
+        self.push_instance(name, SegBuffer::<InflightIndex>::read_stream(stream));
+        Ok(())
     }
 
     fn push_instance(&mut self, name: String, file: SegBuffer<InflightIndex>) {
@@ -178,8 +180,7 @@ impl App {
                         let command = self.command.submit();
                         if command == "q" {
                             break;
-                        } else if command.starts_with("open ") {
-                            let path = &command[5..];
+                        } else if let Some(path) = command.strip_prefix("open ") {
                             if let Err(err) = self.open_file(path) {
                                 self.status.submit_message(
                                     format!("Error opening file `{path}`: {err}"),
@@ -200,9 +201,7 @@ impl App {
                                     .viewport_mut()
                                     .pan_view(crate::direction::VDirection::Down, usize::MAX);
                             }
-                        } else if command.starts_with("find ") {
-                            let pat = &command[5..];
-
+                        } else if let Some(pat) = command.strip_prefix("find ") {
                             let regex = match Regex::new(pat) {
                                 Ok(r) => r,
                                 Err(err) => {

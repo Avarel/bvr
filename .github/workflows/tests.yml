@@ -83,4 +83,4 @@ jobs:
 
       - name: Test workspace w/ Miri
         if: matrix.miri == true
-        run: cargo miri test --workspace
+        run: cargo miri test --workspace miri

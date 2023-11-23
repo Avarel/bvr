@@ -34,7 +34,7 @@ fn generate_log_file(path: &str, lines: usize, chars_per_line: Range<usize>, see
 
         let timestamp = time::OffsetDateTime::now_utc().to_string();
         if i != 0 {
-            writer.write(b"\n")?;
+            writer.write_all(b"\n")?;
         }
         write!(writer, "{} {}", timestamp, s)?;
 

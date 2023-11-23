@@ -23,12 +23,11 @@ pub enum Cursor {
 
 impl Cursor {
     pub fn new_range(start: usize, end: usize, dir: SelectionOrigin) -> Self {
-        if start == end {
-            Self::Singleton(start)
-        } else if start > end {
-            Self::Selection(end, start, dir.flip())
-        } else {
-            Self::Selection(start, end, dir)
+        use std::cmp::Ordering;
+        match start.cmp(&end) {
+            Ordering::Less => Self::Selection(start, end, dir),
+            Ordering::Equal => Self::Singleton(start),
+            Ordering::Greater => Self::Selection(end, start, dir.flip()),
         }
     }
 }
@@ -201,7 +200,7 @@ impl CommandApp {
         match self.cursor {
             Cursor::Singleton(i) => {
                 if i == 0 {
-                    return self.buf.len() != 0;
+                    return !self.buf.is_empty();
                 }
                 self.buf.remove(i - 1);
                 self.move_cursor(HDirection::Left, CursorMovement::DEFAULT)
@@ -216,6 +215,6 @@ impl CommandApp {
 
     pub fn submit(&mut self) -> String {
         self.cursor = Cursor::Singleton(0);
-        std::mem::replace(&mut self.buf, String::new())
+        std::mem::take(&mut self.buf)
     }
 }

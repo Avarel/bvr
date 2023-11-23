@@ -150,7 +150,7 @@ impl SegStr {
     ///
     /// 1. The provided slice must point to data that lives inside the ref-counted [Segment].
     /// 2. The length must encompass a valid range of data inside the [Segment].
-    fn new<'origin>(origin: Arc<Segment>, data: &'origin [u8]) -> Self {
+    fn new(origin: Arc<Segment>, data: &[u8]) -> Self {
         // Safety: This ptr came from a slice that we prevent from
         //         being dropped by having it inside a ref counter
         match String::from_utf8_lossy(data) {

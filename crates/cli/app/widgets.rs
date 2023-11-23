@@ -232,7 +232,7 @@ impl Widget for MultiplexerWidget<'_> {
                     let hsplit = Self::split_horizontal(chunks[0], self.mux.len());
 
                     for (i, (&chunk, viewer)) in
-                        hsplit.into_iter().zip(self.mux.viewers_mut()).enumerate()
+                        hsplit.iter().zip(self.mux.viewers_mut()).enumerate()
                     {
                         let vsplit = Self::split_tabs(chunk);
                         TabWidget {
@@ -248,7 +248,7 @@ impl Widget for MultiplexerWidget<'_> {
                     let hsplit = Self::split_horizontal(vsplit[0], self.mux.len());
 
                     for (i, (&chunk, viewer)) in
-                        hsplit.into_iter().zip(self.mux.viewers_mut()).enumerate()
+                        hsplit.iter().zip(self.mux.viewers_mut()).enumerate()
                     {
                         TabWidget {
                             name: viewer.name(),

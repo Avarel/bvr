@@ -22,6 +22,7 @@ impl IncompleteSearch {
     }
 
     /// Search for a regex in a buffer.
+    #[allow(dead_code)]
     fn search<Idx>(
         mut self,
         mut iter: ContiguousSegmentIterator<Idx>,
@@ -30,7 +31,7 @@ impl IncompleteSearch {
     where
         Idx: BufferIndex,
     {
-        while let Some((idx, start, buf)) = iter.next() {
+        while let Some((idx, start, buf)) = iter.next_buf() {
             for res in regex.find_iter(buf) {
                 let match_start = res.start() as u64 + start;
                 self.add_line(idx.line_of_data(match_start).unwrap())
@@ -44,8 +45,15 @@ impl IncompleteSearch {
         self.inner.lines.push(line_number)
     }
 
+    #[must_use]
     pub fn finish(self) -> CompleteSearch {
         self.inner
+    }
+}
+
+impl Default for IncompleteSearch {
+    fn default() -> Self {
+        Self::new()
     }
 }
 

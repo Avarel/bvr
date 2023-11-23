@@ -163,6 +163,12 @@ impl IncompleteIndex {
     }
 }
 
+impl Default for IncompleteIndex {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 /// A fixed and complete index.
 #[derive(Clone)]
 pub struct CompleteIndex {
