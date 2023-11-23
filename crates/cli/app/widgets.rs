@@ -2,12 +2,25 @@ use crate::components::{
     command::{CommandApp, Cursor, SelectionOrigin},
     mux::{MultiplexerApp, MultiplexerMode},
     status::StatusApp,
-    viewer::{Instance, LineType},
+    viewer::{Instance, ViewLine},
 };
 use bvr_core::index::inflight::InflightIndexProgress;
 use ratatui::{prelude::*, widgets::*};
 
 use super::InputMode;
+
+mod colors {
+    use ratatui::style::Color;
+
+    pub const BLACK: Color = Color::Black;
+    pub const BG: Color = Color::Rgb(25, 25, 25);
+    pub const TEXT_ACTIVE: Color = Color::Rgb(220, 220, 220);
+    pub const TEXT_INACTIVE: Color = Color::Rgb(50, 50, 50);
+    pub const GUTTER: Color = BG;
+    pub const TAB_INACTIVE: Color = Color::Rgb(50, 50, 50);
+    pub const TAB_ACTIVE: Color = Color::Rgb(80, 80, 80);
+    pub const STATUS_BAR: Color = Color::Rgb(40, 40, 40);
+}
 
 enum StatusWidgetState<'a> {
     Normal {
@@ -49,17 +62,19 @@ impl<'a> Widget for StatusWidget<'a> {
                 Paragraph::new(Span::from(match progress {
                     InflightIndexProgress::Done => format!("{} lines", line_count),
                     InflightIndexProgress::Streaming => format!("Streaming ({} lines)", line_count),
-                    InflightIndexProgress::File(progress) => format!("{:.2}% ({} lines)", progress * 100.0, line_count),
+                    InflightIndexProgress::File(progress) => {
+                        format!("{:.2}% ({} lines)", progress * 100.0, line_count)
+                    }
                 }))
                 .block(Block::new().padding(Padding::horizontal(1)))
                 .dark_gray()
-                .on_black()
+                .bg(colors::STATUS_BAR)
                 .render(chunks[0], buf);
 
                 Paragraph::new(name)
                     .block(Block::new().padding(Padding::horizontal(1)))
                     .alignment(Alignment::Right)
-                    .on_black()
+                    .bg(colors::STATUS_BAR)
                     .render(chunks[1], buf);
             }
             StatusWidgetState::Message { message } => {
@@ -147,29 +162,100 @@ pub struct ViewerWidget<'a> {
     viewer: &'a mut Instance,
 }
 
+fn digit_count(n: usize) -> u16 {
+    n.ilog10() as u16 + 1
+}
+
 impl Widget for ViewerWidget<'_> {
     fn render(self, area: Rect, buf: &mut Buffer) {
-        self.viewer.viewport_mut().fit_view(usize::from(area.height));
+        self.viewer
+            .viewport_mut()
+            .fit_view(usize::from(area.height));
 
         let view = self.viewer.update_and_view();
-        let rows = view.iter().map(|line| {
-            let mut row = Row::new([
-                Cell::from((line.line_number() + 1).to_string()),
-                Cell::from(line.data().as_str()),
-            ]);
 
-            if line.line_type() == LineType::Selected {
-                row = row.on_dark_gray();
-            } else if line.line_type() == LineType::Mask {
-                row = row.blue();
-            }
+        let gutter_size = view
+            .iter()
+            .map(|line| digit_count(line.line_number() + 1))
+            .max()
+            .unwrap_or(0)
+            .max(4);
 
-            row.height(1)
-        });
-        // Wait til https://github.com/ratatui-org/ratatui/issues/537 is fixed
-        let t = Table::new(rows).widths(&[Constraint::Percentage(5), Constraint::Percentage(95)]);
+        let mut y = area.y;
+        for line in view.into_iter() {
+            LineWidget { line, gutter_size }.render(Rect::new(area.x, y, area.width, 1), buf);
+            y += 1;
+        }
 
-        ratatui::widgets::Widget::render(t, area, buf)
+        while y < area.bottom() {
+            EmptyLineWidget { gutter_size }.render(Rect::new(area.x, y, area.width, 1), buf);
+            y += 1;
+        }
+    }
+}
+
+struct LineWidget {
+    gutter_size: u16,
+    line: ViewLine,
+}
+
+const SET_LEFT_EDGE: symbols::border::Set = symbols::border::Set {
+    top_left: "",
+    top_right: "",
+    bottom_left: "",
+    bottom_right: "",
+    vertical_left: "▏",
+    vertical_right: "",
+    horizontal_top: "",
+    horizontal_bottom: "",
+};
+
+const LINE_WIDGET_BLOCK: Block = Block::new()
+    .padding(Padding::horizontal(1))
+    .border_set(SET_LEFT_EDGE)
+    .border_style(Style::new().fg(colors::BLACK))
+    .borders(Borders::LEFT);
+
+impl Widget for LineWidget {
+    fn render(self, area: Rect, buf: &mut Buffer) {
+        let chunks = Layout::new()
+            .constraints([Constraint::Length(self.gutter_size + 2), Constraint::Min(1)])
+            .direction(Direction::Horizontal)
+            .split(area);
+
+        let ln_str = (self.line.line_number() + 1).to_string();
+        let ln = Paragraph::new(ln_str)
+            .block(LINE_WIDGET_BLOCK)
+            .alignment(Alignment::Right)
+            .bg(colors::GUTTER);
+        ln.render(chunks[0], buf);
+
+        let data = Paragraph::new(self.line.data().as_str())
+            .block(Block::new().padding(Padding::new(2, 0, 0, 0)))
+            .bg(colors::BG);
+        data.render(chunks[1], buf);
+    }
+}
+
+struct EmptyLineWidget {
+    gutter_size: u16,
+}
+
+impl Widget for EmptyLineWidget {
+    fn render(self, area: Rect, buf: &mut Buffer) {
+        let chunks = Layout::new()
+            .constraints([Constraint::Length(self.gutter_size + 2), Constraint::Min(1)])
+            .direction(Direction::Horizontal)
+            .split(area);
+
+        let ln = Paragraph::new("~")
+            .block(LINE_WIDGET_BLOCK)
+            .alignment(Alignment::Right)
+            .bg(colors::GUTTER);
+        ln.render(chunks[0], buf);
+
+        let data = Paragraph::new("").bg(colors::BG);
+        data.render(chunks[1], buf);
     }
 }
 
@@ -181,14 +267,14 @@ pub struct MultiplexerWidget<'a> {
 
 impl MultiplexerWidget<'_> {
     fn split_status(area: Rect) -> std::rc::Rc<[Rect]> {
-        Layout::default()
+        Layout::new()
             .direction(Direction::Vertical)
             .constraints([Constraint::Min(1), Constraint::Length(1)])
             .split(area)
     }
 
     fn split_tabs(area: Rect) -> std::rc::Rc<[Rect]> {
-        Layout::default()
+        Layout::new()
             .direction(Direction::Vertical)
             .constraints([Constraint::Length(1), Constraint::Min(1)])
             .split(area)
@@ -196,7 +282,7 @@ impl MultiplexerWidget<'_> {
 
     fn split_horizontal(area: Rect, len: usize) -> std::rc::Rc<[Rect]> {
         let constraints = vec![Constraint::Ratio(1, len as u32); len];
-        Layout::default()
+        Layout::new()
             .direction(Direction::Horizontal)
             .constraints(constraints)
             .split(area)
@@ -210,14 +296,25 @@ pub struct TabWidget<'a> {
 
 impl Widget for TabWidget<'_> {
     fn render(self, area: Rect, buf: &mut Buffer) {
-        let mut header =
-            Paragraph::new(self.name).block(Block::new().padding(Padding::horizontal(1)));
-        if self.active {
-            header = header.black().on_white();
+        Paragraph::new(Line::from(vec![
+            if self.active {
+                Span::from("▍ ").fg(colors::TEXT_ACTIVE)
+            } else {
+                Span::from("▏ ").fg(colors::GUTTER)
+            },
+            Span::from(self.name),
+        ]))
+        .bg(if self.active {
+            colors::TAB_ACTIVE
         } else {
-            header = header.on_black();
-        }
-        header.render(area, buf);
+            colors::TAB_INACTIVE
+        })
+        .fg(if self.active {
+            colors::TEXT_ACTIVE
+        } else {
+            colors::TEXT_INACTIVE
+        })
+        .render(area, buf);
     }
 }
 

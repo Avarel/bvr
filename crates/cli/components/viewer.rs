@@ -137,12 +137,13 @@ pub struct Instance {
     mask: Option<Mask>,
 }
 
-pub struct Line {
+pub struct ViewLine {
     line_number: usize,
     data: SegStr,
     line_type: LineType,
 }
-impl Line {
+
+impl ViewLine {
     pub fn line_number(&self) -> usize {
         self.line_number
     }
@@ -185,13 +186,13 @@ impl Instance {
         &mut self.viewport
     }
 
-    pub fn update_and_view(&mut self) -> Vec<Line> {
+    pub fn update_and_view(&mut self) -> Vec<ViewLine> {
         self.file.try_finalize();
         self.viewport.max_height = self.file.line_count();
 
         self.viewport
             .line_range()
-            .map(|line_number| Line {
+            .map(|line_number| ViewLine {
                 line_number,
                 data: self.file.get_line(line_number),
                 line_type: if line_number == self.viewport.current {
