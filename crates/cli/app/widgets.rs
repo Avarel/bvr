@@ -211,7 +211,7 @@ const SET_LEFT_EDGE: symbols::border::Set = symbols::border::Set {
 };
 
 const LINE_WIDGET_BLOCK: Block = Block::new()
-    .padding(Padding::horizontal(1))
+    .padding(Padding::new(0, 0, 0, 0))
     .border_set(SET_LEFT_EDGE)
     .border_style(Style::new().fg(colors::BLACK))
     .borders(Borders::LEFT);
@@ -219,7 +219,7 @@ const LINE_WIDGET_BLOCK: Block = Block::new()
 impl Widget for LineWidget {
     fn render(self, area: Rect, buf: &mut Buffer) {
         let chunks = Layout::new()
-            .constraints([Constraint::Length(self.gutter_size + 2), Constraint::Min(1)])
+            .constraints([Constraint::Length(self.gutter_size + 1), Constraint::Min(1)])
             .direction(Direction::Horizontal)
             .split(area);
 
@@ -227,11 +227,12 @@ impl Widget for LineWidget {
         let ln = Paragraph::new(ln_str)
             .block(LINE_WIDGET_BLOCK)
             .alignment(Alignment::Right)
+            .fg(colors::TEXT_INACTIVE)
             .bg(colors::GUTTER);
         ln.render(chunks[0], buf);
 
         let data = Paragraph::new(self.line.data().as_str())
-            .block(Block::new().padding(Padding::new(2, 0, 0, 0)))
+            .block(Block::new().padding(Padding::new(3, 0, 0, 0)))
             .bg(colors::BG);
         data.render(chunks[1], buf);
     }
@@ -244,13 +245,14 @@ struct EmptyLineWidget {
 impl Widget for EmptyLineWidget {
     fn render(self, area: Rect, buf: &mut Buffer) {
         let chunks = Layout::new()
-            .constraints([Constraint::Length(self.gutter_size + 2), Constraint::Min(1)])
+            .constraints([Constraint::Length(self.gutter_size + 1), Constraint::Min(1)])
             .direction(Direction::Horizontal)
             .split(area);
 
         let ln = Paragraph::new("~")
             .block(LINE_WIDGET_BLOCK)
             .alignment(Alignment::Right)
+            .fg(colors::TEXT_INACTIVE)
             .bg(colors::GUTTER);
         ln.render(chunks[0], buf);
 
