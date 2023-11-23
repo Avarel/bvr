@@ -62,7 +62,7 @@ impl BufferRepr {
                 let range = range.start..range.end.min(*len);
                 segments
                     .get_or_insert(seg_id, || {
-                        Arc::new(Segment::map_file(seg_id, range, file).unwrap())
+                        Arc::new(Segment::map_file(range, file).unwrap())
                     })
                     .clone()
             }
@@ -74,7 +74,6 @@ impl BufferRepr {
                     loop {
                         match rx.try_recv() {
                             Ok(segment) => {
-                                assert_eq!(segment.id(), segments.len());
                                 segments.push(Arc::new(segment))
                             }
                             Err(TryRecvError::Empty) => break,

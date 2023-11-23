@@ -8,7 +8,6 @@ pub(crate) use std::os::fd::AsRawFd as Mmappable;
 pub(crate) use std::os::windows::io::AsRawHandle as Mmappable;
 
 pub struct SegmentRaw<Buf> {
-    id: usize,
     range: Range<u64>,
     data: Buf,
 }
@@ -21,10 +20,6 @@ where
     Buf: AsRef<[u8]>,
 {
     pub const MAX_SIZE: u64 = 1 << 20;
-
-    pub fn id(&self) -> usize {
-        self.id
-    }
 
     pub fn start(&self) -> u64 {
         self.range.start
@@ -74,18 +69,20 @@ where
 }
 
 impl SegmentMut {
-    pub(crate) fn new(id: usize, start: u64) -> Result<Self> {
+    pub(crate) fn new(start: u64) -> Result<Self> {
         let data = memmap2::MmapOptions::new()
             .len(Self::MAX_SIZE as usize)
             .map_anon()?;
         #[cfg(unix)]
         data.advise(memmap2::Advice::Sequential)?;
-        Ok(Self { id, data, range: start..start + Self::MAX_SIZE })
+        Ok(Self {
+            data,
+            range: start..start + Self::MAX_SIZE,
+        })
     }
 
     pub fn into_read_only(self) -> Result<Segment> {
         Ok(Segment {
-            id: self.id,
             data: self.data.make_read_only()?,
             range: self.range,
         })
@@ -93,7 +90,7 @@ impl SegmentMut {
 }
 
 impl Segment {
-    pub(crate) fn map_file<F: Mmappable>(id: usize, range: Range<u64>, file: &F) -> Result<Self> {
+    pub(crate) fn map_file<F: Mmappable>(range: Range<u64>, file: &F) -> Result<Self> {
         let size = range.end - range.start;
         debug_assert!(size <= Self::MAX_SIZE);
         let data = unsafe {
@@ -104,19 +101,11 @@ impl Segment {
         };
         #[cfg(unix)]
         data.advise(memmap2::Advice::WillNeed)?;
-        Ok(Self {
-            id,
-            data,
-            range
-        })
+        Ok(Self { data, range })
     }
 
     pub fn get_line(self: &Arc<Self>, range: Range<u64>) -> SegStr {
-        let data = &self.data[range.start as usize..range.end as usize];
-        // Safety: The length is computed by a (assumed to be correct)
-        //         index. It is undefined behavior if the file changes
-        //         in a non-appending way after the index is created.
-        SegStr::new(self.clone(), data)
+        SegStr::new(self.clone(), range)
     }
 }
 
@@ -150,14 +139,18 @@ impl SegStr {
     ///
     /// 1. The provided slice must point to data that lives inside the ref-counted [Segment].
     /// 2. The length must encompass a valid range of data inside the [Segment].
-    fn new(origin: Arc<Segment>, data: &[u8]) -> Self {
+    fn new(origin: Arc<Segment>, range: Range<u64>) -> Self {
         // Safety: This ptr came from a slice that we prevent from
         //         being dropped by having it inside a ref counter
+        // Safety: The length is computed by a (assumed to be correct)
+        //         index. It is undefined behavior if the file changes
+        //         in a non-appending way after the index is created.
+        let data = &origin.data[range.start as usize..range.end as usize];
         match String::from_utf8_lossy(data) {
             Cow::Borrowed(_) => Self(SegStrRepr::Borrowed {
-                _ref: origin,
-                ptr: unsafe { NonNull::new(data.as_ptr() as *mut _).unwrap_unchecked() },
+                ptr: unsafe { NonNull::new(data.as_ptr().cast_mut()).unwrap_unchecked() },
                 len: data.len(),
+                _ref: origin,
             }),
             Cow::Owned(s) => Self::new_owned(s),
         }
@@ -172,11 +165,9 @@ impl SegStr {
     pub fn as_bytes(&self) -> &[u8] {
         // Safety: We have already checked in the constructor.
         match &self.0 {
-            SegStrRepr::Borrowed {
-                _ref: _pin,
-                ptr,
-                len,
-            } => unsafe { std::slice::from_raw_parts(ptr.as_ptr(), *len) },
+            SegStrRepr::Borrowed { ptr, len, .. } => unsafe {
+                std::slice::from_raw_parts(ptr.as_ptr(), *len)
+            },
             SegStrRepr::Owned(s) => s.as_bytes(),
         }
     }
@@ -205,17 +196,5 @@ impl std::ops::Deref for SegStr {
 impl std::convert::AsRef<str> for SegStr {
     fn as_ref(&self) -> &str {
         self.as_str()
-    }
-}
-
-impl std::fmt::Display for SegStr {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(self)
-    }
-}
-
-impl std::fmt::Debug for SegStr {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        std::fmt::Debug::fmt(&**self, f)
     }
 }

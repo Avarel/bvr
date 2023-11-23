@@ -23,7 +23,7 @@ struct IndexingTask {
 
 impl IndexingTask {
     fn new(file: &File, start: u64, end: u64) -> Result<(Self, Receiver<u64>)> {
-        let segment = Segment::map_file(0, start..end, file)?;
+        let segment = Segment::map_file(start..end, file)?;
         let (sx, rx) = std::sync::mpsc::channel();
         Ok((Self { sx, segment }, rx))
     }
@@ -134,10 +134,9 @@ impl InflightIndexImpl {
     fn index_stream(self: Arc<Self>, mut stream: Stream, outgoing: Sender<Segment>) -> Result<()> {
         assert_eq!(self.mode, InflightIndexMode::Stream);
         let mut len = 0;
-        let mut seg_id = 0;
 
         loop {
-            let mut segment = SegmentMut::new(seg_id, len)?;
+            let mut segment = SegmentMut::new(len)?;
 
             let mut buf_len = 0;
             loop {
@@ -161,7 +160,6 @@ impl InflightIndexImpl {
                 break;
             }
 
-            seg_id += 1;
             len += buf_len as u64;
         }
 

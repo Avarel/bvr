@@ -131,7 +131,7 @@ impl IncompleteIndex {
         while start < len {
             let end = (start + Segment::MAX_SIZE).min(len);
 
-            let segment = Segment::map_file(0, start..end, file)?;
+            let segment = Segment::map_file(start..end, file)?;
 
             for i in memchr::memchr_iter(b'\n', &segment) {
                 let line_data = start + i as u64;
