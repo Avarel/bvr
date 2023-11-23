@@ -195,13 +195,13 @@ impl<T: Copy> CowVec<T> {
         } else {
             let old_ptr = buf.ptr.as_ptr().cast::<u8>();
             // Cannot use realloc here since it may drop the old pointer
-            let old_layout = Layout::array::<T>(cap).unwrap();
+            let old_layout_len = Layout::array::<T>(len).unwrap();
             let new_ptr = unsafe { alloc::alloc(new_layout) };
             if NonNull::new(new_ptr.cast::<T>()).is_none() {
                 alloc::handle_alloc_error(new_layout)
             }
             // This is fine since our elements are Copy
-            unsafe { std::ptr::copy_nonoverlapping(old_ptr, new_ptr, old_layout.size()) };
+            unsafe { std::ptr::copy_nonoverlapping(old_ptr, new_ptr, old_layout_len.size()) };
             new_ptr
         };
 
