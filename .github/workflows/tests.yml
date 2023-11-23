@@ -15,24 +15,42 @@ jobs:
           [
             x86_64-linux,
             x86_64-macos,
-            x86_64-windows
+            x86_64-windows,
+            x86_64-linux-miri,
+            x86_64-macos-miri,
+            x86_64-windows-miri
           ]
         include:
           - build: x86_64-linux
             os: ubuntu-latest
             rust: stable
             target: x86_64-unknown-linux-gnu
-            cross: false
+            miri: false
           - build: x86_64-macos
             os: macos-latest
             rust: stable
             target: x86_64-apple-darwin
-            cross: false
+            miri: false
           - build: x86_64-windows
             os: windows-latest
             rust: stable
             target: x86_64-pc-windows-msvc
-            cross: false
+            miri: false
+          - build: x86_64-linux-miri
+            os: ubuntu-latest
+            rust: nightly
+            target: x86_64-unknown-linux-gnu
+            miri: true
+          - build: x86_64-macos-miri
+            os: macos-latest
+            rust: nightly
+            target: x86_64-apple-darwin
+            miri: true
+          - build: x86_64-windows-miri
+            os: windows-latest
+            rust: nightly
+            target: x86_64-pc-windows-msvc
+            miri: true
 
     steps:
       - name: Checkout sources
@@ -40,9 +58,18 @@ jobs:
 
       - name: Install ${{ matrix.rust }} toolchain
         uses: dtolnay/rust-toolchain@stable
+        if: matrix.miri == false
         with:
           toolchain: ${{ matrix.rust }}
           target: ${{ matrix.target }}
+
+      - name: Install ${{ matrix.rust }} toolchain w/ Miri
+        uses: dtolnay/rust-toolchain@stable
+        if: matrix.miri == true
+        with:
+          toolchain: ${{ matrix.rust }}
+          target: ${{ matrix.target }}
+          components: miri
 
       - name: Rust cache
         uses: Swatinem/rust-cache@v2
@@ -51,4 +78,9 @@ jobs:
         run: cargo run --package test-gen --release
 
       - name: Test workspace
+        if: matrix.miri == false
         run: cargo test --workspace
+
+      - name: Test workspace w/ Miri
+        if: matrix.miri == true
+        run: cargo miri test --workspace

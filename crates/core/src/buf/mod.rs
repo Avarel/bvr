@@ -229,16 +229,6 @@ where
 
     /// Retrieves a line of text from the buffer based on the given line number.
     ///
-    ///
-    /// # Arguments
-    ///
-    /// * `line_number` - The line number to retrieve.
-    ///
-    ///
-    /// # Arguments
-    ///
-    /// * `line_number` - The line number to retrieve.
-    ///
     /// # Panics
     ///
     /// This function will panic if the `line_number` is greater than the total number
@@ -420,16 +410,19 @@ mod test {
     use crate::{buf::SegBuffer, index::CompleteIndex};
 
     #[test]
+    #[cfg_attr(miri, ignore)]
     fn file_stream_consistency_1() -> Result<()> {
         file_stream_consistency_base(File::open("../../tests/test_10.log")?, 10)
     }
 
     #[test]
+    #[cfg_attr(miri, ignore)]
     fn file_stream_consistency_2() -> Result<()> {
         file_stream_consistency_base(File::open("../../tests/test_50_long.log")?, 50)
     }
 
     #[test]
+    #[cfg_attr(miri, ignore)]
     fn file_stream_consistency_3() -> Result<()> {
         file_stream_consistency_base(File::open("../../tests/test_5000000.log")?, 5_000_000)
     }
@@ -453,16 +446,19 @@ mod test {
     }
 
     #[test]
+    #[cfg_attr(miri, ignore)]
     fn multi_buffer_consistency_1() -> Result<()> {
         multi_buffer_consistency_base(File::open("../../tests/test_10.log")?)
     }
 
     #[test]
+    #[cfg_attr(miri, ignore)]
     fn multi_buffer_consistency_2() -> Result<()> {
         multi_buffer_consistency_base(File::open("../../tests/test_50_long.log")?)
     }
 
     #[test]
+    #[cfg_attr(miri, ignore)]
     fn multi_buffer_consistency_3() -> Result<()> {
         multi_buffer_consistency_base(File::open("../../tests/test_5000000.log")?)
     }
