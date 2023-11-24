@@ -147,7 +147,7 @@ impl App {
                     ViewerAction::ToggleLine => {
                         if let Some(viewer) = self.mux.active_viewer_mut() {
                             let ln = viewer.viewport_mut().current();
-                            viewer.mask_mut().toggle(ln);
+                            viewer.mask_manual().toggle(ln);
                         }
                     }
                 },
@@ -195,11 +195,13 @@ impl App {
                             if let Some(viewer) = self.mux.active_viewer_mut() {
                                 viewer.clear_mask()
                             }
-                        } else if command == "e" {
+                        } else if command == "testmask" {
                             if let Some(viewer) = self.mux.active_viewer_mut() {
-                                viewer
-                                    .viewport_mut()
-                                    .pan_view(crate::direction::VDirection::Down, usize::MAX);
+                                if viewer.view_index > 0 {
+                                    viewer.view_index = 0;
+                                } else {
+                                    viewer.view_index = 1;
+                                }
                             }
                         } else if let Some(pat) = command.strip_prefix("find ") {
                             let regex = match Regex::new(pat) {

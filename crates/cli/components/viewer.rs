@@ -80,41 +80,63 @@ impl Viewport {
 }
 
 enum MaskRepr {
+    Passthrough,
     Manual(Vec<usize>),
     Search(SearchResults),
 }
 
 pub struct Mask {
     lines: MaskRepr,
-    // _viewport: Viewport,
+    viewport: Viewport,
     // _settings: HashMap<usize, ()>,
 }
 
 impl Mask {
     pub fn new() -> Self {
         Self {
-            lines: MaskRepr::Manual(vec![]),
-            // _viewport: Viewport::new(),
+            lines: MaskRepr::Passthrough,
+            viewport: Viewport::new(),
             // _settings: HashMap::new(),
         }
     }
 
     pub fn toggle(&mut self, line_number: usize) {
         match &mut self.lines {
-            MaskRepr::Manual(lines) => match lines.binary_search(&line_number) {
-                Ok(idx) => {
-                    lines.remove(idx);
-                }
-                Err(idx) => {
-                    lines.insert(idx, line_number);
-                }
+            MaskRepr::Passthrough => (),
+            MaskRepr::Manual(lines) => {
+                match lines.binary_search(&line_number) {
+                    Ok(idx) => {
+                        lines.remove(idx);
+                    }
+                    Err(idx) => {
+                        lines.insert(idx, line_number);
+                    }
+                };
+                self.viewport.max_height = lines.len();
             },
             MaskRepr::Search(_) => {}
         }
     }
 
+    pub fn len(&self) -> usize {
+        match &self.lines {
+            MaskRepr::Passthrough => self.viewport.max_height,
+            MaskRepr::Manual(lines) => lines.len(),
+            MaskRepr::Search(lines) => lines.len(),
+        }
+    }
+
+    pub fn translate_to_file_line(&self, line_number: usize) -> Option<usize> {
+        match &self.lines {
+            MaskRepr::Passthrough => Some(line_number),
+            MaskRepr::Manual(lines) => lines.get(line_number).copied(),
+            MaskRepr::Search(lines) => lines.get(line_number),
+        }
+    }
+
     pub fn has_line(&self, line_number: usize) -> bool {
         match &self.lines {
+            MaskRepr::Passthrough => true,
             MaskRepr::Manual(lines) => {
                 if let &[first, .., last] = lines.as_slice() {
                     if (first..=last).contains(&line_number) {
@@ -125,16 +147,16 @@ impl Mask {
                 }
                 false
             }
-            MaskRepr::Search(lines) => lines.find(line_number),
+            MaskRepr::Search(lines) => lines.has_line(line_number),
         }
     }
 }
 
 pub struct Instance {
     name: String,
-    viewport: Viewport,
     file: Buffer,
-    mask: Option<Mask>,
+    mask: Vec<Mask>,
+    pub view_index: usize,
 }
 
 pub struct ViewLine {
@@ -168,9 +190,9 @@ impl Instance {
     pub fn new(name: String, file: Buffer) -> Self {
         Self {
             name,
-            viewport: Viewport::new(),
             file,
-            mask: None,
+            mask: vec![Mask::new()],
+            view_index: 0,
         }
     }
 
@@ -178,28 +200,30 @@ impl Instance {
         &self.file
     }
 
-    pub fn viewport(&mut self) -> &Viewport {
-        &self.viewport
+    pub fn viewport(&self) -> &Viewport {
+        &self.mask[self.view_index].viewport
     }
 
     pub fn viewport_mut(&mut self) -> &mut Viewport {
-        &mut self.viewport
+        &mut self.mask[self.view_index].viewport
     }
 
     pub fn update_and_view(&mut self) -> Vec<ViewLine> {
         self.file.try_finalize();
-        self.viewport.max_height = self.file.line_count();
+        self.mask[0].viewport.max_height = self.file.line_count();
 
-        self.viewport
+        let mask = &self.mask[self.view_index];
+        let mask_after = self.mask.get(self.view_index + 1);
+
+        mask.viewport
             .line_range()
-            .map(|line_number| ViewLine {
+            .map(|idx| (idx, mask.translate_to_file_line(idx).unwrap()))
+            .map(|(idx, line_number)| ViewLine {
                 line_number,
                 data: self.file.get_line(line_number),
-                line_type: if line_number == self.viewport.current {
+                line_type: if idx == mask.viewport.current {
                     LineType::Selected
-                } else if self
-                    .mask
-                    .as_ref()
+                } else if mask_after
                     .map(|mask| mask.has_line(line_number))
                     .unwrap_or(false)
                 {
@@ -211,12 +235,18 @@ impl Instance {
             .collect()
     }
 
-    pub fn mask_mut(&mut self) -> &mut Mask {
-        self.mask.get_or_insert_with(Mask::new)
+    pub fn mask_manual(&mut self) -> &mut Mask {
+        if !matches!(self.mask.last().unwrap().lines, MaskRepr::Manual(_)) {
+            self.mask.push(Mask {
+                lines: MaskRepr::Manual(Vec::new()),
+                viewport: Viewport::new(),
+            });
+        }
+        self.mask.last_mut().unwrap()
     }
 
     pub fn clear_mask(&mut self) {
-        self.mask = None;
+        self.mask.truncate(1);
     }
 
     pub fn name(&self) -> &str {
@@ -224,8 +254,9 @@ impl Instance {
     }
 
     pub fn mask_search(&mut self, regex: Regex) {
-        self.mask = Some(Mask {
+        self.mask.push(Mask {
             lines: MaskRepr::Search(SearchResults::search(&self.file, regex).unwrap()),
-        })
+            viewport: Viewport::new(),
+        });
     }
 }

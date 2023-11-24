@@ -130,10 +130,24 @@ impl InflightSearch {
 }
 
 impl BufferSearch for InflightSearch {
-    fn find(&self, line_number: usize) -> bool {
+    fn get(&self, idx: usize) -> Option<usize> {
         match self {
-            InflightSearch::Incomplete(inner) => inner.read(|index| index.find(line_number)),
-            InflightSearch::Complete(index) => index.find(line_number),
+            InflightSearch::Incomplete(inner) => inner.read(|index| index.get(idx)),
+            InflightSearch::Complete(index) => index.get(idx),
+        }
+    }
+
+    fn has_line(&self, line_number: usize) -> bool {
+        match self {
+            InflightSearch::Incomplete(inner) => inner.read(|index| index.has_line(line_number)),
+            InflightSearch::Complete(index) => index.has_line(line_number),
+        }
+    }
+
+    fn len(&self) -> usize {
+        match self {
+            InflightSearch::Incomplete(inner) => inner.read(|index| index.len()),
+            InflightSearch::Complete(index) => index.len(),
         }
     }
 }

@@ -5,7 +5,9 @@ use regex::bytes::Regex;
 use crate::{buf::ContiguousSegmentIterator, cowvec::CowVec, index::BufferIndex, Result};
 
 pub trait BufferSearch {
-    fn find(&self, line_number: usize) -> bool;
+    fn get(&self, index: usize) -> Option<usize>;
+    fn has_line(&self, line_number: usize) -> bool;
+    fn len(&self) -> usize;
 }
 
 #[derive(Clone)]
@@ -71,7 +73,11 @@ impl CompleteSearch {
 }
 
 impl BufferSearch for CompleteSearch {
-    fn find(&self, line_number: usize) -> bool {
+    fn get(&self, index: usize) -> Option<usize> {
+        self.lines.get(index).copied()
+    }
+
+    fn has_line(&self, line_number: usize) -> bool {
         let slice = self.lines.as_slice();
         if let &[first, .., last] = slice {
             if (first..=last).contains(&line_number) {
@@ -81,5 +87,9 @@ impl BufferSearch for CompleteSearch {
             return item == line_number;
         }
         false
+    }
+
+    fn len(&self) -> usize {
+        self.lines.len()
     }
 }
