@@ -14,12 +14,26 @@ mod colors {
 
     pub const BLACK: Color = Color::Black;
     pub const BG: Color = Color::Rgb(25, 25, 25);
+
     pub const TEXT_ACTIVE: Color = Color::Rgb(220, 220, 220);
     pub const TEXT_INACTIVE: Color = Color::Rgb(50, 50, 50);
-    pub const GUTTER: Color = BG;
-    pub const TAB_INACTIVE: Color = Color::Rgb(50, 50, 50);
+
+    pub const GUTTER_BG: Color = BG;
+    pub const GUTTER_TEXT: Color = Color::Rgb(30, 30, 30);
+
+    pub const TAB_INACTIVE: Color = Color::Rgb(40, 40, 40);
     pub const TAB_ACTIVE: Color = Color::Rgb(80, 80, 80);
+    pub const TAB_SIDE_ACTIVE: Color = Color::Blue;
+    pub const TAB_SIDE_INACTIVE: Color = Color::Black;
+
     pub const STATUS_BAR: Color = Color::Rgb(40, 40, 40);
+    pub const STATUS_BAR_TEXT: Color = Color::Rgb(150, 150, 150);
+
+    pub const COMMAND_BAR_SELECT: Color = Color::Rgb(60, 80, 150);
+
+    pub const COMMAND_ACCENT: Color = Color::Rgb(100, 230, 160);
+    pub const SELECT_ACCENT: Color = Color::Rgb(180, 130, 230);
+    pub const NORMAL_ACCENT: Color = Color::Rgb(100, 160, 230);
 }
 
 enum StatusWidgetState<'a> {
@@ -41,10 +55,27 @@ pub struct StatusWidget<'a> {
 
 impl<'a> Widget for StatusWidget<'a> {
     fn render(self, area: Rect, buf: &mut Buffer) {
-        let chunks = Layout::default()
-            .direction(Direction::Horizontal)
-            .constraints([Constraint::Length(9), Constraint::Min(1)])
-            .split(area);
+        const STATUS_BAR_STYLE: Style = Style::new()
+            .fg(colors::STATUS_BAR_TEXT)
+            .bg(colors::STATUS_BAR);
+
+        let accent_color = match self.input_mode {
+            InputMode::Command => colors::COMMAND_ACCENT,
+            InputMode::Viewer => colors::NORMAL_ACCENT,
+            InputMode::Select => colors::SELECT_ACCENT,
+        };
+
+        let mut v = Vec::new();
+
+        v.push(
+            Span::from(match self.input_mode {
+                InputMode::Command => " COMMAND ",
+                InputMode::Viewer => " VIEWER ",
+                InputMode::Select => " SELECT ",
+            })
+            .bg(accent_color),
+        );
+        v.push(Span::raw(" "));
 
         match self.state {
             StatusWidgetState::Normal {
@@ -52,56 +83,30 @@ impl<'a> Widget for StatusWidget<'a> {
                 line_count,
                 name,
             } => {
-                let chunks = Layout::default()
-                    .direction(Direction::Horizontal)
-                    .constraints([
-                        Constraint::Min(1),
-                        Constraint::Length(name.len() as u16 + 2),
-                    ])
-                    .split(chunks[1]);
-                Paragraph::new(Span::from(match progress {
-                    InflightIndexProgress::Done => format!("{} lines", line_count),
-                    InflightIndexProgress::Streaming => format!("Streaming ({} lines)", line_count),
-                    InflightIndexProgress::File(progress) => {
-                        format!("{:.2}% ({} lines)", progress * 100.0, line_count)
-                    }
-                }))
-                .block(Block::new().padding(Padding::horizontal(1)))
-                .dark_gray()
-                .bg(colors::STATUS_BAR)
-                .render(chunks[0], buf);
-
-                Paragraph::new(name)
-                    .block(Block::new().padding(Padding::horizontal(1)))
-                    .alignment(Alignment::Right)
-                    .bg(colors::STATUS_BAR)
-                    .render(chunks[1], buf);
+                v.push(
+                    Span::raw(match progress {
+                        InflightIndexProgress::Done => format!("{} lines", line_count),
+                        InflightIndexProgress::Streaming => {
+                            format!("Streaming ({} lines)", line_count)
+                        }
+                        InflightIndexProgress::File(progress) => {
+                            format!("{:.2}% ({} lines)", progress * 100.0, line_count)
+                        }
+                    })
+                    .fg(accent_color),
+                );
+                v.push(Span::raw(" │ ").fg(accent_color));
+                v.push(Span::raw(name).fg(accent_color));
             }
-            StatusWidgetState::Message { message } => {
-                Paragraph::new(message)
-                    .block(Block::new().padding(Padding::horizontal(1)))
-                    .dark_gray()
-                    .on_black()
-                    .render(chunks[1], buf);
-            }
+            StatusWidgetState::Message { message } => v.push(Span::raw(message)),
             StatusWidgetState::None => {
-                Paragraph::new("Open a file with :open [filename]")
-                    .block(Block::new().padding(Padding::horizontal(1)))
-                    .dark_gray()
-                    .on_black()
-                    .render(chunks[1], buf);
+                v.push(Span::raw("Open a file with :open [filename]").fg(accent_color))
             }
         }
 
-        let mode_tag = match self.input_mode {
-            InputMode::Command => Paragraph::new(Span::from("COMMAND")).on_light_green(),
-            InputMode::Viewer => Paragraph::new(Span::from("VIEWER")).on_blue(),
-            InputMode::Select => Paragraph::new(Span::from("SELECT")).on_magenta(),
-        };
-
-        mode_tag
-            .block(Block::new().padding(Padding::horizontal(1)))
-            .render(chunks[0], buf);
+        Paragraph::new(Line::from(v))
+            .style(STATUS_BAR_STYLE)
+            .render(area, buf);
     }
 }
 
@@ -113,57 +118,44 @@ pub struct CommandWidget<'a> {
 
 impl Widget for CommandWidget<'_> {
     fn render(self, area: Rect, buf: &mut Buffer) {
-        let command_chunks = Layout::default()
-            .direction(Direction::Horizontal)
-            .constraints([Constraint::Length(1), Constraint::Min(1)])
-            .split(area);
+        if !self.active {
+            return;
+        }
 
-        let input = Paragraph::new({
-            let mut v = Vec::new();
-
-            match *self.inner.cursor() {
-                Cursor::Singleton(_) => v.push(Span::from(self.inner.buf())),
-                Cursor::Selection(start, end, _) => {
-                    v.push(Span::from(&self.inner.buf()[..start]));
-                    v.push(Span::from(&self.inner.buf()[start..end]).on_blue());
-                    v.push(Span::from(&self.inner.buf()[end..]));
-                }
+        let input = Paragraph::new(Line::from(match *self.inner.cursor() {
+            Cursor::Singleton(_) => {
+                vec![Span::from(":"), Span::from(self.inner.buf())]
             }
+            Cursor::Selection(start, end, _) => vec![
+                Span::from(":"),
+                Span::from(&self.inner.buf()[..start]),
+                Span::from(&self.inner.buf()[start..end]).bg(colors::COMMAND_BAR_SELECT),
+                Span::from(&self.inner.buf()[end..]),
+            ],
+        }))
+        .bg(colors::BG);
 
-            Line::from(v)
-        })
-        .style(match self.active {
-            false => Style::default(),
-            true => Style::default().fg(Color::Yellow),
-        });
-        match self.active {
-            false => {}
-            true => {
-                Paragraph::new(":").render(command_chunks[0], buf);
-                match *self.inner.cursor() {
-                    Cursor::Singleton(i) => {
-                        *self.cursor = Some((command_chunks[1].x + i as u16, command_chunks[1].y));
-                    }
-                    Cursor::Selection(start, end, dir) => {
-                        let x = match dir {
-                            SelectionOrigin::Right => end,
-                            SelectionOrigin::Left => start,
-                        };
-                        *self.cursor = Some((command_chunks[1].x + x as u16, command_chunks[1].y));
-                    }
+        if self.active {
+            match *self.inner.cursor() {
+                Cursor::Singleton(i) => {
+                    *self.cursor = Some((area.x + i as u16 + 1, area.y));
+                }
+                Cursor::Selection(start, end, dir) => {
+                    let x = match dir {
+                        SelectionOrigin::Right => end,
+                        SelectionOrigin::Left => start,
+                    };
+                    *self.cursor = Some((area.x + x as u16 + 1, area.y));
                 }
             }
         }
-        input.render(command_chunks[1], buf);
+        input.render(area, buf);
     }
 }
 
 pub struct ViewerWidget<'a> {
     viewer: &'a mut Instance,
-}
-
-fn digit_count(n: usize) -> u16 {
-    n.ilog10() as u16 + 1
+    gutter: bool,
 }
 
 impl Widget for ViewerWidget<'_> {
@@ -174,90 +166,92 @@ impl Widget for ViewerWidget<'_> {
 
         let view = self.viewer.update_and_view();
 
-        let gutter_size = view
-            .iter()
-            .map(|line| digit_count(line.line_number() + 1))
-            .max()
-            .unwrap_or(0)
-            .max(4);
+        let gutter_size = self.gutter.then(|| {
+            view.last()
+                .map(|ln| ((ln.line_number() + 1).ilog10() + 1) as u16)
+                .unwrap_or(4)
+                .max(4)
+        });
 
         let mut y = area.y;
         for line in view.into_iter() {
-            LineWidget { line, gutter_size }.render(Rect::new(area.x, y, area.width, 1), buf);
+            LineWidget {
+                line: Some(line),
+                gutter_size: gutter_size,
+            }
+            .render(Rect::new(area.x, y, area.width, 1), buf);
             y += 1;
         }
 
         while y < area.bottom() {
-            EmptyLineWidget { gutter_size }.render(Rect::new(area.x, y, area.width, 1), buf);
+            LineWidget {
+                line: None,
+                gutter_size: gutter_size,
+            }
+            .render(Rect::new(area.x, y, area.width, 1), buf);
             y += 1;
         }
     }
 }
 
 struct LineWidget {
-    gutter_size: u16,
-    line: ViewLine,
+    gutter_size: Option<u16>,
+    line: Option<ViewLine>,
 }
-
-const SET_LEFT_EDGE: symbols::border::Set = symbols::border::Set {
-    top_left: "",
-    top_right: "",
-    bottom_left: "",
-    bottom_right: "",
-    vertical_left: "▏",
-    vertical_right: "",
-    horizontal_top: "",
-    horizontal_bottom: "",
-};
-
-const LINE_WIDGET_BLOCK: Block = Block::new()
-    .padding(Padding::new(0, 0, 0, 0))
-    .border_set(SET_LEFT_EDGE)
-    .border_style(Style::new().fg(colors::BLACK))
-    .borders(Borders::LEFT);
 
 impl Widget for LineWidget {
     fn render(self, area: Rect, buf: &mut Buffer) {
-        let chunks = Layout::new()
-            .constraints([Constraint::Length(self.gutter_size + 1), Constraint::Min(1)])
-            .direction(Direction::Horizontal)
-            .split(area);
+        const SET_LEFT_EDGE: symbols::border::Set = symbols::border::Set {
+            top_left: "",
+            top_right: "",
+            bottom_left: "",
+            bottom_right: "",
+            vertical_left: "▏",
+            vertical_right: "",
+            horizontal_top: "",
+            horizontal_bottom: "",
+        };
 
-        let ln_str = (self.line.line_number() + 1).to_string();
-        let ln = Paragraph::new(ln_str)
-            .block(LINE_WIDGET_BLOCK)
-            .alignment(Alignment::Right)
-            .fg(colors::TEXT_INACTIVE)
-            .bg(colors::GUTTER);
-        ln.render(chunks[0], buf);
+        const LINE_WIDGET_BLOCK: Block = Block::new()
+            .border_set(SET_LEFT_EDGE)
+            .border_style(Style::new().fg(colors::BLACK))
+            .borders(Borders::LEFT);
 
-        let data = Paragraph::new(self.line.data().as_str())
-            .block(Block::new().padding(Padding::new(3, 0, 0, 0)))
-            .bg(colors::BG);
-        data.render(chunks[1], buf);
-    }
-}
+        if let Some(gutter_size) = self.gutter_size {
+            let mut gutter_chunk = area;
+            gutter_chunk.width = gutter_size;
 
-struct EmptyLineWidget {
-    gutter_size: u16,
-}
+            let mut data_chunk = area;
+            data_chunk.x += gutter_size;
+            data_chunk.width = data_chunk.width.saturating_sub(gutter_size);
 
-impl Widget for EmptyLineWidget {
-    fn render(self, area: Rect, buf: &mut Buffer) {
-        let chunks = Layout::new()
-            .constraints([Constraint::Length(self.gutter_size + 1), Constraint::Min(1)])
-            .direction(Direction::Horizontal)
-            .split(area);
+            if let Some(line) = self.line {
+                let ln_str = (line.line_number() + 1).to_string();
+                let ln = Paragraph::new(ln_str)
+                    .block(LINE_WIDGET_BLOCK)
+                    .alignment(Alignment::Right)
+                    .fg(colors::GUTTER_TEXT)
+                    .bg(colors::GUTTER_BG);
+                ln.render(gutter_chunk, buf);
 
-        let ln = Paragraph::new("~")
-            .block(LINE_WIDGET_BLOCK)
-            .alignment(Alignment::Right)
-            .fg(colors::TEXT_INACTIVE)
-            .bg(colors::GUTTER);
-        ln.render(chunks[0], buf);
-
-        let data = Paragraph::new("").bg(colors::BG);
-        data.render(chunks[1], buf);
+                let data = Paragraph::new(line.data().as_str())
+                    .block(Block::new().padding(Padding::new(3, 0, 0, 0)))
+                    .bg(colors::BG);
+                data.render(data_chunk, buf);
+            } else {
+                let ln = Paragraph::new("~")
+                    .block(LINE_WIDGET_BLOCK)
+                    .alignment(Alignment::Right)
+                    .fg(colors::GUTTER_TEXT)
+                    .bg(colors::GUTTER_BG);
+                ln.render(gutter_chunk, buf);
+            }
+        } else {
+            if let Some(line) = self.line {
+                let data = Paragraph::new(line.data().as_str()).bg(colors::BG);
+                data.render(area, buf);
+            }
+        }
     }
 }
 
@@ -268,18 +262,26 @@ pub struct MultiplexerWidget<'a> {
 }
 
 impl MultiplexerWidget<'_> {
-    fn split_status(area: Rect) -> std::rc::Rc<[Rect]> {
-        Layout::new()
-            .direction(Direction::Vertical)
-            .constraints([Constraint::Min(1), Constraint::Length(1)])
-            .split(area)
+    fn split_status(area: Rect) -> [Rect; 2] {
+        let mut status_chunk = area;
+        status_chunk.y = status_chunk.bottom().saturating_sub(1);
+        status_chunk.height = 1;
+
+        let mut data_chunk = area;
+        data_chunk.height = data_chunk.height.saturating_sub(1);
+
+        [data_chunk, status_chunk]
     }
 
-    fn split_tabs(area: Rect) -> std::rc::Rc<[Rect]> {
-        Layout::new()
-            .direction(Direction::Vertical)
-            .constraints([Constraint::Length(1), Constraint::Min(1)])
-            .split(area)
+    fn split_tabs(area: Rect) -> [Rect; 2] {
+        let mut tab_chunk = area;
+        tab_chunk.height = 1;
+
+        let mut data_chunk = area;
+        data_chunk.y += 1;
+        data_chunk.height = data_chunk.height.saturating_sub(1);
+
+        [tab_chunk, data_chunk]
     }
 
     fn split_horizontal(area: Rect, len: usize) -> std::rc::Rc<[Rect]> {
@@ -300,9 +302,9 @@ impl Widget for TabWidget<'_> {
     fn render(self, area: Rect, buf: &mut Buffer) {
         Paragraph::new(Line::from(vec![
             if self.active {
-                Span::from("▍ ").fg(colors::TEXT_ACTIVE)
+                Span::from("▍ ").fg(colors::TAB_SIDE_ACTIVE)
             } else {
-                Span::from("▏ ").fg(colors::GUTTER)
+                Span::from("▏ ").fg(colors::TAB_SIDE_INACTIVE)
             },
             Span::from(self.name),
         ]))
@@ -339,7 +341,7 @@ impl Widget for MultiplexerWidget<'_> {
                             active: active == i,
                         }
                         .render(vsplit[0], buf);
-                        ViewerWidget { viewer }.render(vsplit[1], buf);
+                        ViewerWidget { viewer, gutter: true }.render(vsplit[1], buf);
                     }
                 }
                 MultiplexerMode::Tabs => {
@@ -357,7 +359,7 @@ impl Widget for MultiplexerWidget<'_> {
                     }
 
                     let viewer = self.mux.active_viewer_mut().unwrap();
-                    ViewerWidget { viewer }.render(vsplit[1], buf);
+                    ViewerWidget { viewer, gutter: true }.render(vsplit[1], buf);
                 }
             }
         }
