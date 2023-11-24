@@ -2,7 +2,7 @@ use crate::components::{
     command::{CommandApp, Cursor, SelectionOrigin},
     mux::{MultiplexerApp, MultiplexerMode},
     status::StatusApp,
-    viewer::{Instance, ViewLine},
+    viewer::{Instance, LineType, ViewLine},
 };
 use bvr_core::index::inflight::InflightIndexProgress;
 use ratatui::{prelude::*, widgets::*};
@@ -34,6 +34,7 @@ mod colors {
     pub const COMMAND_ACCENT: Color = Color::Rgb(100, 230, 160);
     pub const SELECT_ACCENT: Color = Color::Rgb(180, 130, 230);
     pub const NORMAL_ACCENT: Color = Color::Rgb(100, 160, 230);
+    pub const MASK_ACCENT: Color = Color::Rgb(255, 200, 60);
 }
 
 enum StatusWidgetState<'a> {
@@ -169,7 +170,7 @@ impl Widget for ViewerWidget<'_> {
         let gutter_size = self.gutter.then(|| {
             view.last()
                 .map(|ln| ((ln.line_number() + 1).ilog10() + 1) as u16)
-                .unwrap_or(4)
+                .unwrap_or_default()
                 .max(4)
         });
 
@@ -217,14 +218,21 @@ impl Widget for LineWidget {
             .border_style(Style::new().fg(colors::BLACK))
             .borders(Borders::LEFT);
 
-        if let Some(gutter_size) = self.gutter_size {
-            let mut gutter_chunk = area;
-            gutter_chunk.width = gutter_size;
+        const SPECIAL_SIZE: u16 = 3;
 
-            let mut data_chunk = area;
-            data_chunk.x += gutter_size;
-            data_chunk.width = data_chunk.width.saturating_sub(gutter_size);
+        let gutter_size = self.gutter_size.unwrap_or(0);
+        let mut gutter_chunk = area;
+        gutter_chunk.width = gutter_size;
 
+        let mut type_chunk = area;
+        type_chunk.x += gutter_size + 1;
+        type_chunk.width = 1;
+
+        let mut data_chunk = area;
+        data_chunk.x += gutter_size + SPECIAL_SIZE;
+        data_chunk.width = data_chunk.width.saturating_sub(gutter_size + SPECIAL_SIZE);
+
+        if self.gutter_size.is_some() {
             if let Some(line) = self.line {
                 let ln_str = (line.line_number() + 1).to_string();
                 let ln = Paragraph::new(ln_str)
@@ -234,9 +242,23 @@ impl Widget for LineWidget {
                     .bg(colors::GUTTER_BG);
                 ln.render(gutter_chunk, buf);
 
-                let data = Paragraph::new(line.data().as_str())
-                    .block(Block::new().padding(Padding::new(3, 0, 0, 0)))
-                    .bg(colors::BG);
+                match line.line_type() {
+                    LineType::Plain => {}
+                    LineType::Selected => {
+                        let ln = Paragraph::new("▶")
+                            .fg(colors::SELECT_ACCENT)
+                            .bg(colors::GUTTER_BG);
+                        ln.render(type_chunk, buf);
+                    }
+                    LineType::Mask => {
+                        let ln = Paragraph::new("◈")
+                            .fg(colors::MASK_ACCENT)
+                            .bg(colors::GUTTER_BG);
+                        ln.render(type_chunk, buf);
+                    },
+                }
+
+                let data = Paragraph::new(line.data().as_str()).bg(colors::BG);
                 data.render(data_chunk, buf);
             } else {
                 let ln = Paragraph::new("~")
@@ -248,7 +270,25 @@ impl Widget for LineWidget {
             }
         } else {
             if let Some(line) = self.line {
-                let data = Paragraph::new(line.data().as_str()).bg(colors::BG);
+                match line.line_type() {
+                    LineType::Plain => {}
+                    LineType::Selected => {
+                        let ln = Paragraph::new("▶")
+                            .fg(colors::GUTTER_TEXT)
+                            .bg(colors::GUTTER_BG);
+                        ln.render(type_chunk, buf);
+                    }
+                    LineType::Mask => {
+                        let ln = Paragraph::new("◈")
+                            .fg(colors::GUTTER_TEXT)
+                            .bg(colors::GUTTER_BG);
+                        ln.render(type_chunk, buf);
+                    },
+                }
+
+                let data = Paragraph::new(line.data().as_str())
+                    .block(LINE_WIDGET_BLOCK)
+                    .bg(colors::BG);
                 data.render(area, buf);
             }
         }
@@ -341,7 +381,11 @@ impl Widget for MultiplexerWidget<'_> {
                             active: active == i,
                         }
                         .render(vsplit[0], buf);
-                        ViewerWidget { viewer, gutter: true }.render(vsplit[1], buf);
+                        ViewerWidget {
+                            viewer,
+                            gutter: true,
+                        }
+                        .render(vsplit[1], buf);
                     }
                 }
                 MultiplexerMode::Tabs => {
@@ -359,7 +403,11 @@ impl Widget for MultiplexerWidget<'_> {
                     }
 
                     let viewer = self.mux.active_viewer_mut().unwrap();
-                    ViewerWidget { viewer, gutter: true }.render(vsplit[1], buf);
+                    ViewerWidget {
+                        viewer,
+                        gutter: true,
+                    }
+                    .render(vsplit[1], buf);
                 }
             }
         }
