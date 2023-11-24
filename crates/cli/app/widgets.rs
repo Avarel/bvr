@@ -222,15 +222,15 @@ impl Widget for LineWidget {
 
         let gutter_size = self.gutter_size.unwrap_or(0);
         let mut gutter_chunk = area;
-        gutter_chunk.width = gutter_size;
+        gutter_chunk.width = gutter_size + 1;
 
         let mut type_chunk = area;
-        type_chunk.x += gutter_size + 1;
+        type_chunk.x += gutter_size + 2;
         type_chunk.width = 1;
 
         let mut data_chunk = area;
-        data_chunk.x += gutter_size + SPECIAL_SIZE;
-        data_chunk.width = data_chunk.width.saturating_sub(gutter_size + SPECIAL_SIZE);
+        data_chunk.x += gutter_size + 1 + SPECIAL_SIZE;
+        data_chunk.width = data_chunk.width.saturating_sub(gutter_size + SPECIAL_SIZE + 1);
 
         if self.gutter_size.is_some() {
             if let Some(line) = self.line {
