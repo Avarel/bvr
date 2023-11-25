@@ -146,8 +146,8 @@ impl App {
                     }
                     ViewerAction::ToggleLine => {
                         if let Some(viewer) = self.mux.active_viewer_mut() {
-                            let ln = viewer.viewport_mut().current();
-                            viewer.mask_manual().toggle(ln);
+                            let ln = viewer.current_mask().current_selected_file_line().unwrap();
+                            viewer.bookmarks().toggle(ln);
                         }
                     }
                 },
@@ -193,7 +193,7 @@ impl App {
                             self.mux.swap_mode();
                         } else if command == "clearmask" {
                             if let Some(viewer) = self.mux.active_viewer_mut() {
-                                viewer.clear_mask()
+                                viewer.clear_masks()
                             }
                         } else if command == "testmask" {
                             if let Some(viewer) = self.mux.active_viewer_mut() {

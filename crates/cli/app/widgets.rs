@@ -157,6 +157,7 @@ impl Widget for CommandWidget<'_> {
 pub struct ViewerWidget<'a> {
     viewer: &'a mut Instance,
     gutter: bool,
+    first: bool,
 }
 
 impl Widget for ViewerWidget<'_> {
@@ -179,6 +180,7 @@ impl Widget for ViewerWidget<'_> {
             LineWidget {
                 line: Some(line),
                 gutter_size: gutter_size,
+                first: self.first,
             }
             .render(Rect::new(area.x, y, area.width, 1), buf);
             y += 1;
@@ -188,6 +190,7 @@ impl Widget for ViewerWidget<'_> {
             LineWidget {
                 line: None,
                 gutter_size: gutter_size,
+                first: self.first,
             }
             .render(Rect::new(area.x, y, area.width, 1), buf);
             y += 1;
@@ -198,6 +201,7 @@ impl Widget for ViewerWidget<'_> {
 struct LineWidget {
     gutter_size: Option<u16>,
     line: Option<ViewLine>,
+    first: bool,
 }
 
 impl Widget for LineWidget {
@@ -230,16 +234,24 @@ impl Widget for LineWidget {
 
         let mut data_chunk = area;
         data_chunk.x += gutter_size + 1 + SPECIAL_SIZE;
-        data_chunk.width = data_chunk.width.saturating_sub(gutter_size + SPECIAL_SIZE + 1);
+        data_chunk.width = data_chunk
+            .width
+            .saturating_sub(gutter_size + SPECIAL_SIZE + 1);
 
         if self.gutter_size.is_some() {
             if let Some(line) = self.line {
                 let ln_str = (line.line_number() + 1).to_string();
                 let ln = Paragraph::new(ln_str)
-                    .block(LINE_WIDGET_BLOCK)
                     .alignment(Alignment::Right)
                     .fg(colors::GUTTER_TEXT)
                     .bg(colors::GUTTER_BG);
+
+                let ln = if !self.first {
+                    ln.block(LINE_WIDGET_BLOCK)
+                } else {
+                    ln
+                };
+
                 ln.render(gutter_chunk, buf);
 
                 match line.line_type() {
@@ -251,21 +263,27 @@ impl Widget for LineWidget {
                         ln.render(type_chunk, buf);
                     }
                     LineType::Mask => {
-                        let ln = Paragraph::new("◈")
+                        let ln = Paragraph::new("✦")
                             .fg(colors::MASK_ACCENT)
                             .bg(colors::GUTTER_BG);
                         ln.render(type_chunk, buf);
-                    },
+                    }
                 }
 
                 let data = Paragraph::new(line.data().as_str()).bg(colors::BG);
                 data.render(data_chunk, buf);
             } else {
                 let ln = Paragraph::new("~")
-                    .block(LINE_WIDGET_BLOCK)
                     .alignment(Alignment::Right)
                     .fg(colors::GUTTER_TEXT)
                     .bg(colors::GUTTER_BG);
+
+                let ln = if !self.first {
+                    ln.block(LINE_WIDGET_BLOCK)
+                } else {
+                    ln
+                };
+
                 ln.render(gutter_chunk, buf);
             }
         } else {
@@ -283,12 +301,18 @@ impl Widget for LineWidget {
                             .fg(colors::GUTTER_TEXT)
                             .bg(colors::GUTTER_BG);
                         ln.render(type_chunk, buf);
-                    },
+                    }
                 }
 
                 let data = Paragraph::new(line.data().as_str())
-                    .block(LINE_WIDGET_BLOCK)
                     .bg(colors::BG);
+
+                let data = if !self.first {
+                    data.block(LINE_WIDGET_BLOCK)
+                } else {
+                    data
+                };
+
                 data.render(area, buf);
             }
         }
@@ -384,6 +408,7 @@ impl Widget for MultiplexerWidget<'_> {
                         ViewerWidget {
                             viewer,
                             gutter: true,
+                            first: i == 0,
                         }
                         .render(vsplit[1], buf);
                     }
@@ -406,6 +431,7 @@ impl Widget for MultiplexerWidget<'_> {
                     ViewerWidget {
                         viewer,
                         gutter: true,
+                        first: true,
                     }
                     .render(vsplit[1], buf);
                 }

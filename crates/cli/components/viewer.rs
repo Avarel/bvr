@@ -36,6 +36,10 @@ impl Viewport {
         self.height = height;
     }
 
+    pub fn update_max_height(&mut self, max_height: usize) {
+        self.max_height = max_height;
+    }
+
     fn jump_to_current(&mut self) {
         if !(self.top..self.bottom()).contains(&self.current) {
             // height remains unchanged
@@ -80,8 +84,8 @@ impl Viewport {
 }
 
 enum MaskRepr {
-    Passthrough,
-    Manual(Vec<usize>),
+    None,
+    Manual(ManualMask),
     Search(SearchResults),
 }
 
@@ -92,63 +96,101 @@ pub struct Mask {
 }
 
 impl Mask {
-    pub fn new() -> Self {
+    pub fn none() -> Self {
         Self {
-            lines: MaskRepr::Passthrough,
+            lines: MaskRepr::None,
             viewport: Viewport::new(),
             // _settings: HashMap::new(),
         }
     }
 
+    fn bookmark() -> Self {
+        Self {
+            lines: MaskRepr::Manual(ManualMask::new()),
+            viewport: Viewport::new(),
+        }
+    }
+
     pub fn toggle(&mut self, line_number: usize) {
         match &mut self.lines {
-            MaskRepr::Passthrough => (),
+            MaskRepr::None => (),
             MaskRepr::Manual(lines) => {
-                match lines.binary_search(&line_number) {
-                    Ok(idx) => {
-                        lines.remove(idx);
-                    }
-                    Err(idx) => {
-                        lines.insert(idx, line_number);
-                    }
-                };
+                lines.toggle(line_number);
                 self.viewport.max_height = lines.len();
-            },
+            }
             MaskRepr::Search(_) => {}
         }
     }
 
     pub fn len(&self) -> usize {
         match &self.lines {
-            MaskRepr::Passthrough => self.viewport.max_height,
+            MaskRepr::None => self.viewport.max_height,
             MaskRepr::Manual(lines) => lines.len(),
             MaskRepr::Search(lines) => lines.len(),
         }
     }
 
+    pub fn current_selected_file_line(&self) -> Option<usize> {
+        self.translate_to_file_line(self.viewport.current())
+    }
+
     pub fn translate_to_file_line(&self, line_number: usize) -> Option<usize> {
         match &self.lines {
-            MaskRepr::Passthrough => Some(line_number),
-            MaskRepr::Manual(lines) => lines.get(line_number).copied(),
+            MaskRepr::None => Some(line_number),
+            MaskRepr::Manual(lines) => lines.get(line_number),
             MaskRepr::Search(lines) => lines.get(line_number),
         }
     }
 
     pub fn has_line(&self, line_number: usize) -> bool {
         match &self.lines {
-            MaskRepr::Passthrough => true,
-            MaskRepr::Manual(lines) => {
-                if let &[first, .., last] = lines.as_slice() {
-                    if (first..=last).contains(&line_number) {
-                        return lines.binary_search(&line_number).is_ok();
-                    }
-                } else if let &[item] = lines.as_slice() {
-                    return item == line_number;
-                }
-                false
-            }
+            MaskRepr::None => true,
+            MaskRepr::Manual(lines) => lines.has_line(line_number),
             MaskRepr::Search(lines) => lines.has_line(line_number),
         }
+    }
+}
+
+struct ManualMask {
+    lines: Vec<usize>,
+}
+
+impl ManualMask {
+    fn new() -> ManualMask {
+        ManualMask { lines: Vec::new() }
+    }
+
+    fn toggle(&mut self, line_number: usize) {
+        match self.lines.binary_search(&line_number) {
+            Ok(idx) => {
+                self.lines.remove(idx);
+            }
+            Err(idx) => {
+                self.lines.insert(idx, line_number);
+            }
+        };
+    }
+}
+
+impl BufferSearch for ManualMask {
+    fn get(&self, index: usize) -> Option<usize> {
+        self.lines.get(index).copied()
+    }
+
+    fn has_line(&self, line_number: usize) -> bool {
+        let slice = self.lines.as_slice();
+        if let &[first, .., last] = slice {
+            if (first..=last).contains(&line_number) {
+                return slice.binary_search(&line_number).is_ok();
+            }
+        } else if let &[item] = slice {
+            return item == line_number;
+        }
+        false
+    }
+
+    fn len(&self) -> usize {
+        self.lines.len()
     }
 }
 
@@ -191,7 +233,7 @@ impl Instance {
         Self {
             name,
             file,
-            mask: vec![Mask::new()],
+            mask: vec![Mask::none(), Mask::bookmark()],
             view_index: 0,
         }
     }
@@ -206,6 +248,10 @@ impl Instance {
 
     pub fn viewport_mut(&mut self) -> &mut Viewport {
         &mut self.mask[self.view_index].viewport
+    }
+
+    pub fn current_mask(&self) -> &Mask {
+        &self.mask[self.view_index]
     }
 
     pub fn update_and_view(&mut self) -> Vec<ViewLine> {
@@ -235,18 +281,13 @@ impl Instance {
             .collect()
     }
 
-    pub fn mask_manual(&mut self) -> &mut Mask {
-        if !matches!(self.mask.last().unwrap().lines, MaskRepr::Manual(_)) {
-            self.mask.push(Mask {
-                lines: MaskRepr::Manual(Vec::new()),
-                viewport: Viewport::new(),
-            });
-        }
-        self.mask.last_mut().unwrap()
+    pub fn bookmarks(&mut self) -> &mut Mask {
+        debug_assert!(self.mask.len() >= 2);
+        &mut self.mask[1]
     }
 
-    pub fn clear_mask(&mut self) {
-        self.mask.truncate(1);
+    pub fn clear_masks(&mut self) {
+        self.mask.truncate(2);
     }
 
     pub fn name(&self) -> &str {
