@@ -12,14 +12,15 @@ use super::InputMode;
 mod colors {
     use ratatui::style::Color;
 
-    pub const BLACK: Color = Color::Black;
+    pub const WHITE: Color = Color::Rgb(255, 255, 255);
+    pub const BLACK: Color = Color::Rgb(0, 0, 0);
     pub const BG: Color = Color::Rgb(25, 25, 25);
 
     pub const TEXT_ACTIVE: Color = Color::Rgb(220, 220, 220);
     pub const TEXT_INACTIVE: Color = Color::Rgb(50, 50, 50);
 
     pub const GUTTER_BG: Color = BG;
-    pub const GUTTER_TEXT: Color = Color::Rgb(30, 30, 30);
+    pub const GUTTER_TEXT: Color = Color::Rgb(40, 40, 40);
 
     pub const TAB_INACTIVE: Color = Color::Rgb(40, 40, 40);
     pub const TAB_ACTIVE: Color = Color::Rgb(80, 80, 80);
@@ -74,6 +75,7 @@ impl<'a> Widget for StatusWidget<'a> {
                 InputMode::Viewer => " VIEWER ",
                 InputMode::Select => " SELECT ",
             })
+            .fg(colors::WHITE)
             .bg(accent_color),
         );
         v.push(Span::raw(" "));
@@ -179,8 +181,7 @@ impl Widget for ViewerWidget<'_> {
         for line in view.into_iter() {
             LineWidget {
                 line: Some(line),
-                gutter_size: gutter_size,
-                first: self.first,
+                gutter_size,
             }
             .render(Rect::new(area.x, y, area.width, 1), buf);
             y += 1;
@@ -189,11 +190,37 @@ impl Widget for ViewerWidget<'_> {
         while y < area.bottom() {
             LineWidget {
                 line: None,
-                gutter_size: gutter_size,
-                first: self.first,
+                gutter_size,
             }
             .render(Rect::new(area.x, y, area.width, 1), buf);
             y += 1;
+        }
+
+        if self.first {
+            const WIDGET_BLOCK: Block = Block::new()
+                .border_style(Style::new().fg(colors::BLACK).bg(colors::GUTTER_BG))
+                .style(Style::new().bg(colors::BG));
+
+            WIDGET_BLOCK.render(area, buf);
+        } else {
+            const SET_LEFT_EDGE: symbols::border::Set = symbols::border::Set {
+                top_left: "",
+                top_right: "",
+                bottom_left: "",
+                bottom_right: "",
+                vertical_left: "▏",
+                vertical_right: "",
+                horizontal_top: "",
+                horizontal_bottom: "",
+            };
+
+            const LINE_WIDGET_BLOCK: Block = Block::new()
+                .border_set(SET_LEFT_EDGE)
+                .border_style(Style::new().fg(colors::BLACK).bg(colors::GUTTER_BG))
+                .borders(Borders::LEFT)
+                .style(Style::new().bg(colors::BG));
+
+            LINE_WIDGET_BLOCK.render(area, buf);
         }
     }
 }
@@ -201,27 +228,10 @@ impl Widget for ViewerWidget<'_> {
 struct LineWidget {
     gutter_size: Option<u16>,
     line: Option<ViewLine>,
-    first: bool,
 }
 
 impl Widget for LineWidget {
     fn render(self, area: Rect, buf: &mut Buffer) {
-        const SET_LEFT_EDGE: symbols::border::Set = symbols::border::Set {
-            top_left: "",
-            top_right: "",
-            bottom_left: "",
-            bottom_right: "",
-            vertical_left: "▏",
-            vertical_right: "",
-            horizontal_top: "",
-            horizontal_bottom: "",
-        };
-
-        const LINE_WIDGET_BLOCK: Block = Block::new()
-            .border_set(SET_LEFT_EDGE)
-            .border_style(Style::new().fg(colors::BLACK))
-            .borders(Borders::LEFT);
-
         const SPECIAL_SIZE: u16 = 3;
 
         let gutter_size = self.gutter_size.unwrap_or(0);
@@ -243,46 +253,28 @@ impl Widget for LineWidget {
                 let ln_str = (line.line_number() + 1).to_string();
                 let ln = Paragraph::new(ln_str)
                     .alignment(Alignment::Right)
-                    .fg(colors::GUTTER_TEXT)
-                    .bg(colors::GUTTER_BG);
-
-                let ln = if !self.first {
-                    ln.block(LINE_WIDGET_BLOCK)
-                } else {
-                    ln
-                };
+                    .fg(colors::GUTTER_TEXT);
 
                 ln.render(gutter_chunk, buf);
 
                 match line.line_type() {
                     LineType::Plain => {}
                     LineType::Selected => {
-                        let ln = Paragraph::new("▶")
-                            .fg(colors::SELECT_ACCENT)
-                            .bg(colors::GUTTER_BG);
+                        let ln = Paragraph::new("▶").fg(colors::SELECT_ACCENT);
                         ln.render(type_chunk, buf);
                     }
                     LineType::Mask => {
-                        let ln = Paragraph::new("✦")
-                            .fg(colors::MASK_ACCENT)
-                            .bg(colors::GUTTER_BG);
+                        let ln = Paragraph::new("✦").fg(colors::MASK_ACCENT);
                         ln.render(type_chunk, buf);
                     }
                 }
 
-                let data = Paragraph::new(line.data().as_str()).bg(colors::BG);
+                let data = Paragraph::new(line.data().as_str());
                 data.render(data_chunk, buf);
             } else {
                 let ln = Paragraph::new("~")
                     .alignment(Alignment::Right)
-                    .fg(colors::GUTTER_TEXT)
-                    .bg(colors::GUTTER_BG);
-
-                let ln = if !self.first {
-                    ln.block(LINE_WIDGET_BLOCK)
-                } else {
-                    ln
-                };
+                    .fg(colors::GUTTER_TEXT);
 
                 ln.render(gutter_chunk, buf);
             }
@@ -291,27 +283,16 @@ impl Widget for LineWidget {
                 match line.line_type() {
                     LineType::Plain => {}
                     LineType::Selected => {
-                        let ln = Paragraph::new("▶")
-                            .fg(colors::GUTTER_TEXT)
-                            .bg(colors::GUTTER_BG);
+                        let ln = Paragraph::new("▶").fg(colors::GUTTER_TEXT);
                         ln.render(type_chunk, buf);
                     }
                     LineType::Mask => {
-                        let ln = Paragraph::new("◈")
-                            .fg(colors::GUTTER_TEXT)
-                            .bg(colors::GUTTER_BG);
+                        let ln = Paragraph::new("◈").fg(colors::GUTTER_TEXT);
                         ln.render(type_chunk, buf);
                     }
                 }
 
-                let data = Paragraph::new(line.data().as_str())
-                    .bg(colors::BG);
-
-                let data = if !self.first {
-                    data.block(LINE_WIDGET_BLOCK)
-                } else {
-                    data
-                };
+                let data = Paragraph::new(line.data().as_str());
 
                 data.render(area, buf);
             }
