@@ -2,7 +2,7 @@ use crate::components::{
     command::{CommandApp, Cursor, SelectionOrigin},
     mux::{MultiplexerApp, MultiplexerMode},
     status::StatusApp,
-    viewer::{Instance, LineType, ViewLine},
+    viewer::{Instance, ViewLine},
 };
 use bvr_core::index::inflight::InflightIndexProgress;
 use ratatui::{prelude::*, widgets::*};
@@ -257,19 +257,12 @@ impl Widget for LineWidget {
 
                 ln.render(gutter_chunk, buf);
 
-                match line.line_type() {
-                    LineType::Plain => {}
-                    LineType::Selected => {
-                        let ln = Paragraph::new("▶").fg(colors::SELECT_ACCENT);
-                        ln.render(type_chunk, buf);
-                    }
-                    LineType::Mask => {
-                        let ln = Paragraph::new("✦").fg(colors::MASK_ACCENT);
-                        ln.render(type_chunk, buf);
-                    }
+                if line.selected() {
+                    let ln = Paragraph::new("▶").fg(colors::SELECT_ACCENT);
+                    ln.render(type_chunk, buf);
                 }
 
-                let data = Paragraph::new(line.data().as_str());
+                let data = Paragraph::new(line.data().as_str()).fg(line.color());
                 data.render(data_chunk, buf);
             } else {
                 let ln = Paragraph::new("~")
@@ -280,16 +273,9 @@ impl Widget for LineWidget {
             }
         } else {
             if let Some(line) = self.line {
-                match line.line_type() {
-                    LineType::Plain => {}
-                    LineType::Selected => {
-                        let ln = Paragraph::new("▶").fg(colors::GUTTER_TEXT);
-                        ln.render(type_chunk, buf);
-                    }
-                    LineType::Mask => {
-                        let ln = Paragraph::new("◈").fg(colors::GUTTER_TEXT);
-                        ln.render(type_chunk, buf);
-                    }
+                if line.selected() {
+                    let ln = Paragraph::new("▶").fg(colors::SELECT_ACCENT);
+                    ln.render(type_chunk, buf);
                 }
 
                 let data = Paragraph::new(line.data().as_str());
@@ -331,10 +317,7 @@ impl MultiplexerWidget<'_> {
 
     fn split_horizontal(area: Rect, len: usize) -> std::rc::Rc<[Rect]> {
         let constraints = vec![Constraint::Ratio(1, len as u32); len];
-        Layout::new()
-            .direction(Direction::Horizontal)
-            .constraints(constraints)
-            .split(area)
+        Layout::new(Direction::Horizontal, constraints).split(area)
     }
 }
 

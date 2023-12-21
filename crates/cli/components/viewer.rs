@@ -1,4 +1,5 @@
 use bvr_core::{search::BufferSearch, SegStr};
+use ratatui::style::Color;
 use regex::bytes::Regex;
 use std::ops::Range;
 
@@ -84,83 +85,79 @@ impl Viewport {
 }
 
 enum MaskRepr {
-    None,
-    Manual(ManualMask),
+    All,
+    Bookmarks(Bookmarks),
     Search(SearchResults),
 }
 
 pub struct Mask {
+    name: String,
     lines: MaskRepr,
-    viewport: Viewport,
-    // _settings: HashMap<usize, ()>,
+    enabled: bool,
+    color: Color,
 }
 
 impl Mask {
     pub fn none() -> Self {
         Self {
-            lines: MaskRepr::None,
-            viewport: Viewport::new(),
-            // _settings: HashMap::new(),
+            name: "All Lines".to_string(),
+            lines: MaskRepr::All,
+            enabled: true,
+            color: Color::White,
         }
     }
 
     fn bookmark() -> Self {
         Self {
-            lines: MaskRepr::Manual(ManualMask::new()),
-            viewport: Viewport::new(),
+            name: "Bookmarks".to_string(),
+            enabled: true,
+            color: Color::Blue,
+            lines: MaskRepr::Bookmarks(Bookmarks::new()),
         }
     }
 
-    pub fn toggle(&mut self, line_number: usize) {
+    fn bookmarks_internal_mut(&mut self) -> &mut Bookmarks {
         match &mut self.lines {
-            MaskRepr::None => (),
-            MaskRepr::Manual(lines) => {
-                lines.toggle(line_number);
-                self.viewport.max_height = lines.len();
-            }
-            MaskRepr::Search(_) => {}
+            MaskRepr::Bookmarks(bookmarks) => bookmarks,
+            _ => unreachable!(),
         }
     }
 
-    pub fn len(&self) -> usize {
-        match &self.lines {
-            MaskRepr::None => self.viewport.max_height,
-            MaskRepr::Manual(lines) => lines.len(),
-            MaskRepr::Search(lines) => lines.len(),
-        }
-    }
-
-    pub fn current_selected_file_line(&self) -> Option<usize> {
-        self.translate_to_file_line(self.viewport.current())
-    }
+    // pub fn len(&self) -> usize {
+    //     match &self.lines {
+    //         MaskRepr::All => unreachable!(),
+    //         MaskRepr::Bookmarks(lines) => lines.len(),
+    //         MaskRepr::Search(lines) => lines.len(),
+    //     }
+    // }
 
     pub fn translate_to_file_line(&self, line_number: usize) -> Option<usize> {
         match &self.lines {
-            MaskRepr::None => Some(line_number),
-            MaskRepr::Manual(lines) => lines.get(line_number),
+            MaskRepr::All => Some(line_number),
+            MaskRepr::Bookmarks(lines) => lines.get(line_number),
             MaskRepr::Search(lines) => lines.get(line_number),
         }
     }
 
     pub fn has_line(&self, line_number: usize) -> bool {
         match &self.lines {
-            MaskRepr::None => true,
-            MaskRepr::Manual(lines) => lines.has_line(line_number),
+            MaskRepr::All => true,
+            MaskRepr::Bookmarks(lines) => lines.has_line(line_number),
             MaskRepr::Search(lines) => lines.has_line(line_number),
         }
     }
 }
 
-struct ManualMask {
+pub struct Bookmarks {
     lines: Vec<usize>,
 }
 
-impl ManualMask {
-    fn new() -> ManualMask {
-        ManualMask { lines: Vec::new() }
+impl Bookmarks {
+    fn new() -> Bookmarks {
+        Bookmarks { lines: Vec::new() }
     }
 
-    fn toggle(&mut self, line_number: usize) {
+    pub fn toggle(&mut self, line_number: usize) {
         match self.lines.binary_search(&line_number) {
             Ok(idx) => {
                 self.lines.remove(idx);
@@ -172,7 +169,7 @@ impl ManualMask {
     }
 }
 
-impl BufferSearch for ManualMask {
+impl BufferSearch for Bookmarks {
     fn get(&self, index: usize) -> Option<usize> {
         self.lines.get(index).copied()
     }
@@ -197,14 +194,16 @@ impl BufferSearch for ManualMask {
 pub struct Instance {
     name: String,
     file: Buffer,
-    mask: Vec<Mask>,
+    viewport: Viewport,
+    masks: Vec<Mask>,
     pub view_index: usize,
 }
 
 pub struct ViewLine {
     line_number: usize,
     data: SegStr,
-    line_type: LineType,
+    color: Color,
+    selected: bool,
 }
 
 impl ViewLine {
@@ -216,16 +215,13 @@ impl ViewLine {
         &self.data
     }
 
-    pub(crate) fn line_type(&self) -> LineType {
-        self.line_type
+    pub(crate) fn color(&self) -> Color {
+        self.color
     }
-}
 
-#[derive(Clone, Copy, PartialEq, Eq)]
-pub enum LineType {
-    Plain,
-    Selected,
-    Mask,
+    pub(crate) fn selected(&self) -> bool {
+        self.selected
+    }
 }
 
 impl Instance {
@@ -233,7 +229,8 @@ impl Instance {
         Self {
             name,
             file,
-            mask: vec![Mask::none(), Mask::bookmark()],
+            viewport: Viewport::new(),
+            masks: vec![Mask::none(), Mask::bookmark()],
             view_index: 0,
         }
     }
@@ -243,61 +240,150 @@ impl Instance {
     }
 
     pub fn viewport(&self) -> &Viewport {
-        &self.mask[self.view_index].viewport
+        &self.viewport
     }
 
     pub fn viewport_mut(&mut self) -> &mut Viewport {
-        &mut self.mask[self.view_index].viewport
-    }
-
-    pub fn current_mask(&self) -> &Mask {
-        &self.mask[self.view_index]
+        &mut self.viewport
     }
 
     pub fn update_and_view(&mut self) -> Vec<ViewLine> {
         self.file.try_finalize();
-        self.mask[0].viewport.max_height = self.file.line_count();
+        self.viewport.max_height = self.file.line_count();
 
-        let mask = &self.mask[self.view_index];
-        let mask_after = self.mask.get(self.view_index + 1);
+        if self.masks[0].enabled {
+            let masks = self
+                .masks
+                .iter()
+                .filter(|mask| mask.enabled)
+                .collect::<Vec<_>>();
 
-        mask.viewport
-            .line_range()
-            .map(|idx| (idx, mask.translate_to_file_line(idx).unwrap()))
-            .map(|(idx, line_number)| ViewLine {
-                line_number,
-                data: self.file.get_line(line_number),
-                line_type: if idx == mask.viewport.current {
-                    LineType::Selected
-                } else if mask_after
-                    .map(|mask| mask.has_line(line_number))
-                    .unwrap_or(false)
-                {
-                    LineType::Mask
-                } else {
-                    LineType::Plain
-                },
-            })
-            .collect()
+            let mut lines = Vec::with_capacity(self.viewport.line_range().len());
+
+            for line_number in self.viewport.line_range() {
+                let data = self.file.get_line(line_number);
+
+                let color = masks
+                    .iter()
+                    .rev()
+                    .find(|mask| mask.has_line(line_number))
+                    .map(|mask| mask.color)
+                    .unwrap_or(Color::White);
+
+                lines.push(ViewLine {
+                    line_number,
+                    data,
+                    color,
+                    selected: line_number == self.viewport.current,
+                });
+            }
+
+            lines
+        } else {
+            let mut masks = self
+                .masks
+                .iter()
+                .filter(|mask| mask.enabled)
+                .map(|v| (0, v))
+                .collect::<Vec<_>>();
+
+            let mut lines = Vec::with_capacity(self.viewport.line_range().len());
+
+            let Range { mut start, end } = self.viewport.line_range();
+            // skip start lines
+            let mut skipped = 0;
+            while skipped < start {
+                let Some((offset, _)) = masks
+                    .iter_mut()
+                    .filter_map(|(offset, mask)| {
+                        mask.translate_to_file_line(*offset).map(|ln| (offset, ln))
+                    })
+                    .min_by_key(|&(_, ln)| ln)
+                else {
+                    break;
+                };
+
+                *offset += 1;
+                skipped += 1;
+            }
+
+            while start < end {
+                let Some((offset, line_number)) = masks
+                    .iter_mut()
+                    .filter_map(|(offset, mask)| {
+                        mask.translate_to_file_line(*offset).map(|ln| (offset, ln))
+                    })
+                    .min_by_key(|&(_, ln)| ln)
+                else {
+                    break;
+                };
+
+                *offset += 1;
+
+                let color = masks
+                    .iter()
+                    .rev()
+                    .find(|(_, mask)| mask.has_line(line_number))
+                    .map(|(_, mask)| mask.color)
+                    .unwrap_or(Color::White);
+
+                start += 1;
+
+                let data = self.file.get_line(line_number);
+
+                lines.push(ViewLine {
+                    line_number,
+                    data,
+                    color,
+                    selected: line_number == self.viewport.current,
+                });
+            }
+
+            lines
+        }
     }
 
-    pub fn bookmarks(&mut self) -> &mut Mask {
-        debug_assert!(self.mask.len() >= 2);
-        &mut self.mask[1]
+    pub fn current_selected_file_line(&self) -> usize {
+        if self.masks[0].enabled {
+            self.viewport.current()
+        } else {
+            // let vectors = self
+            //     .masks
+            //     .iter()
+            //     .filter(|mask| mask.enabled)
+            //     .map(|v| (0, v))
+            //     .collect::<Vec<_>>();
+
+            // vec![]
+            todo!()
+        }
+
+        // self.translate_to_file_line(self.viewport.current())
+    }
+
+    pub fn bookmarks(&mut self) -> &mut Bookmarks {
+        debug_assert!(self.masks.len() >= 2);
+        self.masks[1].bookmarks_internal_mut()
     }
 
     pub fn clear_masks(&mut self) {
-        self.mask.truncate(2);
+        self.masks.truncate(2);
     }
 
     pub fn name(&self) -> &str {
         &self.name
     }
 
+    pub fn toggle_mask(&mut self, index: usize) {
+        self.masks[index].enabled = !self.masks[index].enabled;
+    }
+
     pub fn mask_search(&mut self, regex: Regex) {
-        self.mask.push(Mask {
+        self.masks.push(Mask {
+            name: regex.to_string(),
+            enabled: true,
             lines: MaskRepr::Search(SearchResults::search(&self.file, regex).unwrap()),
-            viewport: Viewport::new(),
+            color: Color::Red,
         });
     }
 }

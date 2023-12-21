@@ -21,11 +21,11 @@ use crossterm::{
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
 use ratatui::prelude::*;
-use regex::bytes::Regex;
+use regex::bytes::{Regex, RegexBuilder};
 use std::{path::Path, time::Duration};
 
 use self::{
-    actions::{Action, CommandAction, ViewerAction, Delta},
+    actions::{Action, CommandAction, Delta, ViewerAction},
     keybinding::Keybinding,
     widgets::{CommandWidget, MultiplexerWidget},
 };
@@ -146,7 +146,7 @@ impl App {
                     }
                     ViewerAction::ToggleLine => {
                         if let Some(viewer) = self.mux.active_viewer_mut() {
-                            let ln = viewer.current_mask().current_selected_file_line().unwrap();
+                            let ln = viewer.current_selected_file_line();
                             viewer.bookmarks().toggle(ln);
                         }
                     }
@@ -195,16 +195,13 @@ impl App {
                             if let Some(viewer) = self.mux.active_viewer_mut() {
                                 viewer.clear_masks()
                             }
-                        } else if command == "testmask" {
+                        } else if command == "togglemask" {
                             if let Some(viewer) = self.mux.active_viewer_mut() {
-                                if viewer.view_index > 0 {
-                                    viewer.view_index = 0;
-                                } else {
-                                    viewer.view_index = 1;
-                                }
+                                viewer.toggle_mask(0);
                             }
                         } else if let Some(pat) = command.strip_prefix("find ") {
-                            let regex = match Regex::new(pat) {
+                            let regex = match RegexBuilder::new(pat).case_insensitive(true).build()
+                            {
                                 Ok(r) => r,
                                 Err(err) => {
                                     self.status.submit_message(

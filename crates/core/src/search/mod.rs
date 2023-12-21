@@ -44,6 +44,9 @@ impl IncompleteSearch {
     }
 
     pub fn add_line(&mut self, line_number: usize) {
+        if self.inner.lines.last() == Some(&line_number) {
+            return;
+        }
         self.inner.lines.push(line_number)
     }
 

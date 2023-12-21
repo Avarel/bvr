@@ -375,7 +375,8 @@ where
             let line_end = self
                 .index
                 .line_of_data(curr_seg_data_end)
-                .unwrap_or_else(|| self.index.line_count());
+                .unwrap_or_else(|| self.index.line_count())
+                .min(self.line_range.end);
             let line_end_data_start = self.index.data_of_line(line_end).unwrap();
 
             // this line should not cross multiple segments, else we would have caught in the first case
