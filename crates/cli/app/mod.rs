@@ -6,7 +6,7 @@ use crate::components::{
     command::{CommandApp, CursorMovement},
     mux::MultiplexerApp,
     status::StatusApp,
-    viewer::Instance,
+    viewer::{Instance, Viewport},
 };
 use anyhow::Result;
 use bvr_core::{
@@ -38,6 +38,7 @@ pub enum InputMode {
     Command,
     Viewer,
     Select,
+    Mask,
 }
 
 pub struct App {
@@ -151,6 +152,25 @@ impl App {
                         }
                     }
                 },
+                Action::Mask(action) => match action {
+                    actions::MaskAction::Move { direction, delta } => {
+                        if let Some(viewer) = self.mux.active_viewer_mut() {
+                            let viewport = &mut viewer.mask_viewport;
+                            let delta = match delta {
+                                Delta::Number(n) => usize::from(n),
+                                Delta::Page => viewport.height(),
+                                Delta::HalfPage => viewport.height().div_ceil(2),
+                                Delta::Boundary => usize::MAX,
+                            };
+                            viewport.move_select(direction, delta)
+                        }
+                    }
+                    actions::MaskAction::Toggle => {
+                        if let Some(viewer) = self.mux.active_viewer_mut() {
+                            viewer.current_mask_mut().toggle();
+                        }
+                    }
+                },
                 Action::Command(action) => match action {
                     CommandAction::Move {
                         direction,
@@ -194,10 +214,6 @@ impl App {
                         } else if command == "clearmask" {
                             if let Some(viewer) = self.mux.active_viewer_mut() {
                                 viewer.clear_masks()
-                            }
-                        } else if command == "togglemask" {
-                            if let Some(viewer) = self.mux.active_viewer_mut() {
-                                viewer.toggle_mask(0);
                             }
                         } else if let Some(pat) = command.strip_prefix("find ") {
                             let regex = match RegexBuilder::new(pat).case_insensitive(true).build()

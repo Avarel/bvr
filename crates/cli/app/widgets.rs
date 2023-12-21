@@ -2,7 +2,7 @@ use crate::components::{
     command::{CommandApp, Cursor, SelectionOrigin},
     mux::{MultiplexerApp, MultiplexerMode},
     status::StatusApp,
-    viewer::{Instance, ViewLine},
+    viewer::{Instance, ViewLine, ViewMask},
 };
 use bvr_core::index::inflight::InflightIndexProgress;
 use ratatui::{prelude::*, widgets::*};
@@ -65,6 +65,7 @@ impl<'a> Widget for StatusWidget<'a> {
             InputMode::Command => colors::COMMAND_ACCENT,
             InputMode::Viewer => colors::NORMAL_ACCENT,
             InputMode::Select => colors::SELECT_ACCENT,
+            InputMode::Mask => colors::MASK_ACCENT,
         };
 
         let mut v = Vec::new();
@@ -74,6 +75,7 @@ impl<'a> Widget for StatusWidget<'a> {
                 InputMode::Command => " COMMAND ",
                 InputMode::Viewer => " VIEWER ",
                 InputMode::Select => " SELECT ",
+                InputMode::Mask => " MASK ",
             })
             .fg(colors::WHITE)
             .bg(accent_color),
@@ -156,6 +158,31 @@ impl Widget for CommandWidget<'_> {
     }
 }
 
+pub struct MaskViewerWidget<'a> {
+    viewer: &'a mut Instance,
+    first: bool,
+}
+
+impl Widget for MaskViewerWidget<'_> {
+    fn render(self, area: Rect, buf: &mut Buffer) {
+        let mut area = area;
+
+        const WIDGET_BLOCK: Block = Block::new().style(Style::new().bg(colors::STATUS_BAR));
+        WIDGET_BLOCK.render(area, buf);
+
+        if !self.first {
+            area.x += 1;
+            area.width -= 1;
+        }
+        let mut y = area.y;
+        let masks = self.viewer.update_and_mask(area.height as usize);
+        for mask in masks {
+            MaskLineWidget { inner: &mask }.render(Rect::new(area.x, y, area.width, 1), buf);
+            y += 1;
+        }
+    }
+}
+
 pub struct ViewerWidget<'a> {
     viewer: &'a mut Instance,
     gutter: bool,
@@ -164,22 +191,24 @@ pub struct ViewerWidget<'a> {
 
 impl Widget for ViewerWidget<'_> {
     fn render(self, area: Rect, buf: &mut Buffer) {
-        self.viewer
-            .viewport_mut()
-            .fit_view(usize::from(area.height));
-
-        let view = self.viewer.update_and_view();
+        let view = self.viewer.update_and_view(area.height as usize);
 
         let gutter_size = self.gutter.then(|| {
             view.last()
-                .map(|ln| ((ln.line_number() + 1).ilog10() + 1) as u16)
+                .map(|ln| ((ln.line_number + 1).ilog10() + 1) as u16)
                 .unwrap_or_default()
                 .max(4)
         });
 
+        let mut area = area;
+        if !self.first {
+            area.x += 1;
+            area.width -= 1;
+        }
+
         let mut y = area.y;
         for line in view.into_iter() {
-            LineWidget {
+            ViewerLineWidget {
                 line: Some(line),
                 gutter_size,
             }
@@ -188,15 +217,21 @@ impl Widget for ViewerWidget<'_> {
         }
 
         while y < area.bottom() {
-            LineWidget {
+            ViewerLineWidget {
                 line: None,
                 gutter_size,
             }
             .render(Rect::new(area.x, y, area.width, 1), buf);
             y += 1;
         }
+    }
+}
 
-        if self.first {
+struct EdgeBg(bool);
+
+impl Widget for EdgeBg {
+    fn render(self, area: Rect, buf: &mut Buffer) {
+        if self.0 {
             const WIDGET_BLOCK: Block = Block::new()
                 .border_style(Style::new().fg(colors::BLACK).bg(colors::GUTTER_BG))
                 .style(Style::new().bg(colors::BG));
@@ -225,44 +260,60 @@ impl Widget for ViewerWidget<'_> {
     }
 }
 
-struct LineWidget {
+struct MaskLineWidget<'a> {
+    inner: &'a ViewMask<'a>,
+}
+
+impl Widget for MaskLineWidget<'_> {
+    fn render(self, area: Rect, buf: &mut Buffer) {
+        Paragraph::new(Line::from(vec![
+            Span::from(if self.inner.selected { "▶" } else { " " }),
+            Span::from(" "),
+            Span::from(if self.inner.enabled { "●" } else { "◯" }),
+            Span::from(" "),
+            Span::from(self.inner.name),
+        ]))
+        .fg(self.inner.color)
+        .render(area, buf);
+    }
+}
+
+struct ViewerLineWidget {
     gutter_size: Option<u16>,
     line: Option<ViewLine>,
 }
 
-impl Widget for LineWidget {
+impl Widget for ViewerLineWidget {
     fn render(self, area: Rect, buf: &mut Buffer) {
         const SPECIAL_SIZE: u16 = 3;
 
         let gutter_size = self.gutter_size.unwrap_or(0);
         let mut gutter_chunk = area;
-        gutter_chunk.width = gutter_size + 1;
+        gutter_chunk.width = gutter_size;
 
         let mut type_chunk = area;
-        type_chunk.x += gutter_size + 2;
+        type_chunk.x += gutter_size + 1;
         type_chunk.width = 1;
 
         let mut data_chunk = area;
-        data_chunk.x += gutter_size + 1 + SPECIAL_SIZE;
-        data_chunk.width = data_chunk
-            .width
-            .saturating_sub(gutter_size + SPECIAL_SIZE + 1);
+        data_chunk.x += gutter_size + SPECIAL_SIZE;
+        data_chunk.width = data_chunk.width.saturating_sub(gutter_size + SPECIAL_SIZE);
 
         if self.gutter_size.is_some() {
             if let Some(line) = self.line {
-                let ln_str = (line.line_number() + 1).to_string();
+                let ln_str = (line.line_number + 1).to_string();
                 let ln = Paragraph::new(ln_str)
                     .alignment(Alignment::Right)
                     .fg(colors::GUTTER_TEXT);
 
                 ln.render(gutter_chunk, buf);
 
-                if line.selected() {
+                if line.selected {
                     let ln = Paragraph::new("▶").fg(colors::SELECT_ACCENT);
                     ln.render(type_chunk, buf);
                 }
 
-                let data = Paragraph::new(line.data().as_str()).fg(line.color());
+                let data = Paragraph::new(line.data.as_str()).fg(line.color);
                 data.render(data_chunk, buf);
             } else {
                 let ln = Paragraph::new("~")
@@ -273,12 +324,12 @@ impl Widget for LineWidget {
             }
         } else {
             if let Some(line) = self.line {
-                if line.selected() {
+                if line.selected {
                     let ln = Paragraph::new("▶").fg(colors::SELECT_ACCENT);
                     ln.render(type_chunk, buf);
                 }
 
-                let data = Paragraph::new(line.data().as_str());
+                let data = Paragraph::new(line.data.as_str());
 
                 data.render(area, buf);
             }
@@ -318,6 +369,19 @@ impl MultiplexerWidget<'_> {
     fn split_horizontal(area: Rect, len: usize) -> std::rc::Rc<[Rect]> {
         let constraints = vec![Constraint::Ratio(1, len as u32); len];
         Layout::new(Direction::Horizontal, constraints).split(area)
+    }
+
+    fn split_mask(area: Rect) -> [Rect; 2] {
+        const MASK_HEIGHT: u16 = 10;
+
+        let mut view_chunk = area;
+        view_chunk.height = view_chunk.height.saturating_sub(MASK_HEIGHT);
+
+        let mut mask_chunk = area;
+        mask_chunk.y = area.y + view_chunk.height;
+        mask_chunk.height = MASK_HEIGHT.min(area.height);
+
+        [view_chunk, mask_chunk]
     }
 }
 
@@ -369,12 +433,26 @@ impl Widget for MultiplexerWidget<'_> {
                             active: active == i,
                         }
                         .render(vsplit[0], buf);
+
+                        let mut viewer_chunk = vsplit[1];
+
+                        if self.mode == InputMode::Mask {
+                            let msplit = Self::split_mask(vsplit[1]);
+                            MaskViewerWidget {
+                                viewer,
+                                first: i == 0,
+                            }
+                            .render(msplit[1], buf);
+                            viewer_chunk = msplit[0];
+                        }
+
                         ViewerWidget {
                             viewer,
                             gutter: true,
                             first: i == 0,
                         }
-                        .render(vsplit[1], buf);
+                        .render(viewer_chunk, buf);
+                        EdgeBg(i == 0).render(viewer_chunk, buf)
                     }
                 }
                 MultiplexerMode::Tabs => {
@@ -392,12 +470,24 @@ impl Widget for MultiplexerWidget<'_> {
                     }
 
                     let viewer = self.mux.active_viewer_mut().unwrap();
+                    let mut viewer_chunk = vsplit[1];
+
+                    if self.mode == InputMode::Mask {
+                        let msplit = Self::split_mask(vsplit[1]);
+                        MaskViewerWidget {
+                            viewer,
+                            first: true,
+                        }
+                        .render(msplit[1], buf);
+                        viewer_chunk = msplit[0];
+                    }
                     ViewerWidget {
                         viewer,
                         gutter: true,
                         first: true,
                     }
-                    .render(vsplit[1], buf);
+                    .render(viewer_chunk, buf);
+                    EdgeBg(true).render(viewer_chunk, buf)
                 }
             }
         }

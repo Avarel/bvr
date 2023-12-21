@@ -16,7 +16,7 @@ pub struct Viewport {
 }
 
 impl Viewport {
-    const fn new() -> Self {
+    pub const fn new() -> Self {
         Self {
             max_height: 0,
             top: 0,
@@ -33,7 +33,7 @@ impl Viewport {
         self.top + self.height
     }
 
-    pub fn fit_view(&mut self, height: usize) {
+    fn fit_view(&mut self, height: usize) {
         self.height = height;
     }
 
@@ -123,6 +123,10 @@ impl Mask {
         }
     }
 
+    pub fn toggle(&mut self) {
+        self.enabled = !self.enabled;
+    }
+
     // pub fn len(&self) -> usize {
     //     match &self.lines {
     //         MaskRepr::All => unreachable!(),
@@ -195,33 +199,22 @@ pub struct Instance {
     name: String,
     file: Buffer,
     viewport: Viewport,
-    masks: Vec<Mask>,
-    pub view_index: usize,
+    pub masks: Vec<Mask>,
+    pub mask_viewport: Viewport,
+}
+
+pub struct ViewMask<'a> {
+    pub name: &'a str,
+    pub color: Color,
+    pub enabled: bool,
+    pub selected: bool,
 }
 
 pub struct ViewLine {
-    line_number: usize,
-    data: SegStr,
-    color: Color,
-    selected: bool,
-}
-
-impl ViewLine {
-    pub fn line_number(&self) -> usize {
-        self.line_number
-    }
-
-    pub fn data(&self) -> &SegStr {
-        &self.data
-    }
-
-    pub(crate) fn color(&self) -> Color {
-        self.color
-    }
-
-    pub(crate) fn selected(&self) -> bool {
-        self.selected
-    }
+    pub line_number: usize,
+    pub data: SegStr,
+    pub color: Color,
+    pub selected: bool,
 }
 
 impl Instance {
@@ -231,7 +224,7 @@ impl Instance {
             file,
             viewport: Viewport::new(),
             masks: vec![Mask::none(), Mask::bookmark()],
-            view_index: 0,
+            mask_viewport: Viewport::new(),
         }
     }
 
@@ -247,10 +240,32 @@ impl Instance {
         &mut self.viewport
     }
 
-    pub fn update_and_view(&mut self) -> Vec<ViewLine> {
+    pub fn update_and_mask(&mut self, viewport_height: usize) -> Vec<ViewMask> {
+        let viewport = &mut self.mask_viewport;
+        viewport.max_height = self.masks.len();
+        viewport.height = viewport_height;
+
+        let mut masks = Vec::with_capacity(viewport.line_range().len());
+
+        for index in viewport.line_range() {
+            let mask = &self.masks[index];
+            masks.push(ViewMask {
+                name: &mask.name,
+                color: mask.color,
+                enabled: mask.enabled,
+                selected: index == viewport.current(),
+            });
+        }
+
+        masks
+    }
+
+    pub fn update_and_view(&mut self, viewport_height: usize) -> Vec<ViewLine> {
         self.file.try_finalize();
         self.viewport.max_height = self.file.line_count();
+        self.viewport.height = viewport_height;
 
+        let mut lines = Vec::with_capacity(self.viewport.line_range().len());
         if self.masks[0].enabled {
             let masks = self
                 .masks
@@ -258,7 +273,6 @@ impl Instance {
                 .filter(|mask| mask.enabled)
                 .collect::<Vec<_>>();
 
-            let mut lines = Vec::with_capacity(self.viewport.line_range().len());
 
             for line_number in self.viewport.line_range() {
                 let data = self.file.get_line(line_number);
@@ -286,8 +300,6 @@ impl Instance {
                 .filter(|mask| mask.enabled)
                 .map(|v| (0, v))
                 .collect::<Vec<_>>();
-
-            let mut lines = Vec::with_capacity(self.viewport.line_range().len());
 
             let Range { mut start, end } = self.viewport.line_range();
             // skip start lines
@@ -374,16 +386,32 @@ impl Instance {
         &self.name
     }
 
-    pub fn toggle_mask(&mut self, index: usize) {
-        self.masks[index].enabled = !self.masks[index].enabled;
+    pub fn current_mask_mut(&mut self) -> &mut Mask {
+        &mut self.masks[self.mask_viewport.current()]
     }
 
     pub fn mask_search(&mut self, regex: Regex) {
+        const SEARCH_COLOR_LIST: &'static [Color] = &[
+            Color::Red,
+            Color::Green,
+            Color::Yellow,
+            Color::Magenta,
+            Color::Cyan,
+            Color::Indexed(21),
+            Color::Indexed(43),
+            Color::Indexed(140),
+            Color::Indexed(214),
+            Color::Indexed(91),
+        ];
+
         self.masks.push(Mask {
             name: regex.to_string(),
             enabled: true,
             lines: MaskRepr::Search(SearchResults::search(&self.file, regex).unwrap()),
-            color: Color::Red,
+            color: SEARCH_COLOR_LIST
+                .get(self.masks.len() - 2)
+                .copied()
+                .unwrap_or(Color::White),
         });
     }
 }

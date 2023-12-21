@@ -7,6 +7,7 @@ pub enum Action {
     SwitchMode(InputMode),
     Command(CommandAction),
     Viewer(ViewerAction),
+    Mask(MaskAction),
 }
 
 pub enum Delta {
@@ -27,6 +28,14 @@ pub enum ViewerAction {
     },
     ToggleLine,
     SwitchActive(HDirection),
+}
+
+pub enum MaskAction {
+    Move {
+        direction: VDirection,
+        delta: Delta
+    },
+    Toggle,
 }
 
 pub enum CommandAction {

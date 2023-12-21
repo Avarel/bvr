@@ -3,7 +3,7 @@ use crossterm::event::{Event, KeyCode, KeyModifiers, MouseEventKind, KeyEventKin
 use crate::direction::{HDirection, VDirection};
 
 use super::{
-    actions::{Action, CommandAction, Jump, ViewerAction, Delta},
+    actions::{Action, CommandAction, Jump, ViewerAction, Delta, MaskAction},
     InputMode,
 };
 
@@ -40,6 +40,7 @@ impl Keybinding {
                 Event::Key(key) => match key.code {
                     KeyCode::Char(':') => Some(Action::SwitchMode(InputMode::Command)),
                     KeyCode::Char('i') => Some(Action::SwitchMode(InputMode::Select)),
+                    KeyCode::Tab => Some(Action::SwitchMode(InputMode::Mask)),
                     KeyCode::Esc => Some(Action::Exit),
                     KeyCode::Up | KeyCode::Down => Some(Action::Viewer(ViewerAction::Pan {
                         direction: VDirection::up_if(key.code == KeyCode::Up),
@@ -64,7 +65,36 @@ impl Keybinding {
                 },
                 _ => None,
             },
-
+            InputMode::Mask => match event {
+                Event::Key(key) => match key.code {
+                    KeyCode::Char(':') => Some(Action::SwitchMode(InputMode::Command)),
+                    KeyCode::Esc | KeyCode::Tab => Some(Action::SwitchMode(InputMode::Viewer)),
+                    KeyCode::Up | KeyCode::Down => Some(Action::Mask(MaskAction::Move {
+                        direction: VDirection::up_if(key.code == KeyCode::Up),
+                        delta: Delta::Number(1),
+                    })),
+                    KeyCode::Home | KeyCode::End => Some(Action::Mask(MaskAction::Move {
+                        direction: VDirection::up_if(key.code == KeyCode::Home),
+                        delta: Delta::Boundary,
+                    })),
+                    KeyCode::PageUp | KeyCode::PageDown => Some(Action::Mask(MaskAction::Move {
+                        direction: VDirection::up_if(key.code == KeyCode::PageUp),
+                        delta: Delta::Page,
+                    })),
+                    KeyCode::Char(c @ ('u' | 'd')) => Some(Action::Mask(MaskAction::Move {
+                        direction: VDirection::up_if(c == 'u'),
+                        delta: Delta::HalfPage,
+                    })),
+                    KeyCode::Left | KeyCode::Right => Some(Action::Viewer(ViewerAction::SwitchActive(
+                        HDirection::left_if(key.code == KeyCode::Left)),
+                    )),
+                    KeyCode::Char(' ') | KeyCode::Enter => {
+                        Some(Action::Mask(MaskAction::Toggle))
+                    }
+                    _ => None,
+                },
+                _ => None,
+            },
             InputMode::Select => match event {
                 Event::Mouse(mouse) => match mouse.kind {
                     MouseEventKind::ScrollUp | MouseEventKind::ScrollDown => {
