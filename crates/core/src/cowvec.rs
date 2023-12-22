@@ -224,7 +224,7 @@ impl<T: Copy> CowVec<T> {
         } else {
             // This can't overflow because we ensure self.cap <= isize::MAX.
             let new_cap = if from_snapshot {
-                cap.next_power_of_two()
+                (cap + 1).next_power_of_two()
             } else {
                 2 * cap
             };
