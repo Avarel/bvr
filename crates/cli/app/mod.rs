@@ -168,7 +168,7 @@ impl App {
                     actions::MaskAction::Toggle => {
                         if let Some(viewer) = self.mux.active_viewer_mut() {
                             viewer.masker.current_mask_mut().toggle();
-                            viewer.masker.recompute_composite_on_next_use();
+                            viewer.masker.compute_composite();
                         }
                     }
                 },
@@ -231,6 +231,7 @@ impl App {
 
                             if let Some(viewer) = self.mux.active_viewer_mut() {
                                 viewer.mask_search(regex);
+                                viewer.masker.compute_composite();
                             }
                         } else {
                             self.status.submit_message(

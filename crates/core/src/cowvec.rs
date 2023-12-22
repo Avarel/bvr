@@ -1,4 +1,4 @@
-//! Contains the [`CowVec`], which is an append-only vector for [Copy]-elements
+//! Contains the [`CowVec`], which is a vector for [Copy]-elements
 //! based on the standard library's [Vec].
 
 use std::{

@@ -132,6 +132,8 @@ impl Instance {
     pub fn update_and_view(&mut self, viewport_height: usize) -> Vec<LineData> {
         self.file.try_finalize();
         self.masker.masks.try_finalize();
+        self.masker.composite.try_finalize();
+
         self.viewport.height = viewport_height;
 
         let mut lines = Vec::with_capacity(self.viewport.line_range().len());
@@ -139,10 +141,6 @@ impl Instance {
             self.viewport.max_height = self.file.line_count();
             self.viewport.fixup();
         } else {
-            if self.masker.composite.is_empty() {
-                self.masker.compute_composite_mask();
-            }
-
             self.viewport.max_height = self.masker.composite.len();
             self.viewport.fixup();
         }
@@ -153,7 +151,7 @@ impl Instance {
             let line_number = if self.masker.masks.all().is_enabled() {
                 index
             } else {
-                self.masker.composite[index]
+                self.masker.composite.get(index).expect("valid index into composite")
             };
 
             let data = self.file.get_line(line_number);
@@ -174,11 +172,11 @@ impl Instance {
         lines
     }
 
-    pub fn current_selected_file_line(&self) -> usize {
+    pub fn current_selected_file_line(&mut self) -> usize {
         if self.masker.masks.all().is_enabled() {
             self.viewport.current()
         } else {
-            self.masker.composite[self.viewport.current()]
+            self.masker.composite.get(self.viewport.current()).unwrap()
         }
     }
 

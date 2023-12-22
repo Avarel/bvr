@@ -90,28 +90,39 @@ impl InflightIndexImpl {
 
     fn index_file(self: Arc<Self>, file: File) -> Result<()> {
         assert_eq!(self.mode, InflightIndexMode::File);
-        assert!(Arc::strong_count(&self) >= 2);
         // Build index
         let (sx, rx) = std::sync::mpsc::sync_channel(4);
 
         let len = file.metadata()?.len();
         let file = file.try_clone()?;
 
+        // We have up to 3 primary holders:
+        // - Someone who needs to read the inflight
+        // - The mapping worker
+        // - The indexing worker
+        // While the indexing worker is alive, there will be at least a mapping
+        // and indexing worker. So the inflight only needs to run while there is
+        // someone who needs to read the inflight, and thus the strong count
+        // must be at least 3 for this to be useful
+
         // Indexing worker
-        let spawner: JoinHandle<Result<()>> = std::thread::spawn(move || {
-            let mut curr = 0;
+        let spawner: JoinHandle<Result<()>> = std::thread::spawn({
+            let r = self.clone();
+            move || {
+                let mut curr = 0;
 
-            while curr < len {
-                let end = (curr + Segment::MAX_SIZE).min(len);
-                let (task, task_rx) = IndexingTask::new(&file, curr, end)?;
-                sx.send(task_rx).unwrap();
+                while curr < len && Arc::strong_count(&r) >= 3 {
+                    let end = (curr + Segment::MAX_SIZE).min(len);
+                    let (task, task_rx) = IndexingTask::new(&file, curr, end)?;
+                    sx.send(task_rx).unwrap();
 
-                std::thread::spawn(|| task.compute());
+                    std::thread::spawn(|| task.compute());
 
-                curr = end;
+                    curr = end;
+                }
+
+                Ok(())
             }
-
-            Ok(())
         });
 
         while let Ok(task_rx) = rx.recv() {
@@ -290,7 +301,7 @@ impl InflightIndex {
                     Ok(unwrapped) => {
                         *self = Self::Complete(unwrapped.inner.into_inner().unwrap().finish());
                         true
-                    },
+                    }
                     Err(old_inner) => {
                         *self = Self::Incomplete(old_inner);
                         false

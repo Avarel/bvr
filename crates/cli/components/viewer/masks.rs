@@ -1,4 +1,4 @@
-use super::{Buffer, SearchResults, Viewport};
+use super::{composite::inflight::InflightComposite, Buffer, SearchResults, Viewport};
 use bvr_core::{
     cowvec::CowVec,
     search::{inflight::InflightSearchProgress, BufferSearch},
@@ -137,7 +137,7 @@ impl BufferSearch for Bookmarks {
 }
 
 pub struct Masker {
-    pub(crate) composite: Vec<usize>,
+    pub(super) composite: InflightComposite,
     pub viewport: Viewport,
     pub(crate) masks: Masks,
 }
@@ -257,7 +257,7 @@ impl Masker {
 
     pub fn new() -> Self {
         Self {
-            composite: Vec::new(),
+            composite: InflightComposite::new().0,
             viewport: Viewport::new(),
             masks: Masks::new(),
         }
@@ -284,28 +284,19 @@ impl Masker {
         masks
     }
 
-    pub fn recompute_composite_on_next_use(&mut self) {
-        self.composite.clear();
-    }
-
-    pub(crate) fn compute_composite_mask(&mut self) {
-        let mut masks = self.masks.iter_active().map(|v| (0, v)).collect::<Vec<_>>();
-
-        loop {
-            let Some((offset, line_number)) = masks
-                .iter_mut()
-                .filter_map(|(offset, mask)| {
-                    mask.translate_to_file_line(*offset).map(|ln| (offset, ln))
-                })
-                .min_by_key(|&(_, ln)| ln)
-            else {
-                break;
-            };
-
-            *offset += 1;
-
-            self.composite.push(line_number);
+    pub fn compute_composite(&mut self) {
+        if self.masks.all().is_enabled() {
+            self.composite = InflightComposite::empty();
+            return;
         }
+        let (composite, remote) = InflightComposite::new();
+        std::thread::spawn({
+            let masks = self.masks.iter_active().cloned().collect();
+            move || {
+                remote.compute(masks).unwrap();
+            }
+        });
+        self.composite = composite;
     }
 
     pub fn current_mask_mut(&mut self) -> &mut Mask {

@@ -50,7 +50,7 @@ impl InflightCompositeImpl {
                 break;
             } else {
                 continue;
-            };
+            }
         }
 
         Ok(())
@@ -111,6 +111,24 @@ impl InflightComposite {
         )
     }
 
+    pub fn empty() -> Self {
+        Self::Complete(CompleteComposite::empty())
+    }
+
+    pub fn len(&self) -> usize {
+        match self {
+            InflightComposite::Incomplete(inner) => inner.read(|v| v.len()),
+            InflightComposite::Complete(inner) => inner.len(),
+        }
+    }
+
+    pub fn get(&self, index: usize) -> Option<usize> {
+        match self {
+            InflightComposite::Incomplete(inner) => inner.read(|v| v.get(index)),
+            InflightComposite::Complete(inner) => inner.get(index),
+        }
+    }
+
     pub fn progress(&self) -> InflightCompositeProgress {
         match self {
             InflightComposite::Incomplete(inner) => {
@@ -125,14 +143,11 @@ impl InflightComposite {
     pub fn try_finalize(&mut self) -> bool {
         match self {
             Self::Incomplete(inner) => {
-                match Arc::try_unwrap(std::mem::replace(
-                    inner,
-                    InflightCompositeImpl::new(),
-                )) {
+                match Arc::try_unwrap(std::mem::replace(inner, InflightCompositeImpl::new())) {
                     Ok(unwrapped) => {
                         *self = Self::Complete(unwrapped.inner.into_inner().unwrap().finish());
                         true
-                    },
+                    }
                     Err(old_inner) => {
                         *self = Self::Incomplete(old_inner);
                         false

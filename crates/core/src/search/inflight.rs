@@ -33,15 +33,17 @@ impl InflightSearchImpl {
     where
         Idx: BufferIndex,
     {
-        assert!(Arc::strong_count(&self) >= 2);
-
         let start_range = iter.remaining_range();
 
         while let Some((idx, start, buf)) = iter.next_buf() {
-            let mut lock = self.inner.lock().unwrap();
+            if Arc::strong_count(&self) == 1 {
+                break;
+            }
+
+            let mut inner = self.inner.lock().unwrap();
             for res in regex.find_iter(buf) {
                 let match_start = res.start() as u64 + start;
-                lock.add_line(idx.line_of_data(match_start).unwrap())
+                inner.add_line(idx.line_of_data(match_start).unwrap())
             }
             let start = iter.remaining_range().start;
 

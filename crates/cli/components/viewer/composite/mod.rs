@@ -15,6 +15,14 @@ impl IncompleteComposite {
         }
     }
 
+    pub fn len(&self) -> usize {
+        self.inner.lines.len()
+    }
+
+    pub fn get(&self, index: usize) -> Option<usize> {
+        self.inner.get(index)
+    }
+
     pub fn add_line(&mut self, line_number: usize) {
         if self.inner.lines.last() == Some(&line_number) {
             return;
@@ -44,5 +52,13 @@ impl CompleteComposite {
         Self {
             lines: CowVec::new(),
         }
+    }
+
+    pub fn len(&self) -> usize {
+        self.lines.len()
+    }
+
+    pub fn get(&self, index: usize) -> Option<usize> {
+        self.lines.get(index).copied()
     }
 }

@@ -68,6 +68,7 @@ impl Keybinding {
                 Event::Key(key) => match key.code {
                     KeyCode::Char(':') => Some(Action::SwitchMode(InputMode::Command)),
                     KeyCode::Esc | KeyCode::Tab => Some(Action::SwitchMode(InputMode::Viewer)),
+                    KeyCode::Char('i') => Some(Action::SwitchMode(InputMode::Select)),
                     KeyCode::Up | KeyCode::Down => Some(Action::Mask(MaskAction::Move {
                         direction: VDirection::up_if(key.code == KeyCode::Up),
                         delta: Delta::Number(1),
@@ -106,6 +107,7 @@ impl Keybinding {
                 },
                 Event::Key(key) => match key.code {
                     KeyCode::Char(':') => Some(Action::SwitchMode(InputMode::Command)),
+                    KeyCode::Tab => Some(Action::SwitchMode(InputMode::Mask)),
                     KeyCode::Esc => Some(Action::SwitchMode(InputMode::Viewer)),
                     KeyCode::Up | KeyCode::Down => Some(Action::Viewer(ViewerAction::Move {
                         direction: VDirection::up_if(key.code == KeyCode::Up),
@@ -122,6 +124,7 @@ impl Keybinding {
                 Event::Paste(paste) => Some(Action::Command(CommandAction::Paste(paste))),
                 Event::Key(key) => match key.code {
                     KeyCode::Esc => Some(Action::SwitchMode(InputMode::Viewer)),
+                    KeyCode::Tab => Some(Action::SwitchMode(InputMode::Mask)),
                     KeyCode::Enter => Some(Action::Command(CommandAction::Submit)),
                     KeyCode::Left | KeyCode::Right => Some(Action::Command(CommandAction::Move {
                         direction: HDirection::left_if(key.code == KeyCode::Left),
