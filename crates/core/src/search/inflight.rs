@@ -33,7 +33,7 @@ impl InflightSearchImpl {
     where
         Idx: BufferIndex,
     {
-        assert_eq!(Arc::strong_count(&self), 2);
+        assert!(Arc::strong_count(&self) >= 2);
 
         let start_range = iter.remaining_range();
 
@@ -147,6 +147,27 @@ impl InflightSearch {
             move || remote.search(iter, regex)
         });
         Ok(search)
+    }
+
+    pub fn try_finalize(&mut self) -> bool {
+        match self {
+            Self::Incomplete(inner) => {
+                match Arc::try_unwrap(std::mem::replace(
+                    inner,
+                    InflightSearchImpl::new(),
+                )) {
+                    Ok(unwrapped) => {
+                        *self = Self::Complete(unwrapped.inner.into_inner().unwrap().finish());
+                        true
+                    },
+                    Err(old_inner) => {
+                        *self = Self::Incomplete(old_inner);
+                        false
+                    }
+                }
+            }
+            Self::Complete(_) => true,
+        }
     }
 
     pub fn progress(&self) -> InflightSearchProgress {

@@ -1,4 +1,5 @@
 pub mod masks;
+mod composite;
 
 use bvr_core::SegStr;
 use ratatui::style::Color;
@@ -130,6 +131,7 @@ impl Instance {
 
     pub fn update_and_view(&mut self, viewport_height: usize) -> Vec<LineData> {
         self.file.try_finalize();
+        self.masker.masks.try_finalize();
         self.viewport.height = viewport_height;
 
         let mut lines = Vec::with_capacity(self.viewport.line_range().len());

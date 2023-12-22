@@ -1,5 +1,8 @@
 use super::{Buffer, SearchResults, Viewport};
-use bvr_core::{search::BufferSearch, cowvec::CowVec};
+use bvr_core::{
+    cowvec::CowVec,
+    search::{inflight::InflightSearchProgress, BufferSearch},
+};
 use ratatui::style::Color;
 use regex::bytes::Regex;
 
@@ -10,8 +13,9 @@ enum MaskRepr {
     Search(SearchResults),
 }
 
+#[derive(Clone)]
 pub struct Mask {
-    pub(super) name: String,
+    name: String,
     enabled: bool,
     pub(super) color: Color,
     repr: MaskRepr,
@@ -67,6 +71,23 @@ impl Mask {
             MaskRepr::Search(lines) => lines.has_line(line_number),
         }
     }
+
+    pub(crate) fn is_complete(&self) -> bool {
+        match &self.repr {
+            MaskRepr::All => true,
+            MaskRepr::Bookmarks(_) => true,
+            MaskRepr::Search(lines) => matches!(lines.progress(), InflightSearchProgress::Done),
+        }
+    }
+
+    pub fn try_finalize(&mut self) {
+        match &mut self.repr {
+            MaskRepr::Search(lines) => {
+                lines.try_finalize();
+            }
+            _ => {}
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -76,7 +97,9 @@ pub struct Bookmarks {
 
 impl Bookmarks {
     fn new() -> Bookmarks {
-        Bookmarks { lines: CowVec::new() }
+        Bookmarks {
+            lines: CowVec::new(),
+        }
     }
 
     pub fn toggle(&mut self, line_number: usize) {
@@ -119,6 +142,7 @@ pub struct Masker {
     pub(crate) masks: Masks,
 }
 
+#[derive(Clone)]
 pub struct Masks {
     all: Mask,
     bookmarks: Mask,
@@ -138,6 +162,18 @@ impl Masks {
         std::iter::once(&self.all)
             .chain(std::iter::once(&self.bookmarks))
             .chain(self.searches.iter())
+    }
+
+    pub fn iter_mut(&mut self) -> impl Iterator<Item = &mut Mask> {
+        std::iter::once(&mut self.all)
+            .chain(std::iter::once(&mut self.bookmarks))
+            .chain(self.searches.iter_mut())
+    }
+
+    pub fn try_finalize(&mut self) {
+        for mask in self.iter_mut() {
+            mask.try_finalize();
+        }
     }
 
     pub fn iter_active(&self) -> impl Iterator<Item = &Mask> {
@@ -253,11 +289,7 @@ impl Masker {
     }
 
     pub(crate) fn compute_composite_mask(&mut self) {
-        let mut masks = self
-            .masks
-            .iter_active()
-            .map(|v| (0, v))
-            .collect::<Vec<_>>();
+        let mut masks = self.masks.iter_active().map(|v| (0, v)).collect::<Vec<_>>();
 
         loop {
             let Some((offset, line_number)) = masks

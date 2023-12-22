@@ -90,7 +90,7 @@ impl InflightIndexImpl {
 
     fn index_file(self: Arc<Self>, file: File) -> Result<()> {
         assert_eq!(self.mode, InflightIndexMode::File);
-        assert_eq!(Arc::strong_count(&self), 2);
+        assert!(Arc::strong_count(&self) >= 2);
         // Build index
         let (sx, rx) = std::sync::mpsc::sync_channel(4);
 
@@ -282,18 +282,21 @@ impl InflightIndex {
     /// has been dropped.
     pub fn try_finalize(&mut self) -> bool {
         match self {
-            Self::Incomplete(inner) if Arc::strong_count(inner) == 1 => {
-                let inner = unsafe {
-                    Arc::try_unwrap(std::mem::replace(
-                        inner,
-                        InflightIndexImpl::new(InflightIndexMode::File),
-                    ))
-                    .unwrap_unchecked()
-                };
-                *self = Self::Complete(inner.inner.into_inner().unwrap().finish());
-                true
+            Self::Incomplete(inner) => {
+                match Arc::try_unwrap(std::mem::replace(
+                    inner,
+                    InflightIndexImpl::new(InflightIndexMode::File),
+                )) {
+                    Ok(unwrapped) => {
+                        *self = Self::Complete(unwrapped.inner.into_inner().unwrap().finish());
+                        true
+                    },
+                    Err(old_inner) => {
+                        *self = Self::Incomplete(old_inner);
+                        false
+                    }
+                }
             }
-            Self::Incomplete(_) => false,
             Self::Complete(_) => true,
         }
     }
