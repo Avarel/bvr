@@ -33,7 +33,7 @@ anyhow = "1.0"
 clap = { version = "4.4", features = ["cargo", "derive"] }
 crossterm = { version = "0.27", features = ["use-dev-tty"] }
 ratatui = "0.25"
-bvr-core = { path = "crates/core" }
+bvr-core = { version = "0.0.2", path = "crates/core" }
 regex = "1.10"
 
 [profile.release]
