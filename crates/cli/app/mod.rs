@@ -6,7 +6,7 @@ use crate::components::{
     command::{CommandApp, CursorMovement},
     mux::MultiplexerApp,
     status::StatusApp,
-    viewer::{Instance, Viewport},
+    viewer::Instance,
 };
 use anyhow::Result;
 use bvr_core::{
@@ -21,7 +21,7 @@ use crossterm::{
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
 use ratatui::prelude::*;
-use regex::bytes::{Regex, RegexBuilder};
+use regex::bytes::RegexBuilder;
 use std::{path::Path, time::Duration};
 
 use self::{

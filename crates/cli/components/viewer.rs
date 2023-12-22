@@ -33,14 +33,6 @@ impl Viewport {
         self.top + self.height
     }
 
-    fn fit_view(&mut self, height: usize) {
-        self.height = height;
-    }
-
-    pub fn update_max_height(&mut self, max_height: usize) {
-        self.max_height = max_height;
-    }
-
     fn jump_to_current(&mut self) {
         if !(self.top..self.bottom()).contains(&self.current) {
             // height remains unchanged
@@ -391,7 +383,7 @@ impl Instance {
     }
 
     pub fn mask_search(&mut self, regex: Regex) {
-        const SEARCH_COLOR_LIST: &'static [Color] = &[
+        const SEARCH_COLOR_LIST: &[Color] = &[
             Color::Red,
             Color::Green,
             Color::Yellow,

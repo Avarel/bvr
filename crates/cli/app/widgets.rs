@@ -322,17 +322,15 @@ impl Widget for ViewerLineWidget {
 
                 ln.render(gutter_chunk, buf);
             }
-        } else {
-            if let Some(line) = self.line {
-                if line.selected {
-                    let ln = Paragraph::new("▶").fg(colors::SELECT_ACCENT);
-                    ln.render(type_chunk, buf);
-                }
-
-                let data = Paragraph::new(line.data.as_str());
-
-                data.render(area, buf);
+        } else if let Some(line) = self.line {
+            if line.selected {
+                let ln = Paragraph::new("▶").fg(colors::SELECT_ACCENT);
+                ln.render(type_chunk, buf);
             }
+
+            let data = Paragraph::new(line.data.as_str());
+
+            data.render(area, buf);
         }
     }
 }
