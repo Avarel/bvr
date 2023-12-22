@@ -2,7 +2,7 @@ use crate::components::{
     command::{CommandApp, Cursor, SelectionOrigin},
     mux::{MultiplexerApp, MultiplexerMode},
     status::StatusApp,
-    viewer::{Instance, ViewLine, ViewMask},
+    viewer::{Instance, LineData, masks::MaskData},
 };
 use bvr_core::index::inflight::InflightIndexProgress;
 use ratatui::{prelude::*, widgets::*};
@@ -175,7 +175,7 @@ impl Widget for MaskViewerWidget<'_> {
             area.width -= 1;
         }
         let mut y = area.y;
-        let masks = self.viewer.masks.update_and_mask(area.height as usize);
+        let masks = self.viewer.masker.update_and_mask(area.height as usize);
         for mask in masks {
             MaskLineWidget { inner: &mask }.render(Rect::new(area.x, y, area.width, 1), buf);
             y += 1;
@@ -261,27 +261,28 @@ impl Widget for EdgeBg {
 }
 
 struct MaskLineWidget<'a> {
-    inner: &'a ViewMask<'a>,
+    inner: &'a MaskData<'a>,
 }
 
 impl Widget for MaskLineWidget<'_> {
     fn render(self, area: Rect, buf: &mut Buffer) {
-        Paragraph::new(Line::from(vec![
-            Span::from(" "),
-            Span::from(if self.inner.selected { "▶" } else { " " }),
-            Span::from(" "),
-            Span::from(if self.inner.enabled { "●" } else { "◯" }),
-            Span::from(" "),
-            Span::from(self.inner.name),
-        ]))
-        .fg(self.inner.color)
-        .render(area, buf);
+        let mut v = vec![
+            Span::from(if self.inner.selected { " ▶" } else { "  " }).fg(colors::MASK_ACCENT),
+            Span::from(if self.inner.enabled { " ● " } else { " ◯ " }).fg(self.inner.color),
+            Span::from(self.inner.name).fg(self.inner.color),
+        ];
+
+        if let Some(len) = self.inner.len {
+            v.push(Span::from(format!(" ({} lines)", len)));
+        }
+
+        Paragraph::new(Line::from(v)).render(area, buf);
     }
 }
 
 struct ViewerLineWidget {
     gutter_size: Option<u16>,
-    line: Option<ViewLine>,
+    line: Option<LineData>,
 }
 
 impl Widget for ViewerLineWidget {
@@ -426,23 +427,23 @@ impl Widget for MultiplexerWidget<'_> {
                     for (i, (&chunk, viewer)) in
                         hsplit.iter().zip(self.mux.viewers_mut()).enumerate()
                     {
-                        let vsplit = Self::split_tabs(chunk);
+                        let [tab_chunk, view_chunk] = Self::split_tabs(chunk);
                         TabWidget {
                             name: viewer.name(),
                             active: active == i,
                         }
-                        .render(vsplit[0], buf);
+                        .render(tab_chunk, buf);
 
-                        let mut viewer_chunk = vsplit[1];
+                        let mut viewer_chunk = view_chunk;
 
                         if self.mode == InputMode::Mask {
-                            let msplit = Self::split_mask(vsplit[1]);
+                            let [view_chunk, mask_chunk] = Self::split_mask(view_chunk);
                             MaskViewerWidget {
                                 viewer,
                                 first: i == 0,
                             }
-                            .render(msplit[1], buf);
-                            viewer_chunk = msplit[0];
+                            .render(mask_chunk, buf);
+                            viewer_chunk = view_chunk;
                         }
 
                         ViewerWidget {
@@ -455,8 +456,8 @@ impl Widget for MultiplexerWidget<'_> {
                     }
                 }
                 MultiplexerMode::Tabs => {
-                    let vsplit = Self::split_tabs(chunks[0]);
-                    let hsplit = Self::split_horizontal(vsplit[0], self.mux.len());
+                    let [tab_chunk, view_chunk] = Self::split_tabs(chunks[0]);
+                    let hsplit = Self::split_horizontal(tab_chunk, self.mux.len());
 
                     for (i, (&chunk, viewer)) in
                         hsplit.iter().zip(self.mux.viewers_mut()).enumerate()
@@ -469,16 +470,16 @@ impl Widget for MultiplexerWidget<'_> {
                     }
 
                     let viewer = self.mux.active_viewer_mut().unwrap();
-                    let mut viewer_chunk = vsplit[1];
+                    let mut viewer_chunk = view_chunk;
 
                     if self.mode == InputMode::Mask {
-                        let msplit = Self::split_mask(vsplit[1]);
+                        let [view_chunk, mask_chunk] = Self::split_mask(view_chunk);
                         MaskViewerWidget {
                             viewer,
                             first: true,
                         }
-                        .render(msplit[1], buf);
-                        viewer_chunk = msplit[0];
+                        .render(mask_chunk, buf);
+                        viewer_chunk = view_chunk;
                     }
                     ViewerWidget {
                         viewer,

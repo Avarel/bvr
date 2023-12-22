@@ -138,19 +138,34 @@ macro_rules! cowvec {
 }
 
 impl<T: Copy> CowVec<T> {
+    fn fixup_mut_buf(&mut self) -> (&Arc<RawBuf<T>>, usize) {
+        match self.repr {
+            CowVecRepr::Snapshot { len, .. } => (self.grow(true), len),
+            CowVecRepr::Owned { ref buf } => {
+                let len = buf.len.load(Acquire);
+                let cap = buf.cap;
+                (
+                    if len == cap {
+                        // Safety: If this runs, then buf will no longer be borrowed from
+                        self.grow(false)
+                    } else {
+                        // Safety: telling the compiler to shut it because this is valid
+                        //         we can return the lifetime of this just fine
+                        //         If you're not convinced, just inline this and drop the transmute
+                        unsafe { std::mem::transmute(buf) }
+                    },
+                    len,
+                )
+            }
+        }
+    }
+
     /// Appends an element to the back of this collection.
     ///
     /// If the collection is in a borrowed state, it will copy the data
     /// underlying the borrowed state and transition to an owned state.
     pub fn push(&mut self, elem: T) {
-        let (buf, len) = match &self.repr {
-            &CowVecRepr::Snapshot { len, .. } => (self.grow(), len),
-            CowVecRepr::Owned { buf } => {
-                let len = buf.len.load(Acquire);
-                let cap = buf.cap;
-                (if len == cap { self.grow() } else { buf }, len)
-            }
-        };
+        let (buf, len) = self.fixup_mut_buf();
 
         unsafe { std::ptr::write_volatile(buf.ptr.as_ptr().add(len), elem) }
 
@@ -159,8 +174,41 @@ impl<T: Copy> CowVec<T> {
         buf.len.store(len + 1, Release);
     }
 
+    pub fn insert(&mut self, index: usize, elem: T) {
+        // Note: `<=` because it's valid to insert after everything
+        // which would be equivalent to push.
+        assert!(index <= self.len(), "index out of bounds");
+        let (buf, len) = self.fixup_mut_buf();
+        unsafe {
+            // ptr::copy(src, dest, len): "copy from src to dest len elems"
+            std::ptr::copy(
+                buf.ptr.as_ptr().add(index),
+                buf.ptr.as_ptr().add(index + 1),
+                len - index,
+            );
+            std::ptr::write(buf.ptr.as_ptr().add(index), elem);
+        }
+        buf.len.store(len + 1, Release);
+    }
+
+    pub fn remove(&mut self, index: usize) -> T {
+        // Note: `<` because it's *not* valid to remove after everything
+        assert!(index < self.len(), "index out of bounds");
+        let (buf, len) = self.fixup_mut_buf();
+        buf.len.store(len - 1, Release);
+        unsafe {
+            let result = std::ptr::read(buf.ptr.as_ptr().add(index));
+            std::ptr::copy(
+                buf.ptr.as_ptr().add(index + 1),
+                buf.ptr.as_ptr().add(index),
+                len - index,
+            );
+            result
+        }
+    }
+
     /// Grow will return a buffer that the caller can write to.
-    fn grow(&mut self) -> &Arc<RawBuf<T>> {
+    fn grow(&mut self, from_snapshot: bool) -> &Arc<RawBuf<T>> {
         let (buf, len) = match &self.repr {
             CowVecRepr::Snapshot { buf, len } => (buf, *len),
             CowVecRepr::Owned { buf } => (buf, buf.len.load(SeqCst)),
@@ -175,7 +223,11 @@ impl<T: Copy> CowVec<T> {
             (1, Layout::array::<T>(1).unwrap())
         } else {
             // This can't overflow because we ensure self.cap <= isize::MAX.
-            let new_cap = 2 * cap;
+            let new_cap = if from_snapshot {
+                cap.next_power_of_two()
+            } else {
+                2 * cap
+            };
 
             // `Layout::array` checks that the number of bytes is <= usize::MAX,
             // but this is redundant since old_layout.size() <= isize::MAX,

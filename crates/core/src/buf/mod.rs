@@ -326,6 +326,10 @@ where
         }
     }
 
+    pub fn remaining_range(&self) -> Range<usize> {
+        self.line_range.clone()
+    }
+
     /// Get the next buffer from the [ContiguousSegmentIterator].
     ///
     /// This function retrieves the next buffer from the `ContiguousSegmentIterator` and returns it as an `Option`.

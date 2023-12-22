@@ -1,3 +1,4 @@
+use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
 
 use regex::bytes::Regex;
@@ -12,6 +13,7 @@ use super::{BufferSearch, CompleteSearch, IncompleteSearch};
 pub struct InflightSearchImpl {
     inner: std::sync::Mutex<IncompleteSearch>,
     cache: std::sync::Mutex<Option<CompleteSearch>>,
+    progress: AtomicU64,
 }
 
 impl InflightSearchImpl {
@@ -19,14 +21,21 @@ impl InflightSearchImpl {
         Arc::new(InflightSearchImpl {
             inner: std::sync::Mutex::new(IncompleteSearch::new()),
             cache: std::sync::Mutex::new(None),
+            progress: AtomicU64::new(0),
         })
     }
 
-    fn search<Idx>(self: Arc<Self>, mut iter: ContiguousSegmentIterator<Idx>, regex: Regex) -> Result<()>
+    fn search<Idx>(
+        self: Arc<Self>,
+        mut iter: ContiguousSegmentIterator<Idx>,
+        regex: Regex,
+    ) -> Result<()>
     where
         Idx: BufferIndex,
     {
         assert_eq!(Arc::strong_count(&self), 2);
+
+        let start_range = iter.remaining_range();
 
         while let Some((idx, start, buf)) = iter.next_buf() {
             let mut lock = self.inner.lock().unwrap();
@@ -34,6 +43,14 @@ impl InflightSearchImpl {
                 let match_start = res.start() as u64 + start;
                 lock.add_line(idx.line_of_data(match_start).unwrap())
             }
+            let start = iter.remaining_range().start;
+
+            let progress =
+                (start - start_range.start) as f64 / (start_range.end - start_range.start) as f64;
+            self.progress.store(
+                (progress * 100.0) as u64,
+                std::sync::atomic::Ordering::Relaxed,
+            );
         }
 
         Ok(())
@@ -78,14 +95,21 @@ impl InflightSearchRemote {
     }
 }
 
+/// Progress report by [InflightSearch]'s `progress()` method.
+pub enum InflightSearchProgress {
+    Done,
+    Partial(f64),
+}
+
+#[derive(Clone)]
 pub enum InflightSearch {
     /// The indexing process is incomplete. The process must be started using
-    /// the associated [InflightIndexRemote]. Accesses to the data inside
+    /// the associated [InflightSearchRemote]. Accesses to the data inside
     /// are relatively cheap, with atomic copies of the ref-counted pointers
     /// to the internal buffers.
     Incomplete(#[doc(hidden)] Arc<InflightSearchImpl>),
     /// The indexing process is finalized, and the internal representation is
-    /// replaced with a [CompleteIndex]. This can be obtained through
+    /// replaced with a [CompleteSearch]. This can be obtained through
     /// [`Self::try_finalize()`].
     Complete(CompleteSearch),
 }
@@ -104,10 +128,7 @@ impl InflightSearch {
     /// ```
     pub fn new() -> (Self, InflightSearchRemote) {
         let inner = InflightSearchImpl::new();
-        (
-            Self::Incomplete(inner.clone()),
-            InflightSearchRemote(inner),
-        )
+        (Self::Incomplete(inner.clone()), InflightSearchRemote(inner))
     }
 
     /// Searches for a regular expression pattern in a segmented buffer.
@@ -126,6 +147,17 @@ impl InflightSearch {
             move || remote.search(iter, regex)
         });
         Ok(search)
+    }
+
+    pub fn progress(&self) -> InflightSearchProgress {
+        match self {
+            InflightSearch::Incomplete(inner) => {
+                let progress =
+                    inner.progress.load(std::sync::atomic::Ordering::Relaxed) as f64 / 100.0;
+                InflightSearchProgress::Partial(progress)
+            }
+            InflightSearch::Complete(_) => InflightSearchProgress::Done,
+        }
     }
 }
 

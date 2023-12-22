@@ -41,7 +41,6 @@ impl Keybinding {
                     KeyCode::Char(':') => Some(Action::SwitchMode(InputMode::Command)),
                     KeyCode::Char('i') => Some(Action::SwitchMode(InputMode::Select)),
                     KeyCode::Tab => Some(Action::SwitchMode(InputMode::Mask)),
-                    KeyCode::Esc => Some(Action::Exit),
                     KeyCode::Up | KeyCode::Down => Some(Action::Viewer(ViewerAction::Pan {
                         direction: VDirection::up_if(key.code == KeyCode::Up),
                         delta: Delta::Number(1),
