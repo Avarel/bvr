@@ -7,25 +7,25 @@ use ratatui::style::Color;
 use regex::bytes::Regex;
 
 #[derive(Clone)]
-enum MaskRepr {
+enum FilterRepr {
     All,
     Bookmarks(Bookmarks),
     Search(SearchResults),
 }
 
 #[derive(Clone)]
-pub struct Mask {
+pub struct Filter {
     name: String,
     enabled: bool,
     pub(super) color: Color,
-    repr: MaskRepr,
+    repr: FilterRepr,
 }
 
-impl Mask {
+impl Filter {
     fn all() -> Self {
         Self {
             name: "All Lines".to_string(),
-            repr: MaskRepr::All,
+            repr: FilterRepr::All,
             enabled: true,
             color: Color::White,
         }
@@ -36,7 +36,7 @@ impl Mask {
             name: "Bookmarks".to_string(),
             enabled: true,
             color: Color::Blue,
-            repr: MaskRepr::Bookmarks(Bookmarks::new()),
+            repr: FilterRepr::Bookmarks(Bookmarks::new()),
         }
     }
 
@@ -50,42 +50,39 @@ impl Mask {
 
     pub fn len(&self) -> Option<usize> {
         match &self.repr {
-            MaskRepr::All => None,
-            MaskRepr::Bookmarks(lines) => Some(lines.len()),
-            MaskRepr::Search(lines) => Some(lines.len()),
+            FilterRepr::All => None,
+            FilterRepr::Bookmarks(lines) => Some(lines.len()),
+            FilterRepr::Search(lines) => Some(lines.len()),
         }
     }
 
     pub fn translate_to_file_line(&self, line_number: usize) -> Option<usize> {
         match &self.repr {
-            MaskRepr::All => Some(line_number),
-            MaskRepr::Bookmarks(lines) => lines.get(line_number),
-            MaskRepr::Search(lines) => lines.get(line_number),
+            FilterRepr::All => Some(line_number),
+            FilterRepr::Bookmarks(lines) => lines.get(line_number),
+            FilterRepr::Search(lines) => lines.get(line_number),
         }
     }
 
     pub fn has_line(&self, line_number: usize) -> bool {
         match &self.repr {
-            MaskRepr::All => true,
-            MaskRepr::Bookmarks(lines) => lines.has_line(line_number),
-            MaskRepr::Search(lines) => lines.has_line(line_number),
+            FilterRepr::All => true,
+            FilterRepr::Bookmarks(lines) => lines.has_line(line_number),
+            FilterRepr::Search(lines) => lines.has_line(line_number),
         }
     }
 
     pub(crate) fn is_complete(&self) -> bool {
         match &self.repr {
-            MaskRepr::All => true,
-            MaskRepr::Bookmarks(_) => true,
-            MaskRepr::Search(lines) => matches!(lines.progress(), InflightSearchProgress::Done),
+            FilterRepr::All => true,
+            FilterRepr::Bookmarks(_) => true,
+            FilterRepr::Search(lines) => matches!(lines.progress(), InflightSearchProgress::Done),
         }
     }
 
     pub fn try_finalize(&mut self) {
-        match &mut self.repr {
-            MaskRepr::Search(lines) => {
-                lines.try_finalize();
-            }
-            _ => {}
+        if let FilterRepr::Search(lines) = &mut self.repr {
+            lines.try_finalize();
         }
     }
 }
@@ -136,56 +133,56 @@ impl BufferSearch for Bookmarks {
     }
 }
 
-pub struct Masker {
+pub struct Filterer {
     pub(super) composite: InflightComposite,
     pub viewport: Viewport,
-    pub(crate) masks: Masks,
+    pub(crate) filters: Filters,
 }
 
 #[derive(Clone)]
-pub struct Masks {
-    all: Mask,
-    bookmarks: Mask,
-    searches: Vec<Mask>,
+pub struct Filters {
+    all: Filter,
+    bookmarks: Filter,
+    searches: Vec<Filter>,
 }
 
-impl Masks {
+impl Filters {
     fn new() -> Self {
         Self {
-            all: Mask::all(),
-            bookmarks: Mask::bookmark(),
+            all: Filter::all(),
+            bookmarks: Filter::bookmark(),
             searches: Vec::new(),
         }
     }
 
-    pub fn iter(&self) -> impl Iterator<Item = &Mask> {
+    pub fn iter(&self) -> impl Iterator<Item = &Filter> {
         std::iter::once(&self.all)
             .chain(std::iter::once(&self.bookmarks))
             .chain(self.searches.iter())
     }
 
-    pub fn iter_mut(&mut self) -> impl Iterator<Item = &mut Mask> {
+    pub fn iter_mut(&mut self) -> impl Iterator<Item = &mut Filter> {
         std::iter::once(&mut self.all)
             .chain(std::iter::once(&mut self.bookmarks))
             .chain(self.searches.iter_mut())
     }
 
     pub fn try_finalize(&mut self) {
-        for mask in self.iter_mut() {
-            mask.try_finalize();
+        for filter in self.iter_mut() {
+            filter.try_finalize();
         }
     }
 
-    pub fn iter_active(&self) -> impl Iterator<Item = &Mask> {
-        self.iter().filter(|mask| mask.is_enabled())
+    pub fn iter_active(&self) -> impl Iterator<Item = &Filter> {
+        self.iter().filter(|filter| filter.is_enabled())
     }
 
-    pub fn all(&self) -> &Mask {
+    pub fn all(&self) -> &Filter {
         &self.all
     }
 
     #[allow(dead_code)]
-    pub fn all_mut(&mut self) -> &mut Mask {
+    pub fn all_mut(&mut self) -> &mut Filter {
         &mut self.all
     }
 
@@ -193,7 +190,7 @@ impl Masks {
     pub fn bookmarks(&self) -> &Bookmarks {
         // Safety: by construction
         match &self.bookmarks.repr {
-            MaskRepr::Bookmarks(bookmarks) => bookmarks,
+            FilterRepr::Bookmarks(bookmarks) => bookmarks,
             _ => unsafe { std::hint::unreachable_unchecked() },
         }
     }
@@ -201,18 +198,18 @@ impl Masks {
     pub fn bookmarks_mut(&mut self) -> &mut Bookmarks {
         // Safety: by construction
         match &mut self.bookmarks.repr {
-            MaskRepr::Bookmarks(bookmarks) => bookmarks,
+            FilterRepr::Bookmarks(bookmarks) => bookmarks,
             _ => unsafe { std::hint::unreachable_unchecked() },
         }
     }
 
     pub fn clear(&mut self) {
-        self.searches.truncate(2);
+        self.searches.clear();
     }
 }
 
-impl std::ops::Index<usize> for Masks {
-    type Output = Mask;
+impl std::ops::Index<usize> for Filters {
+    type Output = Filter;
 
     fn index(&self, index: usize) -> &Self::Output {
         match index {
@@ -223,7 +220,7 @@ impl std::ops::Index<usize> for Masks {
     }
 }
 
-impl std::ops::IndexMut<usize> for Masks {
+impl std::ops::IndexMut<usize> for Filters {
     fn index_mut(&mut self, index: usize) -> &mut Self::Output {
         match index {
             0 => &mut self.all,
@@ -233,7 +230,7 @@ impl std::ops::IndexMut<usize> for Masks {
     }
 }
 
-pub struct MaskData<'a> {
+pub struct FilterData<'a> {
     pub name: &'a str,
     pub color: Color,
     pub len: Option<usize>,
@@ -241,7 +238,7 @@ pub struct MaskData<'a> {
     pub selected: bool,
 }
 
-impl Masker {
+impl Filterer {
     const SEARCH_COLOR_LIST: &'static [Color] = &[
         Color::Red,
         Color::Green,
@@ -259,57 +256,59 @@ impl Masker {
         Self {
             composite: InflightComposite::new().0,
             viewport: Viewport::new(),
-            masks: Masks::new(),
+            filters: Filters::new(),
         }
     }
 
-    pub fn update_and_mask(&mut self, viewport_height: usize) -> Vec<MaskData> {
+    pub fn update_and_filter_view(&mut self, viewport_height: usize) -> Vec<FilterData> {
+        self.filters.try_finalize();
+
         let viewport = &mut self.viewport;
-        viewport.max_height = self.masks.searches.len() + 2;
+        viewport.max_height = self.filters.searches.len() + 2;
         viewport.height = viewport_height;
 
-        let mut masks = Vec::with_capacity(viewport.line_range().len());
+        let mut filters = Vec::with_capacity(viewport.line_range().len());
 
         for index in viewport.line_range() {
-            let mask = &self.masks[index];
-            masks.push(MaskData {
-                name: &mask.name,
-                color: mask.color,
-                len: mask.len(),
-                enabled: mask.enabled,
+            let filter = &self.filters[index];
+            filters.push(FilterData {
+                name: &filter.name,
+                color: filter.color,
+                len: filter.len(),
+                enabled: filter.enabled,
                 selected: index == self.viewport.current(),
             });
         }
 
-        masks
+        filters
     }
 
     pub fn compute_composite(&mut self) {
-        if self.masks.all().is_enabled() {
+        if self.filters.all().is_enabled() {
             self.composite = InflightComposite::empty();
             return;
         }
         let (composite, remote) = InflightComposite::new();
         std::thread::spawn({
-            let masks = self.masks.iter_active().cloned().collect();
+            let filters = self.filters.iter_active().cloned().collect();
             move || {
-                remote.compute(masks).unwrap();
+                remote.compute(filters).unwrap();
             }
         });
         self.composite = composite;
     }
 
-    pub fn current_mask_mut(&mut self) -> &mut Mask {
-        &mut self.masks[self.viewport.current()]
+    pub fn current_filter_mut(&mut self) -> &mut Filter {
+        &mut self.filters[self.viewport.current()]
     }
 
-    pub fn mask_search(&mut self, file: &Buffer, regex: Regex) {
-        self.masks.searches.push(Mask {
+    pub fn filter_search(&mut self, file: &Buffer, regex: Regex) {
+        self.filters.searches.push(Filter {
             name: regex.to_string(),
             enabled: true,
-            repr: MaskRepr::Search(SearchResults::search(file, regex).unwrap()),
+            repr: FilterRepr::Search(SearchResults::search(file, regex).unwrap()),
             color: Self::SEARCH_COLOR_LIST
-                .get(self.masks.searches.len())
+                .get(self.filters.searches.len())
                 .copied()
                 .unwrap_or(Color::White),
         });

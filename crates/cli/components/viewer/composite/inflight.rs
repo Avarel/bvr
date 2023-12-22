@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use bvr_core::err::Result;
 
-use crate::components::viewer::masks::Mask;
+use crate::components::viewer::filters::Filter;
 
 use super::{CompleteComposite, IncompleteComposite};
 #[doc(hidden)]
@@ -22,16 +22,16 @@ impl InflightCompositeImpl {
         })
     }
 
-    fn compute(self: Arc<Self>, masks: Vec<Mask>) -> Result<()> {
-        let len = masks.iter().filter_map(|v| v.len()).sum::<usize>();
+    fn compute(self: Arc<Self>, filters: Vec<Filter>) -> Result<()> {
+        let len = filters.iter().filter_map(|v| v.len()).sum::<usize>();
 
-        let mut masks = masks.into_iter().map(|v| (0, v)).collect::<Vec<_>>();
+        let mut filters = filters.into_iter().map(|v| (0, v)).collect::<Vec<_>>();
 
         while Arc::strong_count(&self) >= 2 {
-            if let Some((offset, line_number)) = masks
+            if let Some((offset, line_number)) = filters
                 .iter_mut()
-                .filter_map(|(offset, mask)| {
-                    mask.translate_to_file_line(*offset).map(|ln| (offset, ln))
+                .filter_map(|(offset, filter)| {
+                    filter.translate_to_file_line(*offset).map(|ln| (offset, ln))
                 })
                 .min_by_key(|&(_, ln)| ln)
             {
@@ -41,12 +41,12 @@ impl InflightCompositeImpl {
                 inner.add_line(line_number);
 
                 let progress =
-                    masks.iter().map(|(offset, _)| *offset).sum::<usize>() as f64 / len as f64;
+                    filters.iter().map(|(offset, _)| *offset).sum::<usize>() as f64 / len as f64;
                 self.progress.store(
                     (progress * 100.0) as u64,
                     std::sync::atomic::Ordering::Relaxed,
                 );
-            } else if masks.iter().all(|(_, mask)| mask.is_complete()) {
+            } else if filters.iter().all(|(_, filter)| filter.is_complete()) {
                 break;
             } else {
                 continue;
@@ -86,8 +86,8 @@ impl InflightCompositeImpl {
 pub struct InflightCompositeRemote(Arc<InflightCompositeImpl>);
 
 impl InflightCompositeRemote {
-    pub fn compute(self, masks: Vec<Mask>) -> Result<()> {
-        self.0.compute(masks)
+    pub fn compute(self, filters: Vec<Filter>) -> Result<()> {
+        self.0.compute(filters)
     }
 }
 

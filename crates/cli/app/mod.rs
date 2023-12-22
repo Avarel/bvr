@@ -38,7 +38,7 @@ pub enum InputMode {
     Command,
     Viewer,
     Select,
-    Mask,
+    Filter,
 }
 
 pub struct App {
@@ -148,14 +148,14 @@ impl App {
                     ViewerAction::ToggleLine => {
                         if let Some(viewer) = self.mux.active_viewer_mut() {
                             let ln = viewer.current_selected_file_line();
-                            viewer.masker.masks.bookmarks_mut().toggle(ln);
+                            viewer.filterer.filters.bookmarks_mut().toggle(ln);
                         }
                     }
                 },
-                Action::Mask(action) => match action {
-                    actions::MaskAction::Move { direction, delta } => {
+                Action::Filter(action) => match action {
+                    actions::FilterAction::Move { direction, delta } => {
                         if let Some(viewer) = self.mux.active_viewer_mut() {
-                            let viewport = &mut viewer.masker.viewport;
+                            let viewport = &mut viewer.filterer.viewport;
                             let delta = match delta {
                                 Delta::Number(n) => usize::from(n),
                                 Delta::Page => viewport.height(),
@@ -165,10 +165,10 @@ impl App {
                             viewport.move_select(direction, delta)
                         }
                     }
-                    actions::MaskAction::Toggle => {
+                    actions::FilterAction::Toggle => {
                         if let Some(viewer) = self.mux.active_viewer_mut() {
-                            viewer.masker.current_mask_mut().toggle();
-                            viewer.masker.compute_composite();
+                            viewer.filterer.current_filter_mut().toggle();
+                            viewer.filterer.compute_composite();
                         }
                     }
                 },
@@ -199,45 +199,8 @@ impl App {
                     }
                     CommandAction::Submit => {
                         let command = self.command.submit();
-                        if command == "q" {
+                        if !self.process_command(command) {
                             break;
-                        } else if let Some(path) = command.strip_prefix("open ") {
-                            if let Err(err) = self.open_file(path) {
-                                self.status.submit_message(
-                                    format!("Error opening file `{path}`: {err}"),
-                                    Some(Duration::from_secs(2)),
-                                );
-                            }
-                        } else if command == "close" {
-                            self.mux.close_active_viewer()
-                        } else if command == "mux" {
-                            self.mux.swap_mode();
-                        } else if command == "clearmask" {
-                            if let Some(viewer) = self.mux.active_viewer_mut() {
-                                viewer.masker.masks.clear()
-                            }
-                        } else if let Some(pat) = command.strip_prefix("find ") {
-                            let regex = match RegexBuilder::new(pat).case_insensitive(true).build()
-                            {
-                                Ok(r) => r,
-                                Err(err) => {
-                                    self.status.submit_message(
-                                        format!("Invalid regex `{pat}`: {err}"),
-                                        Some(Duration::from_secs(2)),
-                                    );
-                                    continue;
-                                }
-                            };
-
-                            if let Some(viewer) = self.mux.active_viewer_mut() {
-                                viewer.mask_search(regex);
-                                viewer.masker.compute_composite();
-                            }
-                        } else {
-                            self.status.submit_message(
-                                format!("Invalid command `{command}`"),
-                                Some(Duration::from_secs(2)),
-                            );
                         }
                         self.mode = InputMode::Viewer;
                     }
@@ -245,6 +208,69 @@ impl App {
             }
         }
         Ok(())
+    }
+
+    fn process_command(&mut self, command: String) -> bool {
+        if command == "q" {
+            return false;
+        } else if let Some(path) = command.strip_prefix("open ") {
+            if let Err(err) = self.open_file(path) {
+                self.status.submit_message(
+                    format!("Error opening file `{path}`: {err}"),
+                    Some(Duration::from_secs(2)),
+                );
+            }
+        } else if command == "close" {
+            self.mux.close_active_viewer()
+        } else if command == "mux" {
+            self.mux.swap_mode();
+        } else if command == "clearfilter" {
+            if let Some(viewer) = self.mux.active_viewer_mut() {
+                viewer.filterer.filters.clear();
+                viewer.filterer.compute_composite();
+            }
+        } else if let Some(pat) = command.strip_prefix("find ") {
+            let regex = match RegexBuilder::new(pat).case_insensitive(true).build()
+            {
+                Ok(r) => r,
+                Err(err) => {
+                    self.status.submit_message(
+                        format!("Invalid regex `{pat}`: {err}"),
+                        Some(Duration::from_secs(2)),
+                    );
+                    return true;
+                }
+            };
+
+            if let Some(viewer) = self.mux.active_viewer_mut() {
+                viewer.filter_search(regex);
+                viewer.filterer.compute_composite();
+            }
+        } else if let Some(pat) = command.strip_prefix("findl ") {
+            let pat = regex::escape(pat);
+            let regex = match RegexBuilder::new(&pat).case_insensitive(true).build()
+            {
+                Ok(r) => r,
+                Err(err) => {
+                    self.status.submit_message(
+                        format!("Invalid regex `{pat}`: {err}"),
+                        Some(Duration::from_secs(2)),
+                    );
+                    return true;
+                }
+            };
+
+            if let Some(viewer) = self.mux.active_viewer_mut() {
+                viewer.filter_search(regex);
+                viewer.filterer.compute_composite();
+            }
+        } else {
+            self.status.submit_message(
+                format!("Invalid command `{command}`"),
+                Some(Duration::from_secs(2)),
+            );
+        }
+        true
     }
 
     fn ui(&mut self, f: &mut Frame) {

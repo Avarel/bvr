@@ -110,6 +110,11 @@ impl<T> CowVec<T> {
         }
     }
 
+    /// Returns true if the vector contains no elements.
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
     /// Returns the number of elements in the vector, also referred to as its ‘length’.
     pub fn len(&self) -> usize {
         // No matter what len we load, it will be valid since the length

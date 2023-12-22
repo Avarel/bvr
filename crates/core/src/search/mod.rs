@@ -8,6 +8,9 @@ pub trait BufferSearch {
     fn get(&self, index: usize) -> Option<usize>;
     fn has_line(&self, line_number: usize) -> bool;
     fn len(&self) -> usize;
+    fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
 }
 
 #[derive(Clone)]

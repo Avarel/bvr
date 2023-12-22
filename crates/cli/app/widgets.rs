@@ -2,7 +2,7 @@ use crate::components::{
     command::{CommandApp, Cursor, SelectionOrigin},
     mux::{MultiplexerApp, MultiplexerMode},
     status::StatusApp,
-    viewer::{Instance, LineData, masks::MaskData},
+    viewer::{filters::FilterData, Instance, LineData},
 };
 use bvr_core::index::inflight::InflightIndexProgress;
 use ratatui::{prelude::*, widgets::*};
@@ -35,7 +35,7 @@ mod colors {
     pub const COMMAND_ACCENT: Color = Color::Rgb(100, 230, 160);
     pub const SELECT_ACCENT: Color = Color::Rgb(180, 130, 230);
     pub const NORMAL_ACCENT: Color = Color::Rgb(100, 160, 230);
-    pub const MASK_ACCENT: Color = Color::Rgb(255, 200, 60);
+    pub const FILTER_ACCENT: Color = Color::Rgb(255, 200, 60);
 }
 
 enum StatusWidgetState<'a> {
@@ -65,7 +65,7 @@ impl<'a> Widget for StatusWidget<'a> {
             InputMode::Command => colors::COMMAND_ACCENT,
             InputMode::Viewer => colors::NORMAL_ACCENT,
             InputMode::Select => colors::SELECT_ACCENT,
-            InputMode::Mask => colors::MASK_ACCENT,
+            InputMode::Filter => colors::FILTER_ACCENT,
         };
 
         let mut v = Vec::new();
@@ -75,7 +75,7 @@ impl<'a> Widget for StatusWidget<'a> {
                 InputMode::Command => " COMMAND ",
                 InputMode::Viewer => " VIEWER ",
                 InputMode::Select => " SELECT ",
-                InputMode::Mask => " MASK ",
+                InputMode::Filter => " FILTER ",
             })
             .fg(colors::WHITE)
             .bg(accent_color),
@@ -158,12 +158,12 @@ impl Widget for CommandWidget<'_> {
     }
 }
 
-pub struct MaskViewerWidget<'a> {
+pub struct FilterViewerWidget<'a> {
     viewer: &'a mut Instance,
     first: bool,
 }
 
-impl Widget for MaskViewerWidget<'_> {
+impl Widget for FilterViewerWidget<'_> {
     fn render(self, area: Rect, buf: &mut Buffer) {
         let mut area = area;
 
@@ -175,9 +175,12 @@ impl Widget for MaskViewerWidget<'_> {
             area.width -= 1;
         }
         let mut y = area.y;
-        let masks = self.viewer.masker.update_and_mask(area.height as usize);
-        for mask in masks {
-            MaskLineWidget { inner: &mask }.render(Rect::new(area.x, y, area.width, 1), buf);
+        for filter in self
+            .viewer
+            .filterer
+            .update_and_filter_view(area.height as usize)
+        {
+            FilterLineWidget { inner: &filter }.render(Rect::new(area.x, y, area.width, 1), buf);
             y += 1;
         }
     }
@@ -260,14 +263,14 @@ impl Widget for EdgeBg {
     }
 }
 
-struct MaskLineWidget<'a> {
-    inner: &'a MaskData<'a>,
+struct FilterLineWidget<'a> {
+    inner: &'a FilterData<'a>,
 }
 
-impl Widget for MaskLineWidget<'_> {
+impl Widget for FilterLineWidget<'_> {
     fn render(self, area: Rect, buf: &mut Buffer) {
         let mut v = vec![
-            Span::from(if self.inner.selected { " ▶" } else { "  " }).fg(colors::MASK_ACCENT),
+            Span::from(if self.inner.selected { " ▶" } else { "  " }).fg(colors::FILTER_ACCENT),
             Span::from(if self.inner.enabled { " ● " } else { " ◯ " }).fg(self.inner.color),
             Span::from(self.inner.name).fg(self.inner.color),
         ];
@@ -371,17 +374,17 @@ impl MultiplexerWidget<'_> {
         Layout::new(Direction::Horizontal, constraints).split(area)
     }
 
-    fn split_mask(area: Rect) -> [Rect; 2] {
-        const MASK_HEIGHT: u16 = 10;
+    fn split_filter(area: Rect) -> [Rect; 2] {
+        const FILTER_MAX_HEIGHT: u16 = 10;
 
         let mut view_chunk = area;
-        view_chunk.height = view_chunk.height.saturating_sub(MASK_HEIGHT);
+        view_chunk.height = view_chunk.height.saturating_sub(FILTER_MAX_HEIGHT);
 
-        let mut mask_chunk = area;
-        mask_chunk.y = area.y + view_chunk.height;
-        mask_chunk.height = MASK_HEIGHT.min(area.height);
+        let mut filter_chunk = area;
+        filter_chunk.y = area.y + view_chunk.height;
+        filter_chunk.height = FILTER_MAX_HEIGHT.min(area.height);
 
-        [view_chunk, mask_chunk]
+        [view_chunk, filter_chunk]
     }
 }
 
@@ -436,13 +439,13 @@ impl Widget for MultiplexerWidget<'_> {
 
                         let mut viewer_chunk = view_chunk;
 
-                        if self.mode == InputMode::Mask {
-                            let [view_chunk, mask_chunk] = Self::split_mask(view_chunk);
-                            MaskViewerWidget {
+                        if self.mode == InputMode::Filter {
+                            let [view_chunk, filter_chunk] = Self::split_filter(view_chunk);
+                            FilterViewerWidget {
                                 viewer,
                                 first: i == 0,
                             }
-                            .render(mask_chunk, buf);
+                            .render(filter_chunk, buf);
                             viewer_chunk = view_chunk;
                         }
 
@@ -472,13 +475,13 @@ impl Widget for MultiplexerWidget<'_> {
                     let viewer = self.mux.active_viewer_mut().unwrap();
                     let mut viewer_chunk = view_chunk;
 
-                    if self.mode == InputMode::Mask {
-                        let [view_chunk, mask_chunk] = Self::split_mask(view_chunk);
-                        MaskViewerWidget {
+                    if self.mode == InputMode::Filter {
+                        let [view_chunk, filter_chunk] = Self::split_filter(view_chunk);
+                        FilterViewerWidget {
                             viewer,
                             first: true,
                         }
-                        .render(mask_chunk, buf);
+                        .render(filter_chunk, buf);
                         viewer_chunk = view_chunk;
                     }
                     ViewerWidget {

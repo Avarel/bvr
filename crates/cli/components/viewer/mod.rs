@@ -1,4 +1,4 @@
-pub mod masks;
+pub mod filters;
 mod composite;
 
 use bvr_core::SegStr;
@@ -8,7 +8,7 @@ use std::ops::Range;
 
 use crate::direction::VDirection;
 
-use self::masks::Masker;
+use self::filters::Filterer;
 
 type Buffer = bvr_core::SegBuffer<bvr_core::InflightIndex>;
 type SearchResults = bvr_core::search::inflight::InflightSearch;
@@ -97,7 +97,7 @@ pub struct Instance {
     name: String,
     file: Buffer,
     viewport: Viewport,
-    pub masker: Masker,
+    pub filterer: Filterer,
 }
 
 pub struct LineData {
@@ -113,7 +113,7 @@ impl Instance {
             name,
             file,
             viewport: Viewport::new(),
-            masker: Masker::new(),
+            filterer: Filterer::new(),
         }
     }
 
@@ -131,35 +131,35 @@ impl Instance {
 
     pub fn update_and_view(&mut self, viewport_height: usize) -> Vec<LineData> {
         self.file.try_finalize();
-        self.masker.masks.try_finalize();
-        self.masker.composite.try_finalize();
+        self.filterer.filters.try_finalize();
+        self.filterer.composite.try_finalize();
 
         self.viewport.height = viewport_height;
 
         let mut lines = Vec::with_capacity(self.viewport.line_range().len());
-        if self.masker.masks.all().is_enabled() {
+        if self.filterer.filters.all().is_enabled() {
             self.viewport.max_height = self.file.line_count();
             self.viewport.fixup();
         } else {
-            self.viewport.max_height = self.masker.composite.len();
+            self.viewport.max_height = self.filterer.composite.len();
             self.viewport.fixup();
         }
 
-        let masks = self.masker.masks.iter_active().collect::<Vec<_>>();
+        let filters = self.filterer.filters.iter_active().collect::<Vec<_>>();
 
         for index in self.viewport.line_range() {
-            let line_number = if self.masker.masks.all().is_enabled() {
+            let line_number = if self.filterer.filters.all().is_enabled() {
                 index
             } else {
-                self.masker.composite.get(index).expect("valid index into composite")
+                self.filterer.composite.get(index).expect("valid index into composite")
             };
 
             let data = self.file.get_line(line_number);
-            let color = masks
+            let color = filters
                 .iter()
                 .rev()
-                .find(|mask| mask.has_line(line_number))
-                .map(|mask| mask.color)
+                .find(|filter| filter.has_line(line_number))
+                .map(|filter| filter.color)
                 .unwrap_or(Color::White);
 
             lines.push(LineData {
@@ -173,15 +173,15 @@ impl Instance {
     }
 
     pub fn current_selected_file_line(&mut self) -> usize {
-        if self.masker.masks.all().is_enabled() {
+        if self.filterer.filters.all().is_enabled() {
             self.viewport.current()
         } else {
-            self.masker.composite.get(self.viewport.current()).unwrap()
+            self.filterer.composite.get(self.viewport.current()).unwrap()
         }
     }
 
-    pub fn mask_search(&mut self, regex: Regex) {
-        self.masker.mask_search(&self.file, regex);
+    pub fn filter_search(&mut self, regex: Regex) {
+        self.filterer.filter_search(&self.file, regex);
     }
 
     pub fn name(&self) -> &str {

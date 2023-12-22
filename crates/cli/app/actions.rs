@@ -8,7 +8,7 @@ pub enum Action {
     SwitchMode(InputMode),
     Command(CommandAction),
     Viewer(ViewerAction),
-    Mask(MaskAction),
+    Filter(FilterAction),
 }
 
 pub enum Delta {
@@ -25,7 +25,7 @@ pub enum ViewerAction {
     SwitchActive(HDirection),
 }
 
-pub enum MaskAction {
+pub enum FilterAction {
     Move { direction: VDirection, delta: Delta },
     Toggle,
 }

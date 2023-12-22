@@ -3,7 +3,7 @@ use crossterm::event::{Event, KeyCode, KeyModifiers, MouseEventKind, KeyEventKin
 use crate::direction::{HDirection, VDirection};
 
 use super::{
-    actions::{Action, CommandAction, Jump, ViewerAction, Delta, MaskAction},
+    actions::{Action, CommandAction, Jump, ViewerAction, Delta, FilterAction},
     InputMode,
 };
 
@@ -40,7 +40,7 @@ impl Keybinding {
                 Event::Key(key) => match key.code {
                     KeyCode::Char(':') => Some(Action::SwitchMode(InputMode::Command)),
                     KeyCode::Char('i') => Some(Action::SwitchMode(InputMode::Select)),
-                    KeyCode::Tab => Some(Action::SwitchMode(InputMode::Mask)),
+                    KeyCode::Tab => Some(Action::SwitchMode(InputMode::Filter)),
                     KeyCode::Up | KeyCode::Down => Some(Action::Viewer(ViewerAction::Pan {
                         direction: VDirection::up_if(key.code == KeyCode::Up),
                         delta: Delta::Number(1),
@@ -64,24 +64,24 @@ impl Keybinding {
                 },
                 _ => None,
             },
-            InputMode::Mask => match event {
+            InputMode::Filter => match event {
                 Event::Key(key) => match key.code {
                     KeyCode::Char(':') => Some(Action::SwitchMode(InputMode::Command)),
                     KeyCode::Esc | KeyCode::Tab => Some(Action::SwitchMode(InputMode::Viewer)),
                     KeyCode::Char('i') => Some(Action::SwitchMode(InputMode::Select)),
-                    KeyCode::Up | KeyCode::Down => Some(Action::Mask(MaskAction::Move {
+                    KeyCode::Up | KeyCode::Down => Some(Action::Filter(FilterAction::Move {
                         direction: VDirection::up_if(key.code == KeyCode::Up),
                         delta: Delta::Number(1),
                     })),
-                    KeyCode::Home | KeyCode::End => Some(Action::Mask(MaskAction::Move {
+                    KeyCode::Home | KeyCode::End => Some(Action::Filter(FilterAction::Move {
                         direction: VDirection::up_if(key.code == KeyCode::Home),
                         delta: Delta::Boundary,
                     })),
-                    KeyCode::PageUp | KeyCode::PageDown => Some(Action::Mask(MaskAction::Move {
+                    KeyCode::PageUp | KeyCode::PageDown => Some(Action::Filter(FilterAction::Move {
                         direction: VDirection::up_if(key.code == KeyCode::PageUp),
                         delta: Delta::Page,
                     })),
-                    KeyCode::Char(c @ ('u' | 'd')) => Some(Action::Mask(MaskAction::Move {
+                    KeyCode::Char(c @ ('u' | 'd')) => Some(Action::Filter(FilterAction::Move {
                         direction: VDirection::up_if(c == 'u'),
                         delta: Delta::HalfPage,
                     })),
@@ -89,7 +89,7 @@ impl Keybinding {
                         HDirection::left_if(key.code == KeyCode::Left)),
                     )),
                     KeyCode::Char(' ') | KeyCode::Enter => {
-                        Some(Action::Mask(MaskAction::Toggle))
+                        Some(Action::Filter(FilterAction::Toggle))
                     }
                     _ => None,
                 },
@@ -107,7 +107,7 @@ impl Keybinding {
                 },
                 Event::Key(key) => match key.code {
                     KeyCode::Char(':') => Some(Action::SwitchMode(InputMode::Command)),
-                    KeyCode::Tab => Some(Action::SwitchMode(InputMode::Mask)),
+                    KeyCode::Tab => Some(Action::SwitchMode(InputMode::Filter)),
                     KeyCode::Esc => Some(Action::SwitchMode(InputMode::Viewer)),
                     KeyCode::Up | KeyCode::Down => Some(Action::Viewer(ViewerAction::Move {
                         direction: VDirection::up_if(key.code == KeyCode::Up),
@@ -124,7 +124,7 @@ impl Keybinding {
                 Event::Paste(paste) => Some(Action::Command(CommandAction::Paste(paste))),
                 Event::Key(key) => match key.code {
                     KeyCode::Esc => Some(Action::SwitchMode(InputMode::Viewer)),
-                    KeyCode::Tab => Some(Action::SwitchMode(InputMode::Mask)),
+                    KeyCode::Tab => Some(Action::SwitchMode(InputMode::Filter)),
                     KeyCode::Enter => Some(Action::Command(CommandAction::Submit)),
                     KeyCode::Left | KeyCode::Right => Some(Action::Command(CommandAction::Move {
                         direction: HDirection::left_if(key.code == KeyCode::Left),
