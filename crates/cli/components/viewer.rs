@@ -1,7 +1,7 @@
 use bvr_core::{search::BufferSearch, SegStr};
 use ratatui::style::Color;
 use regex::bytes::Regex;
-use std::ops::Range;
+use std::{ops::Range, hint::unreachable_unchecked};
 
 use crate::direction::VDirection;
 
@@ -240,7 +240,7 @@ impl Instance {
         self.viewport.height = viewport_height;
 
         let mut lines = Vec::with_capacity(self.viewport.line_range().len());
-        if self.masks.masks[0].enabled {
+        if self.masks.all.enabled {
             self.viewport.max_height = self.file.line_count();
             self.viewport.fixup();
         } else {
@@ -254,13 +254,12 @@ impl Instance {
 
         let masks = self
             .masks
-            .masks
             .iter()
             .filter(|mask| mask.enabled)
             .collect::<Vec<_>>();
 
         for index in self.viewport.line_range() {
-            let line_number = if self.masks.masks[0].enabled {
+            let line_number = if self.masks.all.enabled {
                 index
             } else {
                 self.masks.composite[index]
@@ -285,7 +284,7 @@ impl Instance {
     }
 
     pub fn current_selected_file_line(&self) -> usize {
-        if self.masks.masks[0].enabled {
+        if self.masks.all.enabled {
             self.viewport.current()
         } else {
             self.masks.composite[self.viewport.current()]
@@ -303,6 +302,8 @@ impl Instance {
 
 pub struct MaskManager {
     composite: Vec<usize>,
+    all: Mask,
+    bookmarks: Mask,
     masks: Vec<Mask>,
     pub viewport: Viewport,
 }
@@ -311,29 +312,45 @@ impl MaskManager {
     pub fn new() -> Self {
         Self {
             composite: Vec::new(),
-            masks: vec![Mask::none(), Mask::bookmark()],
+            all: Mask::none(),
+            bookmarks: Mask::bookmark(),
+            masks: vec![],
             viewport: Viewport::new(),
         }
     }
 
+    pub fn iter(&self) -> impl Iterator<Item = &Mask> {
+        std::iter::once(&self.all)
+            .chain(std::iter::once(&self.bookmarks))
+            .chain(self.masks.iter())
+    }
+
     pub fn update_and_mask(&mut self, viewport_height: usize) -> Vec<ViewMask> {
         let viewport = &mut self.viewport;
-        viewport.max_height = self.masks.len();
+        viewport.max_height = self.masks.len() + 2;
         viewport.height = viewport_height;
 
         let mut masks = Vec::with_capacity(viewport.line_range().len());
 
         for index in viewport.line_range() {
-            let mask = &self.masks[index];
+            let mask = self.mask_by_index(index);
             masks.push(ViewMask {
                 name: &mask.name,
                 color: mask.color,
                 enabled: mask.enabled,
-                selected: index == viewport.current(),
+                selected: index == self.viewport.current(),
             });
         }
 
         masks
+    }
+
+    pub fn mask_by_index(&self, index: usize) -> &Mask {
+        match index {
+            0 => &self.all,
+            1 => &self.bookmarks,
+            _ => &self.masks[index - 2],
+        }
     }
 
     pub fn recompute_composite_on_next_use(&mut self) {
@@ -366,10 +383,10 @@ impl MaskManager {
     }
 
     pub fn bookmarks(&mut self) -> &mut Bookmarks {
-        debug_assert!(self.masks.len() >= 2);
-        match &mut self.masks[1].lines {
+        // Safety: by construction
+        match &mut self.bookmarks.lines {
             MaskRepr::Bookmarks(bookmarks) => bookmarks,
-            _ => unreachable!(),
+            _ => unsafe { unreachable_unchecked() },
         }
     }
 
@@ -378,7 +395,11 @@ impl MaskManager {
     }
 
     pub fn current_mask_mut(&mut self) -> &mut Mask {
-        &mut self.masks[self.viewport.current()]
+        match self.viewport.current {
+            0 => &mut self.all,
+            1 => &mut self.bookmarks,
+            _ => &mut self.masks[self.viewport.current - 2],
+        }
     }
 
     pub fn mask_search(&mut self, file: &Buffer, regex: Regex) {
@@ -400,7 +421,7 @@ impl MaskManager {
             enabled: true,
             lines: MaskRepr::Search(SearchResults::search(file, regex).unwrap()),
             color: SEARCH_COLOR_LIST
-                .get(self.masks.len() - 2)
+                .get(self.masks.len())
                 .copied()
                 .unwrap_or(Color::White),
         });

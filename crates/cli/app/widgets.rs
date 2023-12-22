@@ -267,6 +267,7 @@ struct MaskLineWidget<'a> {
 impl Widget for MaskLineWidget<'_> {
     fn render(self, area: Rect, buf: &mut Buffer) {
         Paragraph::new(Line::from(vec![
+            Span::from(" "),
             Span::from(if self.inner.selected { "▶" } else { " " }),
             Span::from(" "),
             Span::from(if self.inner.enabled { "●" } else { "◯" }),
