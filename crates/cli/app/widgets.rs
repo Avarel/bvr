@@ -175,7 +175,7 @@ impl Widget for MaskViewerWidget<'_> {
             area.width -= 1;
         }
         let mut y = area.y;
-        let masks = self.viewer.update_and_mask(area.height as usize);
+        let masks = self.viewer.masks.update_and_mask(area.height as usize);
         for mask in masks {
             MaskLineWidget { inner: &mask }.render(Rect::new(area.x, y, area.width, 1), buf);
             y += 1;

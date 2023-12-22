@@ -33,6 +33,18 @@ impl Viewport {
         self.top + self.height
     }
 
+    fn fixup(&mut self) {
+        if self.top >= self.max_height {
+            self.top = self.max_height.saturating_sub(1);
+        }
+        if self.height > self.max_height {
+            self.height = self.max_height;
+        }
+        if self.current >= self.max_height {
+            self.current = self.max_height.saturating_sub(1);
+        }
+    }
+
     fn jump_to_current(&mut self) {
         if !(self.top..self.bottom()).contains(&self.current) {
             // height remains unchanged
@@ -105,13 +117,6 @@ impl Mask {
             enabled: true,
             color: Color::Blue,
             lines: MaskRepr::Bookmarks(Bookmarks::new()),
-        }
-    }
-
-    fn bookmarks_internal_mut(&mut self) -> &mut Bookmarks {
-        match &mut self.lines {
-            MaskRepr::Bookmarks(bookmarks) => bookmarks,
-            _ => unreachable!(),
         }
     }
 
@@ -191,8 +196,7 @@ pub struct Instance {
     name: String,
     file: Buffer,
     viewport: Viewport,
-    pub masks: Vec<Mask>,
-    pub mask_viewport: Viewport,
+    pub masks: MaskManager,
 }
 
 pub struct ViewMask<'a> {
@@ -215,8 +219,7 @@ impl Instance {
             name,
             file,
             viewport: Viewport::new(),
-            masks: vec![Mask::none(), Mask::bookmark()],
-            mask_viewport: Viewport::new(),
+            masks: MaskManager::new(),
         }
     }
 
@@ -232,8 +235,89 @@ impl Instance {
         &mut self.viewport
     }
 
+    pub fn update_and_view(&mut self, viewport_height: usize) -> Vec<ViewLine> {
+        self.file.try_finalize();
+        self.viewport.height = viewport_height;
+
+        let mut lines = Vec::with_capacity(self.viewport.line_range().len());
+        if self.masks.masks[0].enabled {
+            self.viewport.max_height = self.file.line_count();
+            self.viewport.fixup();
+        } else {
+            if self.masks.composite.is_empty() {
+                self.masks.compute_composite_mask();
+            }
+
+            self.viewport.max_height = self.masks.composite.len();
+            self.viewport.fixup();
+        }
+
+        let masks = self
+            .masks
+            .masks
+            .iter()
+            .filter(|mask| mask.enabled)
+            .collect::<Vec<_>>();
+
+        for index in self.viewport.line_range() {
+            let line_number = if self.masks.masks[0].enabled {
+                index
+            } else {
+                self.masks.composite[index]
+            };
+
+            let data = self.file.get_line(line_number);
+            let color = masks
+                .iter()
+                .rev()
+                .find(|mask| mask.has_line(line_number))
+                .map(|mask| mask.color)
+                .unwrap_or(Color::White);
+
+            lines.push(ViewLine {
+                line_number,
+                data,
+                color,
+                selected: index == self.viewport.current,
+            });
+        }
+        lines
+    }
+
+    pub fn current_selected_file_line(&self) -> usize {
+        if self.masks.masks[0].enabled {
+            self.viewport.current()
+        } else {
+            self.masks.composite[self.viewport.current()]
+        }
+    }
+
+    pub fn mask_search(&mut self, regex: Regex) {
+        self.masks.mask_search(&self.file, regex);
+    }
+
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+}
+
+pub struct MaskManager {
+    composite: Vec<usize>,
+    masks: Vec<Mask>,
+    pub viewport: Viewport,
+}
+
+impl MaskManager {
+    pub fn new() -> Self {
+        Self {
+            composite: Vec::new(),
+            masks: vec![Mask::none(), Mask::bookmark()],
+            viewport: Viewport::new(),
+        }
+    }
+
     pub fn update_and_mask(&mut self, viewport_height: usize) -> Vec<ViewMask> {
-        let viewport = &mut self.mask_viewport;
+        let viewport = &mut self.viewport;
         viewport.max_height = self.masks.len();
         viewport.height = viewport_height;
 
@@ -252,137 +336,52 @@ impl Instance {
         masks
     }
 
-    pub fn update_and_view(&mut self, viewport_height: usize) -> Vec<ViewLine> {
-        self.file.try_finalize();
-        self.viewport.max_height = self.file.line_count();
-        self.viewport.height = viewport_height;
-
-        let mut lines = Vec::with_capacity(self.viewport.line_range().len());
-        if self.masks[0].enabled {
-            let masks = self
-                .masks
-                .iter()
-                .filter(|mask| mask.enabled)
-                .collect::<Vec<_>>();
-
-
-            for line_number in self.viewport.line_range() {
-                let data = self.file.get_line(line_number);
-
-                let color = masks
-                    .iter()
-                    .rev()
-                    .find(|mask| mask.has_line(line_number))
-                    .map(|mask| mask.color)
-                    .unwrap_or(Color::White);
-
-                lines.push(ViewLine {
-                    line_number,
-                    data,
-                    color,
-                    selected: line_number == self.viewport.current,
-                });
-            }
-
-            lines
-        } else {
-            let mut masks = self
-                .masks
-                .iter()
-                .filter(|mask| mask.enabled)
-                .map(|v| (0, v))
-                .collect::<Vec<_>>();
-
-            let Range { mut start, end } = self.viewport.line_range();
-            // skip start lines
-            let mut skipped = 0;
-            while skipped < start {
-                let Some((offset, _)) = masks
-                    .iter_mut()
-                    .filter_map(|(offset, mask)| {
-                        mask.translate_to_file_line(*offset).map(|ln| (offset, ln))
-                    })
-                    .min_by_key(|&(_, ln)| ln)
-                else {
-                    break;
-                };
-
-                *offset += 1;
-                skipped += 1;
-            }
-
-            while start < end {
-                let Some((offset, line_number)) = masks
-                    .iter_mut()
-                    .filter_map(|(offset, mask)| {
-                        mask.translate_to_file_line(*offset).map(|ln| (offset, ln))
-                    })
-                    .min_by_key(|&(_, ln)| ln)
-                else {
-                    break;
-                };
-
-                *offset += 1;
-
-                let color = masks
-                    .iter()
-                    .rev()
-                    .find(|(_, mask)| mask.has_line(line_number))
-                    .map(|(_, mask)| mask.color)
-                    .unwrap_or(Color::White);
-
-                start += 1;
-
-                let data = self.file.get_line(line_number);
-
-                lines.push(ViewLine {
-                    line_number,
-                    data,
-                    color,
-                    selected: line_number == self.viewport.current,
-                });
-            }
-
-            lines
-        }
+    pub fn recompute_composite_on_next_use(&mut self) {
+        self.composite.clear();
     }
 
-    pub fn current_selected_file_line(&self) -> usize {
-        if self.masks[0].enabled {
-            self.viewport.current()
-        } else {
-            // let vectors = self
-            //     .masks
-            //     .iter()
-            //     .filter(|mask| mask.enabled)
-            //     .map(|v| (0, v))
-            //     .collect::<Vec<_>>();
+    fn compute_composite_mask(&mut self) {
+        let mut masks = self
+            .masks
+            .iter()
+            .filter(|mask| mask.enabled)
+            .map(|v| (0, v))
+            .collect::<Vec<_>>();
 
-            // vec![]
-            todo!()
+        loop {
+            let Some((offset, line_number)) = masks
+                .iter_mut()
+                .filter_map(|(offset, mask)| {
+                    mask.translate_to_file_line(*offset).map(|ln| (offset, ln))
+                })
+                .min_by_key(|&(_, ln)| ln)
+            else {
+                break;
+            };
+
+            *offset += 1;
+
+            self.composite.push(line_number);
         }
-
-        // self.translate_to_file_line(self.viewport.current())
     }
 
     pub fn bookmarks(&mut self) -> &mut Bookmarks {
         debug_assert!(self.masks.len() >= 2);
-        self.masks[1].bookmarks_internal_mut()
+        match &mut self.masks[1].lines {
+            MaskRepr::Bookmarks(bookmarks) => bookmarks,
+            _ => unreachable!(),
+        }
     }
 
-    pub fn clear_masks(&mut self) {
+    pub fn clear(&mut self) {
         self.masks.truncate(2);
     }
 
-    pub fn name(&self) -> &str {
-        &self.name
-    }
-
     pub fn current_mask_mut(&mut self) -> &mut Mask {
-        &mut self.masks[self.mask_viewport.current()]
+        &mut self.masks[self.viewport.current()]
     }
 
-    pub fn mask_search(&mut self, regex: Regex) {
+    pub fn mask_search(&mut self, file: &Buffer, regex: Regex) {
         const SEARCH_COLOR_LIST: &[Color] = &[
             Color::Red,
             Color::Green,
@@ -399,7 +398,7 @@ impl Instance {
         self.masks.push(Mask {
             name: regex.to_string(),
             enabled: true,
-            lines: MaskRepr::Search(SearchResults::search(&self.file, regex).unwrap()),
+            lines: MaskRepr::Search(SearchResults::search(file, regex).unwrap()),
             color: SEARCH_COLOR_LIST
                 .get(self.masks.len() - 2)
                 .copied()

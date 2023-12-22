@@ -148,14 +148,14 @@ impl App {
                     ViewerAction::ToggleLine => {
                         if let Some(viewer) = self.mux.active_viewer_mut() {
                             let ln = viewer.current_selected_file_line();
-                            viewer.bookmarks().toggle(ln);
+                            viewer.masks.bookmarks().toggle(ln);
                         }
                     }
                 },
                 Action::Mask(action) => match action {
                     actions::MaskAction::Move { direction, delta } => {
                         if let Some(viewer) = self.mux.active_viewer_mut() {
-                            let viewport = &mut viewer.mask_viewport;
+                            let viewport = &mut viewer.masks.viewport;
                             let delta = match delta {
                                 Delta::Number(n) => usize::from(n),
                                 Delta::Page => viewport.height(),
@@ -167,7 +167,8 @@ impl App {
                     }
                     actions::MaskAction::Toggle => {
                         if let Some(viewer) = self.mux.active_viewer_mut() {
-                            viewer.current_mask_mut().toggle();
+                            viewer.masks.current_mask_mut().toggle();
+                            viewer.masks.recompute_composite_on_next_use();
                         }
                     }
                 },
@@ -213,7 +214,7 @@ impl App {
                             self.mux.swap_mode();
                         } else if command == "clearmask" {
                             if let Some(viewer) = self.mux.active_viewer_mut() {
-                                viewer.clear_masks()
+                                viewer.masks.clear()
                             }
                         } else if let Some(pat) = command.strip_prefix("find ") {
                             let regex = match RegexBuilder::new(pat).case_insensitive(true).build()
