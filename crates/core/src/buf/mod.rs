@@ -13,14 +13,11 @@ use std::{
     },
 };
 
-use crate::{inflight_tool::Inflight, Result, InflightIndex};
+use crate::{inflight_tool::Inflight, InflightIndex, Result};
 use lru::LruCache;
 
 use self::segment::{SegStr, Segment};
-use crate::index::{
-    inflight::Stream,
-    BufferIndex, Index,
-};
+use crate::index::{inflight::Stream, BufferIndex, Index};
 
 /// A segmented buffer that holds data in multiple segments.
 ///
@@ -51,7 +48,7 @@ enum BufferRepr {
 }
 
 impl BufferRepr {
-    fn fetch(&mut self, seg_id: usize) -> Arc<Segment> {
+    fn fetch(&mut self, seg_id: usize) -> Option<Arc<Segment>> {
         match self {
             BufferRepr::File {
                 file,
@@ -60,9 +57,13 @@ impl BufferRepr {
             } => {
                 let range = Segment::data_range_of_id(seg_id);
                 let range = range.start..range.end.min(*len);
-                segments
-                    .get_or_insert(seg_id, || Arc::new(Segment::map_file(range, file).unwrap()))
-                    .clone()
+                Some(
+                    segments
+                        .get_or_insert(seg_id, || {
+                            Arc::new(Segment::map_file(range, file).expect("mmap was successful"))
+                        })
+                        .clone(),
+                )
             }
             BufferRepr::Stream {
                 pending_segs,
@@ -80,7 +81,7 @@ impl BufferRepr {
                         }
                     }
                 }
-                segments[seg_id].clone()
+                segments.get(seg_id).cloned()
             }
         }
     }
@@ -97,7 +98,7 @@ impl SegBuffer<Index> {
     ///
     /// A `Result` containing the constructed instance of [Buffer<CompleteIndex>]
     /// if successful, or an error if the file cannot be read or the index cannot be finalized.
-    pub fn read_file(file: File, seg_count: usize) -> Result<Self> {
+    pub fn read_file(file: File, seg_count: NonZeroUsize) -> Result<Self> {
         let (mut index, remote) = Inflight::<Index>::new();
         remote.index_file(file.try_clone()?)?;
         assert!(index.try_finalize());
@@ -107,7 +108,7 @@ impl SegBuffer<Index> {
             repr: BufferRepr::File {
                 len: file.metadata()?.len(),
                 file,
-                segments: LruCache::new(NonZeroUsize::new(seg_count).unwrap()),
+                segments: LruCache::new(seg_count),
             },
         })
     }
@@ -152,7 +153,7 @@ impl SegBuffer<InflightIndex> {
     ///
     /// A `Result` containing an instance of [Buffer<InflightIndex>] if the
     /// file was successfully read, or an error if the operation failed.
-    pub fn read_file(file: File, seg_count: usize) -> Result<Self> {
+    pub fn read_file(file: File, seg_count: NonZeroUsize) -> Result<Self> {
         let (index, indexer) = Inflight::<Index>::new();
         std::thread::spawn({
             let file = file.try_clone()?;
@@ -164,7 +165,7 @@ impl SegBuffer<InflightIndex> {
             repr: BufferRepr::File {
                 len: file.metadata()?.len(),
                 file,
-                segments: LruCache::new(NonZeroUsize::new(seg_count).unwrap()),
+                segments: LruCache::new(seg_count),
             },
         })
     }
@@ -227,39 +228,39 @@ where
     /// # Returns
     ///
     /// The line of text as a [SegStr] object.
-    pub fn get_line(&mut self, line_number: usize) -> SegStr {
+    pub fn get_line(&mut self, line_number: usize) -> Option<SegStr> {
         assert!(line_number <= self.line_count());
 
-        let data_start = self.index.data_of_line(line_number).unwrap();
-        let data_end = self.index.data_of_line(line_number + 1).unwrap();
+        let data_start = self.index.data_of_line(line_number)?;
+        let data_end = self.index.data_of_line(line_number + 1)?;
         let seg_start = Segment::id_of_data(data_start);
         let seg_end = Segment::id_of_data(data_end);
 
         if seg_start == seg_end {
             // The data is in a single segment
-            let seg = self.repr.fetch(seg_start);
+            let seg = self.repr.fetch(seg_start)?;
             let range = seg.translate_inner_data_range(data_start, data_end);
-            seg.get_line(range)
+            Some(seg.get_line(range))
         } else {
             debug_assert!(seg_start < seg_end);
             // The data may cross several segments, so we must piece together
             // the data from across the segments.
             let mut buf = Vec::with_capacity((data_end - data_start) as usize);
 
-            let seg_first = self.repr.fetch(seg_start);
-            let seg_last = self.repr.fetch(seg_end);
+            let seg_first = self.repr.fetch(seg_start)?;
+            let seg_last = self.repr.fetch(seg_end)?;
             let (start, end) = (
                 seg_first.translate_inner_data_index(data_start),
                 seg_last.translate_inner_data_index(data_end),
             );
             buf.extend_from_slice(&seg_first[start as usize..]);
             for seg_id in seg_start + 1..seg_end {
-                buf.extend_from_slice(&self.repr.fetch(seg_id));
+                buf.extend_from_slice(&self.repr.fetch(seg_id)?);
             }
             buf.extend_from_slice(&seg_last[..end as usize]);
 
             let buf = String::from_utf8_lossy(&buf).into_owned();
-            SegStr::new_owned(buf)
+            Some(SegStr::new_owned(buf))
         }
     }
 }
@@ -337,8 +338,8 @@ where
         }
 
         let curr_line = self.line_range.start;
-        let curr_line_data_start = self.index.data_of_line(curr_line).unwrap();
-        let curr_line_data_end = self.index.data_of_line(curr_line + 1).unwrap();
+        let curr_line_data_start = self.index.data_of_line(curr_line)?;
+        let curr_line_data_end = self.index.data_of_line(curr_line + 1)?;
 
         let curr_line_seg_start = Segment::id_of_data(curr_line_data_start);
         let curr_line_seg_end = Segment::id_of_data(curr_line_data_end);
@@ -348,8 +349,8 @@ where
             self.imm_buf
                 .reserve((curr_line_data_end - curr_line_data_start) as usize);
 
-            let seg_first = self.repr.fetch(curr_line_seg_start);
-            let seg_last = self.repr.fetch(curr_line_seg_end);
+            let seg_first = self.repr.fetch(curr_line_seg_start)?;
+            let seg_last = self.repr.fetch(curr_line_seg_end)?;
             let (start, end) = (
                 seg_first.translate_inner_data_index(curr_line_data_start),
                 seg_last.translate_inner_data_index(curr_line_data_end),
@@ -357,7 +358,7 @@ where
 
             self.imm_buf.extend_from_slice(&seg_first[start as usize..]);
             for seg_id in curr_line_seg_start + 1..curr_line_seg_end {
-                self.imm_buf.extend_from_slice(&self.repr.fetch(seg_id));
+                self.imm_buf.extend_from_slice(&self.repr.fetch(seg_id)?);
             }
             self.imm_buf.extend_from_slice(&seg_last[..end as usize]);
 
@@ -372,10 +373,10 @@ where
                 .line_of_data(curr_seg_data_end)
                 .unwrap_or_else(|| self.index.line_count())
                 .min(self.line_range.end);
-            let line_end_data_start = self.index.data_of_line(line_end).unwrap();
+            let line_end_data_start = self.index.data_of_line(line_end)?;
 
             // this line should not cross multiple segments, else we would have caught in the first case
-            let segment = self.repr.fetch(curr_line_seg_start);
+            let segment = self.repr.fetch(curr_line_seg_start)?;
             let range =
                 segment.translate_inner_data_range(curr_line_data_start, line_end_data_start);
             assert!(line_end_data_start - curr_seg_data_start <= Segment::MAX_SIZE);
@@ -400,6 +401,7 @@ mod test {
     use std::{
         fs::File,
         io::{BufReader, Read},
+        num::NonZeroUsize,
     };
 
     use crate::{buf::SegBuffer, index::Index};
@@ -422,15 +424,15 @@ mod test {
     fn file_stream_consistency_base(file: File, line_count: usize) -> Result<()> {
         let stream = BufReader::new(file.try_clone()?);
 
-        let mut file_index = SegBuffer::<Index>::read_file(file, 25)?;
+        let mut file_index = SegBuffer::<Index>::read_file(file, NonZeroUsize::new(25).unwrap())?;
         let mut stream_index = SegBuffer::<Index>::read_stream(Box::new(stream))?;
 
         assert_eq!(file_index.line_count(), stream_index.line_count());
         assert_eq!(file_index.line_count(), line_count);
         for i in 0..file_index.line_count() {
             assert_eq!(
-                file_index.get_line(i).as_str(),
-                stream_index.get_line(i).as_str()
+                file_index.get_line(i).unwrap().as_str(),
+                stream_index.get_line(i).unwrap().as_str()
             );
         }
 
@@ -459,7 +461,7 @@ mod test {
         let file_len = file.metadata()?.len();
         let mut reader = BufReader::new(file.try_clone()?);
 
-        let file_buffer = SegBuffer::<Index>::read_file(file, 25)?;
+        let file_buffer = SegBuffer::<Index>::read_file(file, NonZeroUsize::new(25).unwrap())?;
         let mut buffers = file_buffer.segment_iter()?;
 
         let mut total_bytes = 0;

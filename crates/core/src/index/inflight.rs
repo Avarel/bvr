@@ -2,7 +2,7 @@
 //! that allow the use of [IncompleteIndex] functionalities while it is "inflight"
 //! or in the middle of the indexing operation.
 
-use super::{BufferIndex, Index, IncompleteIndex};
+use super::{BufferIndex, IncompleteIndex, Index};
 use crate::{
     buf::segment::{Segment, SegmentMut},
     err::{Error, Result},

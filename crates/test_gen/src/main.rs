@@ -1,6 +1,11 @@
-use std::{fs::OpenOptions, io::BufWriter, io::{Write, stdout}, ops::Range};
-use rand::{distributions::Alphanumeric, Rng, rngs::SmallRng, SeedableRng};
 use anyhow::Result;
+use rand::{distributions::Alphanumeric, rngs::SmallRng, Rng, SeedableRng};
+use std::{
+    fs::OpenOptions,
+    io::BufWriter,
+    io::{stdout, Write},
+    ops::Range,
+};
 
 fn main() -> Result<()> {
     std::fs::create_dir("tests").ok();
@@ -10,7 +15,12 @@ fn main() -> Result<()> {
     Ok(())
 }
 
-fn generate_log_file(path: &str, lines: usize, chars_per_line: Range<usize>, seed: u64) -> Result<()> {
+fn generate_log_file(
+    path: &str,
+    lines: usize,
+    chars_per_line: Range<usize>,
+    seed: u64,
+) -> Result<()> {
     let mut rng = SmallRng::seed_from_u64(seed);
 
     let file = OpenOptions::new()
@@ -22,7 +32,7 @@ fn generate_log_file(path: &str, lines: usize, chars_per_line: Range<usize>, see
 
     let mut stdout = stdout().lock();
     let mut writer = BufWriter::new(file);
-    
+
     for i in 0..lines {
         let len = rng.gen_range(chars_per_line.clone());
 

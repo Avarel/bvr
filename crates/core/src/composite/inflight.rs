@@ -26,39 +26,78 @@ impl Inflightable for Composite {
     }
 }
 
+struct QueueMatch<B> {
+    matches: B,
+    index: usize,
+}
+
+struct Queues<B> {
+    queues: Vec<QueueMatch<B>>,
+}
+
+impl<B> Queues<B>
+where
+    B: BufferMatches,
+{
+    fn new(queues: Vec<B>) -> Self {
+        Self {
+            queues: queues
+                .into_iter()
+                .map(|queue| QueueMatch {
+                    matches: queue,
+                    index: 0,
+                })
+                .collect(),
+        }
+    }
+
+    fn take_lowest(&mut self) -> Option<usize> {
+        // Take the lowest line number from all the queues
+        // and progress the queue that yielded the lowest line number
+        'outer: loop {
+            let mut min = None;
+            for queue in &mut self.queues {
+                // We reached the end of this queue but its not complete
+                // It could yield a lower line number than all of the other queues
+                if queue.index >= queue.matches.len() && !queue.matches.is_complete() {
+                    continue 'outer;
+                }
+                if let Some(ln) = queue.matches.get(queue.index) {
+                    if let Some((_, min_ln)) = min {
+                        if ln < min_ln {
+                            min = Some((&mut queue.index, ln));
+                        }
+                    } else {
+                        min = Some((&mut queue.index, ln));
+                    }
+                }
+            }
+
+            return if let Some((offset, line_number)) = min {
+                *offset += 1;
+                Some(line_number)
+            } else {
+                assert!(self.queues.iter().all(|queue| queue.matches.is_complete()));
+                None
+            };
+        }
+    }
+}
+
 impl InflightImpl<Composite> {
     fn compute<B>(self: Arc<Self>, filters: Vec<B>) -> Result<()>
     where
         B: BufferMatches,
     {
-        let mut filters = filters.into_iter().map(|v| (0, v)).collect::<Vec<_>>();
+        let mut queues = Queues::new(filters);
 
-        'outer: while Arc::strong_count(&self) >= 2 {
-            let mut min = None;
-            for (offset, filter) in &mut filters {
-                // We have in progress pending searches, and they could yield something
-                // thats lower than every other search thats ready to yield a result
-                if *offset >= filter.len() && !filter.is_complete() {
-                    continue 'outer;
-                }
-                if let Some(ln) = filter.get(*offset) {
-                    if let Some((_, min_ln)) = min {
-                        if ln < min_ln {
-                            min = Some((offset, ln));
-                        }
-                    } else {
-                        min = Some((offset, ln));
-                    }
-                }
-            }
-
-            if let Some((offset, line_number)) = min {
-                *offset += 1;
-                self.write(|inner| inner.add_line(line_number));
-            } else if filters.iter().all(|(_, filter)| filter.is_complete()) {
+        while let Some(line_number) = queues.take_lowest() {
+            if Arc::strong_count(&self) < 2 {
                 break;
             }
+            self.write(|inner| inner.add_line(line_number));
         }
+
         self.mark_complete();
         Ok(())
     }

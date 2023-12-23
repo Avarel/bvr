@@ -1,7 +1,7 @@
 pub mod filters;
 // mod composite;
 
-use bvr_core::{SegStr, matches::BufferMatches};
+use bvr_core::{matches::BufferMatches, SegStr};
 use ratatui::style::Color;
 use regex::bytes::Regex;
 use std::ops::Range;
@@ -151,10 +151,15 @@ impl Instance {
             let line_number = if self.filterer.filters.all().is_enabled() {
                 index
             } else {
-                self.filterer.composite.get(index).expect("valid index into composite")
+                self.filterer
+                    .composite
+                    .get(index)
+                    .expect("valid index into composite")
             };
 
-            let data = self.file.get_line(line_number);
+            let Some(data) = self.file.get_line(line_number) else {
+                break;
+            };
             let color = filters
                 .iter()
                 .rev()
@@ -176,7 +181,10 @@ impl Instance {
         if self.filterer.filters.all().is_enabled() {
             self.viewport.current()
         } else {
-            self.filterer.composite.get(self.viewport.current()).unwrap()
+            self.filterer
+                .composite
+                .get(self.viewport.current())
+                .unwrap()
         }
     }
 

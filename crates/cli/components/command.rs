@@ -167,7 +167,6 @@ impl CommandApp {
         }
     }
 
-
     pub fn enter_char(&mut self, input: char) {
         let mut b = [0];
         self.enter_str(input.encode_utf8(&mut b));
@@ -180,18 +179,24 @@ impl CommandApp {
         match self.cursor {
             Cursor::Singleton(i) => {
                 self.buf.insert_str(i, input);
-                self.move_cursor(HDirection::Right, CursorMovement {
-                    delta: input.len(),
-                    ..CursorMovement::DEFAULT
-                })
+                self.move_cursor(
+                    HDirection::Right,
+                    CursorMovement {
+                        delta: input.len(),
+                        ..CursorMovement::DEFAULT
+                    },
+                )
             }
             Cursor::Selection(start, end, _) => {
                 self.buf.replace_range(start..end, input);
                 self.move_cursor(HDirection::Left, CursorMovement::DEFAULT);
-                self.move_cursor(HDirection::Right, CursorMovement {
-                    delta: input.len(),
-                    ..CursorMovement::DEFAULT
-                })
+                self.move_cursor(
+                    HDirection::Right,
+                    CursorMovement {
+                        delta: input.len(),
+                        ..CursorMovement::DEFAULT
+                    },
+                )
             }
         }
     }

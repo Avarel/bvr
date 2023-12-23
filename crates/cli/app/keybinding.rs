@@ -1,9 +1,9 @@
-use crossterm::event::{Event, KeyCode, KeyModifiers, MouseEventKind, KeyEventKind};
+use crossterm::event::{Event, KeyCode, KeyEventKind, KeyModifiers, MouseEventKind};
 
 use crate::direction::{HDirection, VDirection};
 
 use super::{
-    actions::{Action, CommandAction, Jump, ViewerAction, Delta, FilterAction},
+    actions::{Action, CommandAction, Delta, FilterAction, Jump, ViewerAction},
     InputMode,
 };
 
@@ -53,16 +53,18 @@ impl Keybinding {
                         direction: VDirection::up_if(key.code == KeyCode::Home),
                         delta: Delta::Boundary,
                     })),
-                    KeyCode::PageUp | KeyCode::PageDown => Some(Action::Viewer(ViewerAction::Pan {
-                        direction: VDirection::up_if(key.code == KeyCode::PageUp),
-                        delta: Delta::Page,
-                    })),
+                    KeyCode::PageUp | KeyCode::PageDown => {
+                        Some(Action::Viewer(ViewerAction::Pan {
+                            direction: VDirection::up_if(key.code == KeyCode::PageUp),
+                            delta: Delta::Page,
+                        }))
+                    }
                     KeyCode::Char(c @ ('u' | 'd')) => Some(Action::Viewer(ViewerAction::Pan {
                         direction: VDirection::up_if(c == 'u'),
                         delta: Delta::HalfPage,
                     })),
-                    KeyCode::Left | KeyCode::Right => Some(Action::Viewer(ViewerAction::SwitchActive(
-                        HDirection::left_if(key.code == KeyCode::Left)),
+                    KeyCode::Left | KeyCode::Right => Some(Action::Viewer(
+                        ViewerAction::SwitchActive(HDirection::left_if(key.code == KeyCode::Left)),
                     )),
                     _ => None,
                 },
@@ -81,16 +83,18 @@ impl Keybinding {
                         direction: VDirection::up_if(key.code == KeyCode::Home),
                         delta: Delta::Boundary,
                     })),
-                    KeyCode::PageUp | KeyCode::PageDown => Some(Action::Filter(FilterAction::Move {
-                        direction: VDirection::up_if(key.code == KeyCode::PageUp),
-                        delta: Delta::Page,
-                    })),
+                    KeyCode::PageUp | KeyCode::PageDown => {
+                        Some(Action::Filter(FilterAction::Move {
+                            direction: VDirection::up_if(key.code == KeyCode::PageUp),
+                            delta: Delta::Page,
+                        }))
+                    }
                     KeyCode::Char(c @ ('u' | 'd')) => Some(Action::Filter(FilterAction::Move {
                         direction: VDirection::up_if(c == 'u'),
                         delta: Delta::HalfPage,
                     })),
-                    KeyCode::Left | KeyCode::Right => Some(Action::Viewer(ViewerAction::SwitchActive(
-                        HDirection::left_if(key.code == KeyCode::Left)),
+                    KeyCode::Left | KeyCode::Right => Some(Action::Viewer(
+                        ViewerAction::SwitchActive(HDirection::left_if(key.code == KeyCode::Left)),
                     )),
                     KeyCode::Char(' ') | KeyCode::Enter => {
                         Some(Action::Filter(FilterAction::Toggle))
@@ -117,8 +121,8 @@ impl Keybinding {
                         direction: VDirection::up_if(key.code == KeyCode::Up),
                         delta: Delta::Number(1),
                     })),
-                    KeyCode::Left | KeyCode::Right => Some(Action::Viewer(ViewerAction::SwitchActive(
-                        HDirection::left_if(key.code == KeyCode::Left)),
+                    KeyCode::Left | KeyCode::Right => Some(Action::Viewer(
+                        ViewerAction::SwitchActive(HDirection::left_if(key.code == KeyCode::Left)),
                     )),
                     KeyCode::Char(' ') | KeyCode::Enter => {
                         Some(Action::Viewer(ViewerAction::ToggleLine))

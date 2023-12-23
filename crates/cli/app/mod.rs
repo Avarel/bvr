@@ -9,11 +9,7 @@ use crate::components::{
     viewer::Instance,
 };
 use anyhow::Result;
-use bvr_core::{
-    buf::SegBuffer,
-    InflightIndex,
-    index::inflight::Stream,
-};
+use bvr_core::{buf::SegBuffer, index::inflight::Stream, InflightIndex};
 use crossterm::{
     event::{
         self, DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture,
@@ -23,7 +19,7 @@ use crossterm::{
 };
 use ratatui::prelude::*;
 use regex::bytes::RegexBuilder;
-use std::{path::Path, time::Duration};
+use std::{num::NonZeroUsize, path::Path, time::Duration};
 
 use self::{
     actions::{Action, CommandAction, Delta, ViewerAction},
@@ -68,7 +64,10 @@ impl App {
             .file_name()
             .map(|str| str.to_string_lossy().into_owned())
             .unwrap_or_else(|| String::from("Unnamed File"));
-        self.push_instance(name, SegBuffer::<InflightIndex>::read_file(file, 25)?);
+        self.push_instance(
+            name,
+            SegBuffer::<InflightIndex>::read_file(file, NonZeroUsize::new(25).unwrap())?,
+        );
         Ok(())
     }
 
@@ -234,8 +233,7 @@ impl App {
                 viewer.filterer.compute_composite();
             }
         } else if let Some(pat) = command.strip_prefix("find ") {
-            let regex = match RegexBuilder::new(pat).case_insensitive(true).build()
-            {
+            let regex = match RegexBuilder::new(pat).case_insensitive(true).build() {
                 Ok(r) => r,
                 Err(err) => {
                     self.status.submit_message(
@@ -252,8 +250,7 @@ impl App {
             }
         } else if let Some(pat) = command.strip_prefix("findl ") {
             let pat = regex::escape(pat);
-            let regex = match RegexBuilder::new(&pat).case_insensitive(true).build()
-            {
+            let regex = match RegexBuilder::new(&pat).case_insensitive(true).build() {
                 Ok(r) => r,
                 Err(err) => {
                     self.status.submit_message(

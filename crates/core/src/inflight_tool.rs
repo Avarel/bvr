@@ -16,7 +16,7 @@ pub trait Inflightable: Sized {
     fn finish(inner: Self::Incomplete) -> Self;
 
     /// Create a snapshot of the incomplete data.
-    /// 
+    ///
     /// Ideally, this operation should be *extremely* cheap to reduce
     /// the amount of time the internal lock is held.
     fn snapshot(inner: &Self::Incomplete) -> Self;

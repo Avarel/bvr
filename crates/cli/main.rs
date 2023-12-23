@@ -2,7 +2,7 @@ mod app;
 mod components;
 mod direction;
 
-use std::{path::PathBuf, io::IsTerminal};
+use std::{io::IsTerminal, path::PathBuf};
 
 use anyhow::Result;
 use app::App;

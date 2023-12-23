@@ -7,7 +7,7 @@ use crate::inflight_tool::{Inflight, InflightImpl, Inflightable};
 use crate::SegBuffer;
 use crate::{index::BufferIndex, Result};
 
-use super::{BufferMatches, Matches, IncompleteMatches};
+use super::{BufferMatches, IncompleteMatches, Matches};
 
 impl Inflightable for Matches {
     type Incomplete = IncompleteMatches;
