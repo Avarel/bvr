@@ -148,16 +148,16 @@ pub struct Filterer {
 #[derive(Clone)]
 pub struct Filters {
     all: Filter,
-    searches: Vec<Filter>,
     bookmarks: Filter,
+    searches: Vec<Filter>,
 }
 
 impl Filters {
     fn new() -> Self {
         Self {
             all: Filter::all(),
-            searches: Vec::new(),
             bookmarks: Filter::bookmark(),
+            searches: Vec::new(),
         }
     }
 
@@ -167,14 +167,14 @@ impl Filters {
 
     pub fn iter(&self) -> impl Iterator<Item = &Filter> {
         std::iter::once(&self.all)
-            .chain(self.searches.iter())
             .chain(std::iter::once(&self.bookmarks))
+            .chain(self.searches.iter())
     }
 
     pub fn iter_mut(&mut self) -> impl Iterator<Item = &mut Filter> {
         std::iter::once(&mut self.all)
-            .chain(self.searches.iter_mut())
             .chain(std::iter::once(&mut self.bookmarks))
+            .chain(self.searches.iter_mut())
     }
 
     pub fn try_finalize(&mut self) {
@@ -229,7 +229,7 @@ pub struct FilterData<'a> {
 impl Filterer {
     pub fn new() -> Self {
         Self {
-            composite: InflightComposite::new().0,
+            composite: InflightComposite::empty(),
             viewport: Viewport::new(),
             filters: Filters::new(),
         }
@@ -282,8 +282,8 @@ impl Filterer {
 
         match self.viewport.current() {
             0 => &mut self.filters.all,
-            i if i == self.filters.len() - 1 => &mut self.filters.bookmarks,
-            _ => &mut self.filters.searches[self.viewport.current() - 1],
+            1 => &mut self.filters.bookmarks,
+            _ => &mut self.filters.searches[self.viewport.current() - 2],
         }
     }
 
@@ -292,9 +292,9 @@ impl Filterer {
 
         match self.viewport.current() {
             0 => self.filters.all.enabled = false,
-            i if i == self.filters.len() - 1 => self.filters.bookmarks.enabled = false,
+            1 => self.filters.bookmarks.enabled = false,
             _ => {
-                self.filters.searches.remove(self.viewport.current() - 1);
+                self.filters.searches.remove(self.viewport.current() - 2);
             }
         }
     }
