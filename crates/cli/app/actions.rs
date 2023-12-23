@@ -19,16 +19,21 @@ pub enum Delta {
 }
 
 pub enum ViewerAction {
-    Pan { direction: VDirection, delta: Delta },
-    Move { direction: VDirection, delta: Delta },
-    ToggleLine,
+    Pan { direction: VDirection, delta: Delta, target_view: Option<usize> },
+    MoveSelect { direction: VDirection, delta: Delta },
+    ToggleSelectedLine,
+    ToggleLine {
+        target_view: usize,
+        line_number: usize,
+    },
     SwitchActive(HDirection),
+    SwitchActiveIndex(usize),
 }
 
 pub enum FilterAction {
-    Move { direction: VDirection, delta: Delta },
-    Toggle,
-    Remove,
+    MoveSelect { direction: VDirection, delta: Delta },
+    ToggleSelectedFilter,
+    RemoveSelectedFilter,
 }
 
 pub enum CommandAction {

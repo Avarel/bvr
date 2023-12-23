@@ -3,7 +3,7 @@ name = "bvr"
 description = "Chew through logs."
 categories = ["command-line-utilities"]
 authors = ["An Tran <antranprm@gmail.com>"]
-version = "0.0.2"
+version = "0.0.3"
 edition = "2021"
 license = "MIT"
 keywords = ["cli", "pager"]
@@ -29,12 +29,13 @@ name = "bvr"
 members = ["crates/core", "crates/test_gen"]
 
 [dependencies]
+bvr-core = { version = "0.0.3", path = "crates/core" }
 anyhow = "1.0"
 clap = { version = "4.4", features = ["cargo", "derive"] }
 crossterm = { version = "0.27", features = ["use-dev-tty"] }
 ratatui = "0.25"
-bvr-core = { version = "0.0.2", path = "crates/core" }
 regex = "1.10"
+itoa = "1.0"
 
 [profile.release]
 strip = true

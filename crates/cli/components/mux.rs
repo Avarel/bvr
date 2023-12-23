@@ -63,13 +63,14 @@ impl MultiplexerApp {
     }
 
     pub fn move_active(&mut self, direction: HDirection) {
-        self.active = match direction {
+        self.move_active_index(match direction {
             HDirection::Left => self.active.saturating_sub(1),
-            HDirection::Right => self
-                .active
-                .saturating_add(1)
-                .min(self.views.len().saturating_sub(1)),
-        }
+            HDirection::Right => self.active.saturating_add(1),
+        })
+    }
+
+    pub fn move_active_index(&mut self, index: usize) {
+        self.active = index.min(self.views.len().saturating_sub(1));
     }
 
     pub fn active_viewer_mut(&mut self) -> Option<&mut Instance> {

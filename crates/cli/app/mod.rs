@@ -1,5 +1,6 @@
 mod actions;
 mod keybinding;
+mod mouse;
 mod widgets;
 
 use crate::components::{
@@ -17,13 +18,14 @@ use crossterm::{
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
-use ratatui::prelude::*;
+use ratatui::{prelude::*, widgets::Widget};
 use regex::bytes::RegexBuilder;
 use std::{num::NonZeroUsize, path::Path, time::Duration};
 
 use self::{
     actions::{Action, CommandAction, Delta, ViewerAction},
     keybinding::Keybinding,
+    mouse::MouseHandler,
     widgets::{CommandWidget, MultiplexerWidget},
 };
 
@@ -107,16 +109,25 @@ impl App {
     }
 
     fn event_loop(&mut self, terminal: &mut Terminal) -> Result<()> {
+        let mut mouse_handler = MouseHandler::new();
+
         loop {
-            terminal.draw(|f| self.ui(f))?;
+            terminal.draw(|f| self.ui(f, &mut mouse_handler))?;
 
-            if !event::poll(Duration::from_secs_f64(1.0 / 30.0))? {
-                continue;
-            }
+            let action = match mouse_handler.extract() {
+                Some(action) => action,
+                None => {
+                    if !event::poll(Duration::from_secs_f64(1.0 / 30.0))? {
+                        continue;
+                    }
 
-            let key = self.keybinds.map_key(self.mode, event::read()?);
-
-            let Some(action) = key else { continue };
+                    let mut event = event::read()?;
+                    let key = self.keybinds.map_key(self.mode, &mut event);
+                    mouse_handler.publish_event(event);
+                    let Some(action) = key else { continue };
+                    action
+                }
+            };
 
             match action {
                 Action::Exit => break,
@@ -131,8 +142,18 @@ impl App {
                     }
                 }
                 Action::Viewer(action) => match action {
-                    ViewerAction::Pan { direction, delta } => {
-                        if let Some(viewer) = self.mux.active_viewer_mut() {
+                    ViewerAction::Pan {
+                        direction,
+                        delta,
+                        target_view,
+                    } => {
+                        let viewer = if let Some(index) = target_view {
+                            self.mux.viewers_mut().get_mut(index)
+                        } else {
+                            self.mux.active_viewer_mut()
+                        };
+
+                        if let Some(viewer) = viewer {
                             let delta = match delta {
                                 Delta::Number(n) => usize::from(n),
                                 Delta::Page => viewer.viewport().height(),
@@ -143,7 +164,8 @@ impl App {
                         }
                     }
                     ViewerAction::SwitchActive(direction) => self.mux.move_active(direction),
-                    ViewerAction::Move { direction, delta } => {
+                    ViewerAction::SwitchActiveIndex(index) => self.mux.move_active_index(index),
+                    ViewerAction::MoveSelect { direction, delta } => {
                         if let Some(viewer) = self.mux.active_viewer_mut() {
                             let delta = match delta {
                                 Delta::Number(n) => usize::from(n),
@@ -154,15 +176,26 @@ impl App {
                             viewer.viewport_mut().move_select(direction, delta)
                         }
                     }
-                    ViewerAction::ToggleLine => {
+                    ViewerAction::ToggleSelectedLine => {
                         if let Some(viewer) = self.mux.active_viewer_mut() {
                             let ln = viewer.current_selected_file_line();
                             viewer.filterer.filters.bookmarks_mut().toggle(ln);
+                            viewer.filterer.compute_composite();
                         }
+                    }
+                    ViewerAction::ToggleLine {
+                        target_view,
+                        line_number,
+                    } => {
+                        let Some(viewer) = self.mux.viewers_mut().get_mut(target_view) else {
+                            continue;
+                        };
+                        viewer.filterer.filters.bookmarks_mut().toggle(line_number);
+                        viewer.filterer.compute_composite();
                     }
                 },
                 Action::Filter(action) => match action {
-                    actions::FilterAction::Move { direction, delta } => {
+                    actions::FilterAction::MoveSelect { direction, delta } => {
                         if let Some(viewer) = self.mux.active_viewer_mut() {
                             let viewport = &mut viewer.filterer.viewport;
                             let delta = match delta {
@@ -174,13 +207,13 @@ impl App {
                             viewport.move_select(direction, delta)
                         }
                     }
-                    actions::FilterAction::Toggle => {
+                    actions::FilterAction::ToggleSelectedFilter => {
                         if let Some(viewer) = self.mux.active_viewer_mut() {
                             viewer.filterer.current_filter_mut().toggle();
                             viewer.filterer.compute_composite();
                         }
-                    },
-                    actions::FilterAction::Remove => {
+                    }
+                    actions::FilterAction::RemoveSelectedFilter => {
                         if let Some(viewer) = self.mux.active_viewer_mut() {
                             viewer.filterer.remove_current_filter();
                             viewer.filterer.compute_composite();
@@ -286,30 +319,21 @@ impl App {
         true
     }
 
-    fn ui(&mut self, f: &mut Frame) {
-        let chunks = Layout::default()
-            .direction(Direction::Vertical)
-            .constraints([Constraint::Min(1), Constraint::Length(1)])
-            .split(f.size());
+    fn ui(&mut self, f: &mut Frame, handler: &mut MouseHandler) {
+        let [mux_chunk, cmd_chunk] = MultiplexerWidget::split_status(f.size());
 
-        f.render_widget(
-            MultiplexerWidget {
-                mux: &mut self.mux,
-                status: &mut self.status,
-                mode: self.mode,
-            },
-            chunks[0],
-        );
+        MultiplexerWidget {
+            mux: &mut self.mux,
+            status: &mut self.status,
+            mode: self.mode,
+        }.render(mux_chunk, f.buffer_mut(), handler);
 
         let mut cursor = None;
-        f.render_widget(
-            CommandWidget {
-                active: self.mode == InputMode::Command,
-                inner: &self.command,
-                cursor: &mut cursor,
-            },
-            chunks[1],
-        );
+        CommandWidget {
+            active: self.mode == InputMode::Command,
+            inner: &self.command,
+            cursor: &mut cursor,
+        }.render(cmd_chunk, f.buffer_mut());
 
         if let Some((x, y)) = cursor {
             f.set_cursor(x, y);

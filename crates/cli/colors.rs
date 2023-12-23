@@ -25,7 +25,7 @@ pub const COMMAND_ACCENT: Color = Color::Indexed(48);
 pub const SELECT_ACCENT: Color = Color::Indexed(170);
 pub const FILTER_ACCENT: Color = Color::Indexed(178);
 
-pub const SEARCH_COLOR_LIST: &'static [Color] = &[
+pub const SEARCH_COLOR_LIST: &[Color] = &[
     Color::Red,
     Color::Indexed(178), // Orange
     Color::Yellow,

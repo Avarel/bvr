@@ -103,19 +103,20 @@ checksum = "327762f6e5a765692301e5bb513e0d9fef63be86bbc14528052b1cd3e6f03e07"
 
 [[package]]
 name = "bvr"
-version = "0.0.2"
+version = "0.0.3"
 dependencies = [
  "anyhow",
  "bvr-core",
  "clap",
  "crossterm",
+ "itoa",
  "ratatui",
  "regex",
 ]
 
 [[package]]
 name = "bvr-core"
-version = "0.0.2"
+version = "0.0.3"
 dependencies = [
  "anyhow",
  "lru",
@@ -293,6 +294,12 @@ checksum = "25db6b064527c5d482d0423354fcd07a89a2dfe07b67892e62411946db7f07b0"
 dependencies = [
  "either",
 ]
+
+[[package]]
+name = "itoa"
+version = "1.0.10"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b1a46d1a171d865aa5f83f92695765caa047a9b4cbae2cbf37dbd613a793fd4c"
 
 [[package]]
 name = "libc"

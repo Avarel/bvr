@@ -108,6 +108,7 @@ pub struct LineData {
     pub line_number: usize,
     pub data: SegStr,
     pub color: Color,
+    pub bookmarked: bool,
     pub selected: bool,
 }
 
@@ -171,10 +172,13 @@ impl Instance {
                 .map(|filter| filter.color)
                 .unwrap_or(Color::White);
 
+            let bookmarked = self.filterer.filters.bookmarks().has_line(line_number);
+
             lines.push(LineData {
                 line_number,
                 data,
                 color,
+                bookmarked,
                 selected: index == self.viewport.current,
             });
         }

@@ -1,15 +1,22 @@
-use crate::{components::{
-    command::{CommandApp, Cursor, SelectionOrigin},
-    filters::FilterData,
-    mux::{MultiplexerApp, MultiplexerMode},
-    status::StatusApp,
-    viewer::{Instance, LineData},
-}, colors};
+use crate::{
+    colors,
+    components::{
+        command::{CommandApp, Cursor, SelectionOrigin},
+        filters::FilterData,
+        mux::{MultiplexerApp, MultiplexerMode},
+        status::StatusApp,
+        viewer::{Instance, LineData},
+    },
+    direction::VDirection,
+};
+use crossterm::event::MouseEventKind;
 use ratatui::{prelude::*, widgets::*};
 
-use super::InputMode;
-
-
+use super::{
+    actions::{Action, Delta, ViewerAction},
+    mouse::MouseHandler,
+    InputMode,
+};
 
 enum StatusWidgetState<'a> {
     Normal { line_count: usize, name: &'a str },
@@ -95,18 +102,12 @@ impl Widget for CommandWidget<'_> {
         .bg(colors::BG);
 
         if self.active {
-            match *self.inner.cursor() {
-                Cursor::Singleton(i) => {
-                    *self.cursor = Some((area.x + i as u16 + 1, area.y));
-                }
-                Cursor::Selection(start, end, dir) => {
-                    let x = match dir {
-                        SelectionOrigin::Right => end,
-                        SelectionOrigin::Left => start,
-                    };
-                    *self.cursor = Some((area.x + x as u16 + 1, area.y));
-                }
-            }
+            let i = match *self.inner.cursor() {
+                Cursor::Singleton(i) => i,
+                Cursor::Selection(start, _, SelectionOrigin::Right) => start,
+                Cursor::Selection(_, end, SelectionOrigin::Left) => end,
+            };
+            *self.cursor = Some((area.x + i as u16 + 1, area.y));
         }
         input.render(area, buf);
     }
@@ -116,7 +117,7 @@ pub struct FilterViewerWidget<'a> {
     viewer: &'a mut Instance,
 }
 
-impl Widget for FilterViewerWidget<'_> {
+impl FilterViewerWidget<'_> {
     fn render(self, area: Rect, buf: &mut Buffer) {
         const WIDGET_BLOCK: Block = Block::new().style(Style::new().bg(colors::STATUS_BAR));
         WIDGET_BLOCK.render(area, buf);
@@ -134,12 +135,13 @@ impl Widget for FilterViewerWidget<'_> {
 }
 
 pub struct ViewerWidget<'a> {
+    view_index: usize,
     viewer: &'a mut Instance,
     gutter: bool,
 }
 
-impl Widget for ViewerWidget<'_> {
-    fn render(self, area: Rect, buf: &mut Buffer) {
+impl ViewerWidget<'_> {
+    fn render(self, area: Rect, buf: &mut Buffer, handle: &mut MouseHandler) {
         let view = self.viewer.update_and_view(area.height as usize);
 
         let gutter_size = self.gutter.then(|| {
@@ -149,30 +151,49 @@ impl Widget for ViewerWidget<'_> {
                 .max(4)
         });
 
+        let mut itoa_buf = itoa::Buffer::new();
         let mut y = area.y;
         for line in view.into_iter() {
             ViewerLineWidget {
+                view_index: self.view_index,
                 line: Some(line),
+                itoa_buf: &mut itoa_buf,
                 gutter_size,
             }
-            .render(Rect::new(area.x, y, area.width, 1), buf);
+            .render(Rect::new(area.x, y, area.width, 1), buf, handle);
             y += 1;
         }
 
         while y < area.bottom() {
             ViewerLineWidget {
+                view_index: self.view_index,
                 line: None,
+                itoa_buf: &mut itoa_buf,
                 gutter_size,
             }
-            .render(Rect::new(area.x, y, area.width, 1), buf);
+            .render(Rect::new(area.x, y, area.width, 1), buf, handle);
             y += 1;
         }
+
+        handle.on_mouse(area, |event| match event.kind {
+            MouseEventKind::ScrollUp | MouseEventKind::ScrollDown => {
+                Some(Action::Viewer(ViewerAction::Pan {
+                    direction: VDirection::up_if(event.kind == MouseEventKind::ScrollUp),
+                    delta: Delta::Number(2),
+                    target_view: Some(self.view_index),
+                }))
+            }
+            // MouseEventKind::Down(_) => Some(Action::Viewer(ViewerAction::SwitchActiveIndex(
+            //     self.view_index,
+            // ))),
+            _ => None,
+        });
     }
 }
 
 struct EdgeBg(bool);
 
-impl Widget for EdgeBg {
+impl EdgeBg {
     fn render(self, area: Rect, buf: &mut Buffer) {
         if self.0 {
             const WIDGET_BLOCK: Block = Block::new()
@@ -207,7 +228,7 @@ struct FilterLineWidget<'a> {
     inner: &'a FilterData<'a>,
 }
 
-impl Widget for FilterLineWidget<'_> {
+impl FilterLineWidget<'_> {
     fn render(self, area: Rect, buf: &mut Buffer) {
         let mut v = vec![
             Span::from(if self.inner.selected { " ▶" } else { "  " }).fg(colors::FILTER_ACCENT),
@@ -223,13 +244,15 @@ impl Widget for FilterLineWidget<'_> {
     }
 }
 
-struct ViewerLineWidget {
+struct ViewerLineWidget<'a> {
+    view_index: usize,
+    itoa_buf: &'a mut itoa::Buffer,
     gutter_size: Option<u16>,
     line: Option<LineData>,
 }
 
-impl Widget for ViewerLineWidget {
-    fn render(self, area: Rect, buf: &mut Buffer) {
+impl ViewerLineWidget<'_> {
+    fn render(self, area: Rect, buf: &mut Buffer, handle: &mut MouseHandler) {
         const SPECIAL_SIZE: u16 = 3;
 
         let gutter_size = self.gutter_size.unwrap_or(0);
@@ -245,11 +268,16 @@ impl Widget for ViewerLineWidget {
         data_chunk.width = data_chunk.width.saturating_sub(gutter_size + SPECIAL_SIZE);
 
         if self.gutter_size.is_some() {
-            if let Some(line) = self.line {
-                let ln_str = (line.line_number + 1).to_string();
-                let ln = Paragraph::new(ln_str)
-                    .alignment(Alignment::Right)
-                    .fg(colors::GUTTER_TEXT);
+            if let Some(line) = &self.line {
+                let ln_str = self.itoa_buf.format(line.line_number + 1);
+                let ln =
+                    Paragraph::new(ln_str)
+                        .alignment(Alignment::Right)
+                        .fg(if line.bookmarked {
+                            colors::SELECT_ACCENT
+                        } else {
+                            colors::GUTTER_TEXT
+                        });
 
                 ln.render(gutter_chunk, buf);
 
@@ -267,16 +295,66 @@ impl Widget for ViewerLineWidget {
 
                 ln.render(gutter_chunk, buf);
             }
-        } else if let Some(line) = self.line {
+        } else if let Some(line) = &self.line {
             if line.selected {
                 let ln = Paragraph::new("▶").fg(colors::SELECT_ACCENT);
                 ln.render(type_chunk, buf);
+            } else if line.bookmarked {
+                let ln = Paragraph::new("▸").fg(colors::SELECT_ACCENT);
+                ln.render(type_chunk, buf);
             }
 
-            let data = Paragraph::new(line.data.as_str());
+            let data = Paragraph::new(line.data.as_str()).fg(line.color);
 
-            data.render(area, buf);
+            data.render(data_chunk, buf);
         }
+
+        if let Some(line) = self.line {
+            handle.on_mouse(area, |event| match event.kind {
+                MouseEventKind::Down(_) => Some(Action::Viewer(ViewerAction::ToggleLine {
+                    line_number: line.line_number,
+                    target_view: self.view_index,
+                })),
+                _ => None,
+            });
+        }
+    }
+}
+
+pub struct TabWidget<'a> {
+    view_index: usize,
+    name: &'a str,
+    active: bool,
+}
+
+impl TabWidget<'_> {
+    fn render(self, area: Rect, buf: &mut Buffer, handle: &mut MouseHandler) {
+        Paragraph::new(Line::from(vec![
+            if self.active {
+                Span::from("▍ ").fg(colors::TAB_SIDE_ACTIVE)
+            } else {
+                Span::from("▏ ").fg(colors::TAB_SIDE_INACTIVE)
+            },
+            Span::from(self.name),
+        ]))
+        .bg(if self.active {
+            colors::TAB_ACTIVE
+        } else {
+            colors::TAB_INACTIVE
+        })
+        .fg(if self.active {
+            colors::TEXT_ACTIVE
+        } else {
+            colors::TEXT_INACTIVE
+        })
+        .render(area, buf);
+
+        handle.on_mouse(area, |event| match event.kind {
+            MouseEventKind::Down(_) => Some(Action::Viewer(ViewerAction::SwitchActiveIndex(
+                self.view_index,
+            ))),
+            _ => None,
+        });
     }
 }
 
@@ -287,7 +365,7 @@ pub struct MultiplexerWidget<'a> {
 }
 
 impl MultiplexerWidget<'_> {
-    fn split_status(area: Rect) -> [Rect; 2] {
+    pub fn split_status(area: Rect) -> [Rect; 2] {
         let mut status_chunk = area;
         status_chunk.y = status_chunk.bottom().saturating_sub(1);
         status_chunk.height = 1;
@@ -328,38 +406,9 @@ impl MultiplexerWidget<'_> {
     }
 }
 
-pub struct TabWidget<'a> {
-    name: &'a str,
-    active: bool,
-}
-
-impl Widget for TabWidget<'_> {
-    fn render(self, area: Rect, buf: &mut Buffer) {
-        Paragraph::new(Line::from(vec![
-            if self.active {
-                Span::from("▍ ").fg(colors::TAB_SIDE_ACTIVE)
-            } else {
-                Span::from("▏ ").fg(colors::TAB_SIDE_INACTIVE)
-            },
-            Span::from(self.name),
-        ]))
-        .bg(if self.active {
-            colors::TAB_ACTIVE
-        } else {
-            colors::TAB_INACTIVE
-        })
-        .fg(if self.active {
-            colors::TEXT_ACTIVE
-        } else {
-            colors::TEXT_INACTIVE
-        })
-        .render(area, buf);
-    }
-}
-
-impl Widget for MultiplexerWidget<'_> {
-    fn render(self, area: Rect, buf: &mut Buffer) {
-        let chunks = Self::split_status(area);
+impl MultiplexerWidget<'_> {
+    pub fn render(self, area: Rect, buf: &mut Buffer, handler: &mut MouseHandler) {
+        let [mux_chunk, status_chunk] = Self::split_status(area);
 
         fn fixup_chunk(fix: bool, mut chunk: Rect) -> Rect {
             if fix {
@@ -373,17 +422,18 @@ impl Widget for MultiplexerWidget<'_> {
             let active = self.mux.active();
             match self.mux.mode() {
                 MultiplexerMode::Windows => {
-                    let hsplit = Self::split_horizontal(chunks[0], self.mux.len());
+                    let hsplit = Self::split_horizontal(mux_chunk, self.mux.len());
 
                     for (i, (&chunk, viewer)) in
                         hsplit.iter().zip(self.mux.viewers_mut()).enumerate()
                     {
                         let [tab_chunk, view_chunk] = Self::split_tabs(chunk);
                         TabWidget {
+                            view_index: i,
                             name: viewer.name(),
                             active: active == i,
                         }
-                        .render(tab_chunk, buf);
+                        .render(tab_chunk, buf, handler);
 
                         let mut viewer_chunk = view_chunk;
 
@@ -394,27 +444,34 @@ impl Widget for MultiplexerWidget<'_> {
                         }
 
                         ViewerWidget {
+                            view_index: i,
                             viewer,
                             gutter: true,
                         }
-                        .render(fixup_chunk(i != 0, viewer_chunk), buf);
+                        .render(
+                            fixup_chunk(i != 0, viewer_chunk),
+                            buf,
+                            handler,
+                        );
                         EdgeBg(i == 0).render(viewer_chunk, buf)
                     }
                 }
                 MultiplexerMode::Tabs => {
-                    let [tab_chunk, view_chunk] = Self::split_tabs(chunks[0]);
+                    let [tab_chunk, view_chunk] = Self::split_tabs(mux_chunk);
                     let hsplit = Self::split_horizontal(tab_chunk, self.mux.len());
 
                     for (i, (&chunk, viewer)) in
                         hsplit.iter().zip(self.mux.viewers_mut()).enumerate()
                     {
                         TabWidget {
+                            view_index: i,
                             name: viewer.name(),
                             active: active == i,
                         }
-                        .render(chunk, buf);
+                        .render(chunk, buf, handler);
                     }
 
+                    let active = self.mux.active();
                     let viewer = self.mux.active_viewer_mut().unwrap();
                     let mut viewer_chunk = view_chunk;
 
@@ -424,21 +481,22 @@ impl Widget for MultiplexerWidget<'_> {
                         viewer_chunk = view_chunk;
                     }
                     ViewerWidget {
+                        view_index: active,
                         viewer,
                         gutter: true,
                     }
-                    .render(viewer_chunk, buf);
+                    .render(viewer_chunk, buf, handler);
                     EdgeBg(true).render(viewer_chunk, buf)
                 }
             }
         }
 
         match self.status.get_message_update() {
-            Some(message) => StatusWidget {
+            Some(ref message) => StatusWidget {
                 input_mode: self.mode,
-                state: StatusWidgetState::Message { message: &message },
+                state: StatusWidgetState::Message { message },
             }
-            .render(chunks[1], buf),
+            .render(status_chunk, buf),
             None => match self.mux.active_viewer_mut() {
                 Some(viewer) => StatusWidget {
                     input_mode: self.mode,
@@ -447,12 +505,12 @@ impl Widget for MultiplexerWidget<'_> {
                         name: viewer.name(),
                     },
                 }
-                .render(chunks[1], buf),
+                .render(status_chunk, buf),
                 None => StatusWidget {
                     input_mode: self.mode,
                     state: StatusWidgetState::None,
                 }
-                .render(chunks[1], buf),
+                .render(status_chunk, buf),
             },
         }
     }
