@@ -12,12 +12,6 @@ use super::{BufferMatches, IncompleteMatches, Matches};
 impl Inflightable for Matches {
     type Incomplete = IncompleteMatches;
 
-    type Remote = InflightSearchRemote;
-
-    fn make_remote(inner: Arc<crate::inflight_tool::InflightImpl<Self>>) -> Self::Remote {
-        InflightSearchRemote(inner)
-    }
-
     fn finish(inner: Self::Incomplete) -> Self {
         inner.finish()
     }
@@ -53,9 +47,9 @@ impl InflightImpl<Matches> {
     }
 }
 
-pub struct InflightSearchRemote(Arc<InflightImpl<Matches>>);
+pub struct InflightMatchRemote(Arc<InflightImpl<Matches>>);
 
-impl InflightSearchRemote {
+impl InflightMatchRemote {
     /// Index a file and load the data into the associated [InflightIndex].
     pub fn search<Idx>(self, iter: ContiguousSegmentIterator<Idx>, regex: Regex) -> Result<()>
     where
@@ -66,6 +60,11 @@ impl InflightSearchRemote {
 }
 
 impl Inflight<Matches> {
+    pub fn new() -> (Self, InflightMatchRemote) {
+        let inner = Arc::new(InflightImpl::<Matches>::new());
+        (Self::Incomplete(inner.clone()), InflightMatchRemote(inner))
+    }
+
     /// Searches for a regular expression pattern in a segmented buffer.
     ///
     /// # Returns
@@ -112,4 +111,4 @@ impl BufferMatches for Inflight<Matches> {
     }
 }
 
-pub type InflightSearch = Inflight<Matches>;
+pub type InflightMatches = Inflight<Matches>;

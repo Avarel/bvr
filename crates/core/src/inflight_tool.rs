@@ -6,12 +6,6 @@ pub trait Inflightable: Sized {
     /// The incomplete underlying data.
     type Incomplete: Default;
 
-    /// The remote type that is used to set off some processes with the incomplete data.
-    type Remote;
-
-    /// Create a remote from the incomplete data implementation.
-    fn make_remote(inner: Arc<InflightImpl<Self>>) -> Self::Remote;
-
     /// Finish the incomplete data and create a complete data.
     fn finish(inner: Self::Incomplete) -> Self;
 
@@ -95,11 +89,6 @@ impl<I> Inflight<I>
 where
     I: Inflightable,
 {
-    pub fn new() -> (Inflight<I>, I::Remote) {
-        let inner = Arc::new(InflightImpl::<I>::new());
-        (Self::Incomplete(inner.clone()), I::make_remote(inner))
-    }
-
     pub fn try_finalize(&mut self) -> bool {
         match self {
             Self::Incomplete(inner) => {

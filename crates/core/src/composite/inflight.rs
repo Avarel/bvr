@@ -11,12 +11,6 @@ use super::{Composite, IncompleteComposite};
 impl Inflightable for Composite {
     type Incomplete = IncompleteComposite;
 
-    type Remote = InflightCompositeRemote;
-
-    fn make_remote(inner: Arc<crate::inflight_tool::InflightImpl<Self>>) -> Self::Remote {
-        InflightCompositeRemote(inner)
-    }
-
     fn finish(inner: Self::Incomplete) -> Self {
         inner.finish()
     }
@@ -115,6 +109,11 @@ impl InflightCompositeRemote {
 }
 
 impl Inflight<Composite> {
+    pub fn new() -> (Self, InflightCompositeRemote) {
+        let inner = Arc::new(InflightImpl::<Composite>::new());
+        (Self::Incomplete(inner.clone()), InflightCompositeRemote(inner))
+    }
+
     pub fn empty() -> Self {
         Self::Complete(Composite::empty())
     }

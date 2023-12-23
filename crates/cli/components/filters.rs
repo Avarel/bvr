@@ -5,7 +5,7 @@ use bvr_core::{composite::inflight::InflightComposite, cowvec::CowVec, matches::
 use ratatui::style::Color;
 use regex::bytes::Regex;
 
-type SearchResults = bvr_core::InflightSearch;
+type SearchResults = bvr_core::InflightMatches;
 
 #[derive(Clone)]
 enum FilterRepr {

@@ -40,12 +40,6 @@ impl IndexingTask {
 impl Inflightable for Index {
     type Incomplete = IncompleteIndex;
 
-    type Remote = InflightIndexRemote;
-
-    fn make_remote(inner: Arc<crate::inflight_tool::InflightImpl<Self>>) -> Self::Remote {
-        InflightIndexRemote(inner)
-    }
-
     fn finish(inner: Self::Incomplete) -> Self {
         inner.finish()
     }
@@ -161,6 +155,11 @@ impl InflightIndexRemote {
 }
 
 impl Inflight<Index> {
+    pub fn new() -> (Self, InflightIndexRemote) {
+        let inner = Arc::new(InflightImpl::<Index>::new());
+        (Self::Incomplete(inner.clone()), InflightIndexRemote(inner))
+    }
+
     /// Creates a new complete index from a file.
     ///
     /// This function creates a new complete index from the provided file. It internally

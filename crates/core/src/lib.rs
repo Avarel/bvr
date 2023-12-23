@@ -14,4 +14,4 @@ pub use err::Result;
 
 pub use composite::inflight::InflightComposite;
 pub use index::inflight::InflightIndex;
-pub use matches::inflight::InflightSearch;
+pub use matches::inflight::InflightMatches;
