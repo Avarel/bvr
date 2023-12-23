@@ -1,6 +1,7 @@
 mod app;
 mod components;
 mod direction;
+mod colors;
 
 use std::{io::IsTerminal, path::PathBuf};
 

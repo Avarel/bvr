@@ -1,41 +1,15 @@
-use crate::components::{
+use crate::{components::{
     command::{CommandApp, Cursor, SelectionOrigin},
+    filters::FilterData,
     mux::{MultiplexerApp, MultiplexerMode},
     status::StatusApp,
-    viewer::{filters::FilterData, Instance, LineData},
-};
+    viewer::{Instance, LineData},
+}, colors};
 use ratatui::{prelude::*, widgets::*};
 
 use super::InputMode;
 
-mod colors {
-    use ratatui::style::Color;
 
-    pub const WHITE: Color = Color::Rgb(255, 255, 255);
-    pub const BLACK: Color = Color::Rgb(0, 0, 0);
-    pub const BG: Color = Color::Rgb(25, 25, 25);
-
-    pub const TEXT_ACTIVE: Color = Color::Rgb(220, 220, 220);
-    pub const TEXT_INACTIVE: Color = Color::Rgb(50, 50, 50);
-
-    pub const GUTTER_BG: Color = BG;
-    pub const GUTTER_TEXT: Color = Color::Rgb(40, 40, 40);
-
-    pub const TAB_INACTIVE: Color = Color::Rgb(40, 40, 40);
-    pub const TAB_ACTIVE: Color = Color::Rgb(80, 80, 80);
-    pub const TAB_SIDE_ACTIVE: Color = Color::Blue;
-    pub const TAB_SIDE_INACTIVE: Color = Color::Black;
-
-    pub const STATUS_BAR: Color = Color::Rgb(40, 40, 40);
-    pub const STATUS_BAR_TEXT: Color = Color::Rgb(150, 150, 150);
-
-    pub const COMMAND_BAR_SELECT: Color = Color::Rgb(60, 80, 150);
-
-    pub const COMMAND_ACCENT: Color = Color::Rgb(100, 230, 160);
-    pub const SELECT_ACCENT: Color = Color::Rgb(180, 130, 230);
-    pub const NORMAL_ACCENT: Color = Color::Rgb(100, 160, 230);
-    pub const FILTER_ACCENT: Color = Color::Rgb(255, 200, 60);
-}
 
 enum StatusWidgetState<'a> {
     Normal { line_count: usize, name: &'a str },
@@ -56,7 +30,7 @@ impl<'a> Widget for StatusWidget<'a> {
 
         let accent_color = match self.input_mode {
             InputMode::Command => colors::COMMAND_ACCENT,
-            InputMode::Viewer => colors::NORMAL_ACCENT,
+            InputMode::Viewer => colors::VIEWER_ACCENT,
             InputMode::Select => colors::SELECT_ACCENT,
             InputMode::Filter => colors::FILTER_ACCENT,
         };
@@ -102,6 +76,8 @@ pub struct CommandWidget<'a> {
 impl Widget for CommandWidget<'_> {
     fn render(self, area: Rect, buf: &mut Buffer) {
         if !self.active {
+            const WIDGET_BLOCK: Block = Block::new().style(Style::new().bg(colors::BG));
+            WIDGET_BLOCK.render(area, buf);
             return;
         }
 
@@ -138,20 +114,13 @@ impl Widget for CommandWidget<'_> {
 
 pub struct FilterViewerWidget<'a> {
     viewer: &'a mut Instance,
-    first: bool,
 }
 
 impl Widget for FilterViewerWidget<'_> {
     fn render(self, area: Rect, buf: &mut Buffer) {
-        let mut area = area;
-
         const WIDGET_BLOCK: Block = Block::new().style(Style::new().bg(colors::STATUS_BAR));
         WIDGET_BLOCK.render(area, buf);
 
-        if !self.first {
-            area.x += 1;
-            area.width -= 1;
-        }
         let mut y = area.y;
         for filter in self
             .viewer
@@ -167,7 +136,6 @@ impl Widget for FilterViewerWidget<'_> {
 pub struct ViewerWidget<'a> {
     viewer: &'a mut Instance,
     gutter: bool,
-    first: bool,
 }
 
 impl Widget for ViewerWidget<'_> {
@@ -180,12 +148,6 @@ impl Widget for ViewerWidget<'_> {
                 .unwrap_or_default()
                 .max(4)
         });
-
-        let mut area = area;
-        if !self.first {
-            area.x += 1;
-            area.width -= 1;
-        }
 
         let mut y = area.y;
         for line in view.into_iter() {
@@ -254,7 +216,7 @@ impl Widget for FilterLineWidget<'_> {
         ];
 
         if let Some(len) = self.inner.len {
-            v.push(Span::from(format!(" ({} lines)", len)));
+            v.push(Span::from(format!(" {}", len)).fg(colors::TEXT_INACTIVE));
         }
 
         Paragraph::new(Line::from(v)).render(area, buf);
@@ -399,6 +361,14 @@ impl Widget for MultiplexerWidget<'_> {
     fn render(self, area: Rect, buf: &mut Buffer) {
         let chunks = Self::split_status(area);
 
+        fn fixup_chunk(fix: bool, mut chunk: Rect) -> Rect {
+            if fix {
+                chunk.x += 1;
+                chunk.width -= 1;
+            }
+            chunk
+        }
+
         if !self.mux.is_empty() {
             let active = self.mux.active();
             match self.mux.mode() {
@@ -419,20 +389,15 @@ impl Widget for MultiplexerWidget<'_> {
 
                         if self.mode == InputMode::Filter {
                             let [view_chunk, filter_chunk] = Self::split_filter(view_chunk);
-                            FilterViewerWidget {
-                                viewer,
-                                first: i == 0,
-                            }
-                            .render(filter_chunk, buf);
+                            FilterViewerWidget { viewer }.render(filter_chunk, buf);
                             viewer_chunk = view_chunk;
                         }
 
                         ViewerWidget {
                             viewer,
                             gutter: true,
-                            first: i == 0,
                         }
-                        .render(viewer_chunk, buf);
+                        .render(fixup_chunk(i != 0, viewer_chunk), buf);
                         EdgeBg(i == 0).render(viewer_chunk, buf)
                     }
                 }
@@ -455,17 +420,12 @@ impl Widget for MultiplexerWidget<'_> {
 
                     if self.mode == InputMode::Filter {
                         let [view_chunk, filter_chunk] = Self::split_filter(view_chunk);
-                        FilterViewerWidget {
-                            viewer,
-                            first: true,
-                        }
-                        .render(filter_chunk, buf);
+                        FilterViewerWidget { viewer }.render(filter_chunk, buf);
                         viewer_chunk = view_chunk;
                     }
                     ViewerWidget {
                         viewer,
                         gutter: true,
-                        first: true,
                     }
                     .render(viewer_chunk, buf);
                     EdgeBg(true).render(viewer_chunk, buf)

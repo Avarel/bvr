@@ -28,6 +28,7 @@ pub enum ViewerAction {
 pub enum FilterAction {
     Move { direction: VDirection, delta: Delta },
     Toggle,
+    Remove,
 }
 
 pub enum CommandAction {

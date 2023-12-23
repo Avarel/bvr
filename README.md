@@ -36,23 +36,13 @@ This is the default mode. You can scroll through files.
 
 | Keybinding                | Description                                   |
 | ------------------------- | --------------------------------------------- |
-| `:`                       | Enter command mode.                           |
-| `i`                       | Enter selection mode.                         |
-| `Tab`                     | Enter filter mode.                            |
 | `Up` and `Down`           | Pan the view.                                 |
 | `Home` and `End`          | Pan the view to the start or end of the file. |
 | `PageUp` and `PageDown`   | Pan the view by a page.                       |
 | `Shift` + `Up` and `Down` | Pan the view by a half-page.                  |
-| `Left` and `Right`        | Switch selected view left or right.           |
 
 ### Command Mode
 In this mode, you can enter commands to interact with the pager.
-
-| Keybinding | Description                              |
-| ---------- | ---------------------------------------- |
-| `Esc`      | Exit selection mode (enter viewer mode). |
-| `i`        | Enter selection mode.                    |
-| `Tab`      | Enter filter mode.                       |
 
 | Command        | Description                                          |
 | -------------- | ---------------------------------------------------- |
@@ -66,14 +56,10 @@ In this mode, you can enter commands to interact with the pager.
 ### Selection Mode
 In this mode, you can select lines to bookmark.
 
-| Keybinding          | Description                              |
-| ------------------- | ---------------------------------------- |
-| `Esc`               | Exit selection mode (enter viewer mode). |
-| `:`                 | Enter command mode.                      |
-| `Tab`               | Enter filter mode.                       |
-| `Up` and `Down`     | Move the select cursor.                  |
-| `Space` and `Enter` | Toggle bookmark at current line.         |
-| `Left` and `Right`  | Switch selected view left or right.      |
+| Keybinding          | Description                      |
+| ------------------- | -------------------------------- |
+| `Up` and `Down`     | Move the select cursor.          |
+| `Space` and `Enter` | Toggle bookmark at current line. |
 
 ### Filter Mode
 In this mode, you can toggle filters from bookmarks or searches to omit or include certain lines in the viewer.
@@ -85,4 +71,12 @@ In this mode, you can toggle filters from bookmarks or searches to omit or inclu
 | `i`                 | Enter selection mode.                    |
 | `Up` and `Down`     | Change which filter is selected.         |
 | `Space` and `Enter` | Toggle selected filter.                  |
-| `Left` and `Right`  | Switch selected view left or right.      |
+
+### Mode-Independent
+| Keybinding                               | Description                              |
+| ---------------------------------------- | ---------------------------------------- |
+| `Esc`                                    | Exit selection mode (enter viewer mode). |
+| `:`                                      | Enter command mode.                      |
+| `i`                                      | Enter selection mode.                    |
+| `Tab`                                    | Enter filter mode.                       |
+| `Shift` + `Left` </br> `Shift` + `Right` | Switch selected view.                    |

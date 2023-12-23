@@ -1,7 +1,11 @@
-use super::{Buffer, SearchResults, Viewport};
+use crate::colors;
+
+use super::viewer::{Buffer, Viewport};
 use bvr_core::{composite::inflight::InflightComposite, cowvec::CowVec, matches::BufferMatches};
 use ratatui::style::Color;
 use regex::bytes::Regex;
+
+type SearchResults = bvr_core::InflightSearch;
 
 #[derive(Clone)]
 enum FilterRepr {
@@ -32,7 +36,7 @@ impl Filter {
         Self {
             name: "Bookmarks".to_string(),
             enabled: true,
-            color: Color::Blue,
+            color: colors::SELECT_ACCENT,
             repr: FilterRepr::Bookmarks(Bookmarks::new()),
         }
     }
@@ -144,29 +148,33 @@ pub struct Filterer {
 #[derive(Clone)]
 pub struct Filters {
     all: Filter,
-    bookmarks: Filter,
     searches: Vec<Filter>,
+    bookmarks: Filter,
 }
 
 impl Filters {
     fn new() -> Self {
         Self {
             all: Filter::all(),
-            bookmarks: Filter::bookmark(),
             searches: Vec::new(),
+            bookmarks: Filter::bookmark(),
         }
+    }
+
+    pub fn len(&self) -> usize {
+        self.searches.len() + 2
     }
 
     pub fn iter(&self) -> impl Iterator<Item = &Filter> {
         std::iter::once(&self.all)
-            .chain(std::iter::once(&self.bookmarks))
             .chain(self.searches.iter())
+            .chain(std::iter::once(&self.bookmarks))
     }
 
     pub fn iter_mut(&mut self) -> impl Iterator<Item = &mut Filter> {
         std::iter::once(&mut self.all)
-            .chain(std::iter::once(&mut self.bookmarks))
             .chain(self.searches.iter_mut())
+            .chain(std::iter::once(&mut self.bookmarks))
     }
 
     pub fn try_finalize(&mut self) {
@@ -210,28 +218,6 @@ impl Filters {
     }
 }
 
-impl std::ops::Index<usize> for Filters {
-    type Output = Filter;
-
-    fn index(&self, index: usize) -> &Self::Output {
-        match index {
-            0 => &self.all,
-            1 => &self.bookmarks,
-            _ => &self.searches[index - 2],
-        }
-    }
-}
-
-impl std::ops::IndexMut<usize> for Filters {
-    fn index_mut(&mut self, index: usize) -> &mut Self::Output {
-        match index {
-            0 => &mut self.all,
-            1 => &mut self.bookmarks,
-            _ => &mut self.searches[index - 2],
-        }
-    }
-}
-
 pub struct FilterData<'a> {
     pub name: &'a str,
     pub color: Color,
@@ -241,19 +227,6 @@ pub struct FilterData<'a> {
 }
 
 impl Filterer {
-    const SEARCH_COLOR_LIST: &'static [Color] = &[
-        Color::Red,
-        Color::Green,
-        Color::Yellow,
-        Color::Magenta,
-        Color::Cyan,
-        Color::Indexed(21),
-        Color::Indexed(43),
-        Color::Indexed(140),
-        Color::Indexed(214),
-        Color::Indexed(91),
-    ];
-
     pub fn new() -> Self {
         Self {
             composite: InflightComposite::new().0,
@@ -269,11 +242,14 @@ impl Filterer {
         viewport.max_height = self.filters.searches.len() + 2;
         viewport.height = viewport_height;
 
-        let mut filters = Vec::with_capacity(viewport.line_range().len());
+        let range = viewport.line_range();
 
-        for index in viewport.line_range() {
-            let filter = &self.filters[index];
-            filters.push(FilterData {
+        self.filters
+            .iter()
+            .enumerate()
+            .skip(range.start)
+            .take(range.len())
+            .map(|(index, filter)| FilterData {
                 name: &filter.name,
                 color: filter.color,
                 len: match &filter.repr {
@@ -282,10 +258,8 @@ impl Filterer {
                 },
                 enabled: filter.enabled,
                 selected: index == self.viewport.current(),
-            });
-        }
-
-        filters
+            })
+            .collect()
     }
 
     pub fn compute_composite(&mut self) {
@@ -304,7 +278,25 @@ impl Filterer {
     }
 
     pub fn current_filter_mut(&mut self) -> &mut Filter {
-        &mut self.filters[self.viewport.current()]
+        assert!(self.viewport.current() < self.filters.len());
+
+        match self.viewport.current() {
+            0 => &mut self.filters.all,
+            i if i == self.filters.len() - 1 => &mut self.filters.bookmarks,
+            _ => &mut self.filters.searches[self.viewport.current() - 1],
+        }
+    }
+
+    pub fn remove_current_filter(&mut self) {
+        assert!(self.viewport.current() < self.filters.len());
+
+        match self.viewport.current() {
+            0 => self.filters.all.enabled = false,
+            i if i == self.filters.len() - 1 => self.filters.bookmarks.enabled = false,
+            _ => {
+                self.filters.searches.remove(self.viewport.current() - 1);
+            }
+        }
     }
 
     pub fn filter_search(&mut self, file: &Buffer, regex: Regex) {
@@ -312,7 +304,7 @@ impl Filterer {
             name: regex.to_string(),
             enabled: true,
             repr: FilterRepr::Search(SearchResults::search(file, regex).unwrap()),
-            color: Self::SEARCH_COLOR_LIST
+            color: colors::SEARCH_COLOR_LIST
                 .get(self.filters.searches.len())
                 .copied()
                 .unwrap_or(Color::White),

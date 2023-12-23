@@ -1,6 +1,3 @@
-pub mod filters;
-// mod composite;
-
 use bvr_core::{matches::BufferMatches, SegStr};
 use ratatui::style::Color;
 use regex::bytes::Regex;
@@ -8,16 +5,15 @@ use std::ops::Range;
 
 use crate::direction::VDirection;
 
-use self::filters::Filterer;
+use super::filters::Filterer;
 
-type Buffer = bvr_core::SegBuffer<bvr_core::InflightIndex>;
-type SearchResults = bvr_core::InflightSearch;
+pub type Buffer = bvr_core::SegBuffer<bvr_core::InflightIndex>;
 
 pub struct Viewport {
-    max_height: usize,
-    top: usize,
-    height: usize,
-    current: usize,
+    pub max_height: usize,
+    pub top: usize,
+    pub height: usize,
+    pub current: usize,
 }
 
 impl Viewport {
@@ -47,6 +43,14 @@ impl Viewport {
         }
         if self.current >= self.max_height {
             self.current = self.max_height.saturating_sub(1);
+        }
+    }
+
+    pub fn move_select_within_view(&mut self) {
+        if self.current < self.top {
+            self.current = self.top;
+        } else if self.current >= self.bottom() {
+            self.current = self.bottom().saturating_sub(1);
         }
     }
 

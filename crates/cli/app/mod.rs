@@ -123,6 +123,12 @@ impl App {
                 Action::SwitchMode(new_mode) => {
                     self.command.submit();
                     self.mode = new_mode;
+
+                    if new_mode == InputMode::Select {
+                        if let Some(viewer) = self.mux.active_viewer_mut() {
+                            viewer.viewport_mut().move_select_within_view();
+                        }
+                    }
                 }
                 Action::Viewer(action) => match action {
                     ViewerAction::Pan { direction, delta } => {
@@ -171,6 +177,12 @@ impl App {
                     actions::FilterAction::Toggle => {
                         if let Some(viewer) = self.mux.active_viewer_mut() {
                             viewer.filterer.current_filter_mut().toggle();
+                            viewer.filterer.compute_composite();
+                        }
+                    },
+                    actions::FilterAction::Remove => {
+                        if let Some(viewer) = self.mux.active_viewer_mut() {
+                            viewer.filterer.remove_current_filter();
                             viewer.filterer.compute_composite();
                         }
                     }

@@ -10,22 +10,28 @@ use super::{
 pub enum Keybinding {
     // The keybindings are hardcoded into the program.
     Hardcoded,
+    // TODO: custom keybinding feature gate
 }
 
 impl Keybinding {
     pub fn map_key(&self, input_mode: InputMode, event: Event) -> Option<Action> {
         match self {
-            Self::Hardcoded => self.native_keys(input_mode, event),
-            // TODO: custom keybinding feature gate
+            Self::Hardcoded => Self::native_keys(input_mode, event),
         }
     }
 
-    fn native_keys(&self, input_mode: InputMode, event: Event) -> Option<Action> {
+    fn native_keys(input_mode: InputMode, mut event: Event) -> Option<Action> {
         if let Event::Key(key) = event {
             if key.kind != KeyEventKind::Press {
                 return None;
             }
         }
+
+        Self::mode_dependent_bind(input_mode, &mut event)
+            .or_else(|| Self::mode_independent_bind(input_mode, &mut event))
+    }
+
+    fn mode_dependent_bind(input_mode: InputMode, event: &mut Event) -> Option<Action> {
         match input_mode {
             InputMode::Viewer => match event {
                 Event::Mouse(mouse) => match mouse.kind {
@@ -38,9 +44,6 @@ impl Keybinding {
                     _ => None,
                 },
                 Event::Key(key) => match key.code {
-                    KeyCode::Char(':') => Some(Action::SwitchMode(InputMode::Command)),
-                    KeyCode::Char('i') => Some(Action::SwitchMode(InputMode::Select)),
-                    KeyCode::Tab => Some(Action::SwitchMode(InputMode::Filter)),
                     KeyCode::Up | KeyCode::Down => Some(Action::Viewer(ViewerAction::Pan {
                         direction: VDirection::up_if(key.code == KeyCode::Up),
                         delta: if key.modifiers.contains(KeyModifiers::SHIFT) {
@@ -63,18 +66,12 @@ impl Keybinding {
                         direction: VDirection::up_if(c == 'u'),
                         delta: Delta::HalfPage,
                     })),
-                    KeyCode::Left | KeyCode::Right => Some(Action::Viewer(
-                        ViewerAction::SwitchActive(HDirection::left_if(key.code == KeyCode::Left)),
-                    )),
                     _ => None,
                 },
                 _ => None,
             },
             InputMode::Filter => match event {
                 Event::Key(key) => match key.code {
-                    KeyCode::Char(':') => Some(Action::SwitchMode(InputMode::Command)),
-                    KeyCode::Esc | KeyCode::Tab => Some(Action::SwitchMode(InputMode::Viewer)),
-                    KeyCode::Char('i') => Some(Action::SwitchMode(InputMode::Select)),
                     KeyCode::Up | KeyCode::Down => Some(Action::Filter(FilterAction::Move {
                         direction: VDirection::up_if(key.code == KeyCode::Up),
                         delta: Delta::Number(1),
@@ -93,12 +90,10 @@ impl Keybinding {
                         direction: VDirection::up_if(c == 'u'),
                         delta: Delta::HalfPage,
                     })),
-                    KeyCode::Left | KeyCode::Right => Some(Action::Viewer(
-                        ViewerAction::SwitchActive(HDirection::left_if(key.code == KeyCode::Left)),
-                    )),
                     KeyCode::Char(' ') | KeyCode::Enter => {
                         Some(Action::Filter(FilterAction::Toggle))
-                    }
+                    },
+                    KeyCode::Backspace => Some(Action::Filter(FilterAction::Remove)),
                     _ => None,
                 },
                 _ => None,
@@ -114,16 +109,10 @@ impl Keybinding {
                     _ => None,
                 },
                 Event::Key(key) => match key.code {
-                    KeyCode::Char(':') => Some(Action::SwitchMode(InputMode::Command)),
-                    KeyCode::Tab => Some(Action::SwitchMode(InputMode::Filter)),
-                    KeyCode::Esc => Some(Action::SwitchMode(InputMode::Viewer)),
                     KeyCode::Up | KeyCode::Down => Some(Action::Viewer(ViewerAction::Move {
                         direction: VDirection::up_if(key.code == KeyCode::Up),
                         delta: Delta::Number(1),
                     })),
-                    KeyCode::Left | KeyCode::Right => Some(Action::Viewer(
-                        ViewerAction::SwitchActive(HDirection::left_if(key.code == KeyCode::Left)),
-                    )),
                     KeyCode::Char(' ') | KeyCode::Enter => {
                         Some(Action::Viewer(ViewerAction::ToggleLine))
                     }
@@ -132,10 +121,10 @@ impl Keybinding {
                 _ => None,
             },
             InputMode::Command => match event {
-                Event::Paste(paste) => Some(Action::Command(CommandAction::Paste(paste))),
+                Event::Paste(paste) => {
+                    Some(Action::Command(CommandAction::Paste(std::mem::take(paste))))
+                }
                 Event::Key(key) => match key.code {
-                    KeyCode::Esc => Some(Action::SwitchMode(InputMode::Viewer)),
-                    KeyCode::Tab => Some(Action::SwitchMode(InputMode::Filter)),
                     KeyCode::Enter => Some(Action::Command(CommandAction::Submit)),
                     KeyCode::Left | KeyCode::Right => Some(Action::Command(CommandAction::Move {
                         direction: HDirection::left_if(key.code == KeyCode::Left),
@@ -173,6 +162,24 @@ impl Keybinding {
                 },
                 _ => None,
             },
+        }
+    }
+
+    fn mode_independent_bind(_input_mode: InputMode, event: &mut Event) -> Option<Action> {
+        match event {
+            Event::Key(key) => match key.code {
+                KeyCode::Char(':') => Some(Action::SwitchMode(InputMode::Command)),
+                KeyCode::Tab => Some(Action::SwitchMode(InputMode::Filter)),
+                KeyCode::Esc => Some(Action::SwitchMode(InputMode::Viewer)),
+                KeyCode::Char('i') => Some(Action::SwitchMode(InputMode::Select)),
+                KeyCode::Left | KeyCode::Right if key.modifiers.contains(KeyModifiers::SHIFT) => {
+                    Some(Action::Viewer(ViewerAction::SwitchActive(
+                        HDirection::left_if(key.code == KeyCode::Left),
+                    )))
+                }
+                _ => None,
+            },
+            _ => None,
         }
     }
 }
