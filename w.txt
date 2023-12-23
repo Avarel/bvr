@@ -1,0 +1,3 @@
+   Compiling bvr v0.0.2 (D:\bvr)
+    Finished dev [unoptimized + debuginfo] target(s) in 1.03s
+     Running `target\debug\bvr.exe .\tests\test_5000000.log`

@@ -1,37 +1,31 @@
-use bvr_core::cowvec::CowVec;
+use crate::cowvec::CowVec;
 
 pub mod inflight;
 
 #[derive(Clone)]
 pub struct IncompleteComposite {
-    inner: CompleteComposite,
+    inner: Composite,
 }
 
 impl IncompleteComposite {
     /// Create a new [IncompleteComposite].
     pub fn new() -> Self {
         Self {
-            inner: CompleteComposite::empty(),
+            inner: Composite::empty(),
         }
-    }
-
-    pub fn len(&self) -> usize {
-        self.inner.lines.len()
-    }
-
-    pub fn get(&self, index: usize) -> Option<usize> {
-        self.inner.get(index)
     }
 
     pub fn add_line(&mut self, line_number: usize) {
         if self.inner.lines.last() == Some(&line_number) {
             return;
+        } else if let Some(last) = self.inner.lines.last() {
+            assert!(line_number > *last);
         }
         self.inner.lines.push(line_number)
     }
 
     #[must_use]
-    pub fn finish(self) -> CompleteComposite {
+    pub fn finish(self) -> Composite {
         self.inner
     }
 }
@@ -43,11 +37,11 @@ impl Default for IncompleteComposite {
 }
 
 #[derive(Clone)]
-pub struct CompleteComposite {
+pub struct Composite {
     lines: CowVec<usize>,
 }
 
-impl CompleteComposite {
+impl Composite {
     pub fn empty() -> Self {
         Self {
             lines: CowVec::new(),

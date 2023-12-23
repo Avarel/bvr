@@ -1,4 +1,5 @@
-use bvr_core::index::{inflight::InflightIndex, BufferIndex};
+use bvr_core::index::BufferIndex;
+use bvr_core::InflightIndex;
 
 fn main() {
     let file = std::fs::File::open("./tests/test_5000000.log").unwrap();

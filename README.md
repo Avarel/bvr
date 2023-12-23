@@ -14,7 +14,6 @@ BVR (pronounced "beaver") is still under heavy development.
 ## Non-Goals
 * Syntax highlighting
 * Editing files
-* 
 
 ## Features
 | Feature              | Description                                                 | Progress |
@@ -29,3 +28,61 @@ BVR (pronounced "beaver") is still under heavy development.
 | Commands             | Use modal commands to interact with the pager.              | Basic    |
 | Mouse Scrolling      | Use mouse scrolling to pan through the current viewer.      | Done     |
 
+## Built-in Keybindings
+* Custom keybindings will be added in the future.
+
+### Viewer Mode
+This is the default mode. You can scroll through files.
+
+| Keybinding                | Description                                   |
+| ------------------------- | --------------------------------------------- |
+| `:`                       | Enter command mode.                           |
+| `i`                       | Enter selection mode.                         |
+| `Tab`                     | Enter filter mode.                            |
+| `Up` and `Down`           | Pan the view.                                 |
+| `Home` and `End`          | Pan the view to the start or end of the file. |
+| `PageUp` and `PageDown`   | Pan the view by a page.                       |
+| `Shift` + `Up` and `Down` | Pan the view by a half-page.                  |
+| `Left` and `Right`        | Switch selected view left or right.           |
+
+### Command Mode
+In this mode, you can enter commands to interact with the pager.
+
+| Keybinding | Description                              |
+| ---------- | ---------------------------------------- |
+| `Esc`      | Exit selection mode (enter viewer mode). |
+| `i`        | Enter selection mode.                    |
+| `Tab`      | Enter filter mode.                       |
+
+| Command        | Description                                          |
+| -------------- | ---------------------------------------------------- |
+| `q`            | Quit.                                                |
+| `mux`          | Toggle the multiplexer mode between windows or tabs. |
+| `open <file>`  | Open a file in a new tab/view.                       |
+| `close`        | Close the current tab/view.                          |
+| `find <regex>` | Create a new filter searching for the regex.         |
+| `findl <lit>`  | Create a new filter searching for the literal.       |
+
+### Selection Mode
+In this mode, you can select lines to bookmark.
+
+| Keybinding          | Description                              |
+| ------------------- | ---------------------------------------- |
+| `Esc`               | Exit selection mode (enter viewer mode). |
+| `:`                 | Enter command mode.                      |
+| `Tab`               | Enter filter mode.                       |
+| `Up` and `Down`     | Move the select cursor.                  |
+| `Space` and `Enter` | Toggle bookmark at current line.         |
+| `Left` and `Right`  | Switch selected view left or right.      |
+
+### Filter Mode
+In this mode, you can toggle filters from bookmarks or searches to omit or include certain lines in the viewer.
+
+| Keybinding          | Description                              |
+| ------------------- | ---------------------------------------- |
+| `Esc` and `Tab`     | Exit selection mode (enter viewer mode). |
+| `:`                 | Enter command mode.                      |
+| `i`                 | Enter selection mode.                    |
+| `Up` and `Down`     | Change which filter is selected.         |
+| `Space` and `Enter` | Toggle selected filter.                  |
+| `Left` and `Right`  | Switch selected view left or right.      |

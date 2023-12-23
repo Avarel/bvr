@@ -4,7 +4,6 @@ use crate::components::{
     status::StatusApp,
     viewer::{filters::FilterData, Instance, LineData},
 };
-use bvr_core::index::inflight::InflightIndexProgress;
 use ratatui::{prelude::*, widgets::*};
 
 use super::InputMode;
@@ -39,14 +38,8 @@ mod colors {
 }
 
 enum StatusWidgetState<'a> {
-    Normal {
-        progress: InflightIndexProgress,
-        line_count: usize,
-        name: &'a str,
-    },
-    Message {
-        message: &'a str,
-    },
+    Normal { line_count: usize, name: &'a str },
+    Message { message: &'a str },
     None,
 }
 
@@ -83,23 +76,8 @@ impl<'a> Widget for StatusWidget<'a> {
         v.push(Span::raw(" "));
 
         match self.state {
-            StatusWidgetState::Normal {
-                progress,
-                line_count,
-                name,
-            } => {
-                v.push(
-                    Span::raw(match progress {
-                        InflightIndexProgress::Done => format!("{} lines", line_count),
-                        InflightIndexProgress::Streaming => {
-                            format!("Streaming ({} lines)", line_count)
-                        }
-                        InflightIndexProgress::File(progress) => {
-                            format!("{:.2}% ({} lines)", progress * 100.0, line_count)
-                        }
-                    })
-                    .fg(accent_color),
-                );
+            StatusWidgetState::Normal { line_count, name } => {
+                v.push(Span::raw(format!("{} lines", line_count)).fg(accent_color));
                 v.push(Span::raw(" │ ").fg(accent_color));
                 v.push(Span::raw(name).fg(accent_color));
             }
@@ -505,7 +483,6 @@ impl Widget for MultiplexerWidget<'_> {
                 Some(viewer) => StatusWidget {
                     input_mode: self.mode,
                     state: StatusWidgetState::Normal {
-                        progress: viewer.file().progress(),
                         line_count: viewer.file().line_count(),
                         name: viewer.name(),
                     },

@@ -43,7 +43,11 @@ impl Keybinding {
                     KeyCode::Tab => Some(Action::SwitchMode(InputMode::Filter)),
                     KeyCode::Up | KeyCode::Down => Some(Action::Viewer(ViewerAction::Pan {
                         direction: VDirection::up_if(key.code == KeyCode::Up),
-                        delta: Delta::Number(1),
+                        delta: if key.modifiers.contains(KeyModifiers::SHIFT) {
+                            Delta::HalfPage
+                        } else {
+                            Delta::Number(1)
+                        },
                     })),
                     KeyCode::Home | KeyCode::End => Some(Action::Viewer(ViewerAction::Pan {
                         direction: VDirection::up_if(key.code == KeyCode::Home),
@@ -113,6 +117,9 @@ impl Keybinding {
                         direction: VDirection::up_if(key.code == KeyCode::Up),
                         delta: Delta::Number(1),
                     })),
+                    KeyCode::Left | KeyCode::Right => Some(Action::Viewer(ViewerAction::SwitchActive(
+                        HDirection::left_if(key.code == KeyCode::Left)),
+                    )),
                     KeyCode::Char(' ') | KeyCode::Enter => {
                         Some(Action::Viewer(ViewerAction::ToggleLine))
                     }

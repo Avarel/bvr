@@ -88,7 +88,7 @@ pub trait BufferIndex {
 
 /// An index that can be built into a [CompleteIndex].
 pub struct IncompleteIndex {
-    inner: CompleteIndex,
+    inner: Index,
     finished: bool,
 }
 
@@ -106,7 +106,7 @@ impl IncompleteIndex {
     /// ```
     pub fn new() -> Self {
         Self {
-            inner: CompleteIndex::empty(),
+            inner: Index::empty(),
             finished: false,
         }
     }
@@ -124,7 +124,7 @@ impl IncompleteIndex {
     /// # Ok(())
     /// # }
     /// ```
-    pub fn index_file(mut self, file: &File) -> Result<CompleteIndex> {
+    pub fn index_file(mut self, file: &File) -> Result<Index> {
         let len = file.metadata()?.len();
         let mut start = 0;
 
@@ -157,7 +157,7 @@ impl IncompleteIndex {
     }
 
     /// Returns a [CompleteIndex].
-    pub fn finish(self) -> CompleteIndex {
+    pub fn finish(self) -> Index {
         assert!(self.finished);
         self.inner
     }
@@ -171,12 +171,12 @@ impl Default for IncompleteIndex {
 
 /// A fixed and complete index.
 #[derive(Clone)]
-pub struct CompleteIndex {
+pub struct Index {
     /// Store the byte location of the start of the indexed line
     line_index: CowVec<u64>,
 }
 
-impl CompleteIndex {
+impl Index {
     /// Create an empty [CompleteIndex].
     fn empty() -> Self {
         Self {
@@ -185,7 +185,7 @@ impl CompleteIndex {
     }
 }
 
-impl BufferIndex for CompleteIndex {
+impl BufferIndex for Index {
     fn line_count(&self) -> usize {
         self.line_index.len().saturating_sub(1)
     }

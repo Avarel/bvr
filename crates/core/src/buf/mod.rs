@@ -13,13 +13,13 @@ use std::{
     },
 };
 
-use crate::Result;
+use crate::{inflight_tool::Inflight, Result, InflightIndex};
 use lru::LruCache;
 
 use self::segment::{SegStr, Segment};
 use crate::index::{
-    inflight::{InflightIndex, InflightIndexMode, InflightIndexProgress, Stream},
-    BufferIndex, CompleteIndex,
+    inflight::Stream,
+    BufferIndex, Index,
 };
 
 /// A segmented buffer that holds data in multiple segments.
@@ -61,9 +61,7 @@ impl BufferRepr {
                 let range = Segment::data_range_of_id(seg_id);
                 let range = range.start..range.end.min(*len);
                 segments
-                    .get_or_insert(seg_id, || {
-                        Arc::new(Segment::map_file(range, file).unwrap())
-                    })
+                    .get_or_insert(seg_id, || Arc::new(Segment::map_file(range, file).unwrap()))
                     .clone()
             }
             BufferRepr::Stream {
@@ -73,9 +71,7 @@ impl BufferRepr {
                 if let Some(rx) = pending_segs {
                     loop {
                         match rx.try_recv() {
-                            Ok(segment) => {
-                                segments.push(Arc::new(segment))
-                            }
+                            Ok(segment) => segments.push(Arc::new(segment)),
                             Err(TryRecvError::Empty) => break,
                             Err(TryRecvError::Disconnected) => {
                                 *pending_segs = None;
@@ -90,7 +86,7 @@ impl BufferRepr {
     }
 }
 
-impl SegBuffer<CompleteIndex> {
+impl SegBuffer<Index> {
     /// Reads a file and constructs a new instance of [Buffer].
     ///
     /// This function uses [InflightIndex] with [InflightIndexMode::File], which
@@ -102,7 +98,7 @@ impl SegBuffer<CompleteIndex> {
     /// A `Result` containing the constructed instance of [Buffer<CompleteIndex>]
     /// if successful, or an error if the file cannot be read or the index cannot be finalized.
     pub fn read_file(file: File, seg_count: usize) -> Result<Self> {
-        let (mut index, remote) = InflightIndex::new(InflightIndexMode::File);
+        let (mut index, remote) = Inflight::<Index>::new();
         remote.index_file(file.try_clone()?)?;
         assert!(index.try_finalize());
 
@@ -127,7 +123,7 @@ impl SegBuffer<CompleteIndex> {
     /// A `Result` containing the constructed instance of [Buffer<CompleteIndex>]
     /// if successful, or an error if the file cannot be read or the index cannot be finalized.
     pub fn read_stream(stream: Stream) -> Result<Self> {
-        let (mut index, remote) = InflightIndex::new(InflightIndexMode::Stream);
+        let (mut index, remote) = Inflight::<Index>::new();
         let (sx, rx) = std::sync::mpsc::channel();
         remote.index_stream(stream, sx)?;
         assert!(index.try_finalize());
@@ -157,7 +153,7 @@ impl SegBuffer<InflightIndex> {
     /// A `Result` containing an instance of [Buffer<InflightIndex>] if the
     /// file was successfully read, or an error if the operation failed.
     pub fn read_file(file: File, seg_count: usize) -> Result<Self> {
-        let (index, indexer) = InflightIndex::new(InflightIndexMode::File);
+        let (index, indexer) = Inflight::<Index>::new();
         std::thread::spawn({
             let file = file.try_clone()?;
             move || indexer.index_file(file)
@@ -186,7 +182,7 @@ impl SegBuffer<InflightIndex> {
     ///
     /// An instance of [Buffer<InflightIndex>].
     pub fn read_stream(stream: Stream) -> Self {
-        let (index, indexer) = InflightIndex::new(InflightIndexMode::Stream);
+        let (index, indexer) = Inflight::<Index>::new();
         let (sx, rx) = std::sync::mpsc::channel();
         std::thread::spawn(move || indexer.index_stream(stream, sx));
 
@@ -204,11 +200,6 @@ impl SegBuffer<InflightIndex> {
     /// See [`InflightIndex::try_finalize()`] for more information.
     pub fn try_finalize(&mut self) -> bool {
         self.index.try_finalize()
-    }
-
-    /// Report the progress of the inner [InflightIndex].
-    pub fn progress(&self) -> InflightIndexProgress {
-        self.index.progress()
     }
 }
 
@@ -411,7 +402,7 @@ mod test {
         io::{BufReader, Read},
     };
 
-    use crate::{buf::SegBuffer, index::CompleteIndex};
+    use crate::{buf::SegBuffer, index::Index};
 
     #[test]
     fn file_stream_consistency_1() -> Result<()> {
@@ -431,8 +422,8 @@ mod test {
     fn file_stream_consistency_base(file: File, line_count: usize) -> Result<()> {
         let stream = BufReader::new(file.try_clone()?);
 
-        let mut file_index = SegBuffer::<CompleteIndex>::read_file(file, 25)?;
-        let mut stream_index = SegBuffer::<CompleteIndex>::read_stream(Box::new(stream))?;
+        let mut file_index = SegBuffer::<Index>::read_file(file, 25)?;
+        let mut stream_index = SegBuffer::<Index>::read_stream(Box::new(stream))?;
 
         assert_eq!(file_index.line_count(), stream_index.line_count());
         assert_eq!(file_index.line_count(), line_count);
@@ -468,7 +459,7 @@ mod test {
         let file_len = file.metadata()?.len();
         let mut reader = BufReader::new(file.try_clone()?);
 
-        let file_buffer = SegBuffer::<CompleteIndex>::read_file(file, 25)?;
+        let file_buffer = SegBuffer::<Index>::read_file(file, 25)?;
         let mut buffers = file_buffer.segment_iter()?;
 
         let mut total_bytes = 0;

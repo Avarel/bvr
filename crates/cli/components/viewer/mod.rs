@@ -1,7 +1,7 @@
 pub mod filters;
-mod composite;
+// mod composite;
 
-use bvr_core::SegStr;
+use bvr_core::{SegStr, matches::BufferMatches};
 use ratatui::style::Color;
 use regex::bytes::Regex;
 use std::ops::Range;
@@ -11,7 +11,7 @@ use crate::direction::VDirection;
 use self::filters::Filterer;
 
 type Buffer = bvr_core::SegBuffer<bvr_core::InflightIndex>;
-type SearchResults = bvr_core::search::inflight::InflightSearch;
+type SearchResults = bvr_core::InflightSearch;
 
 pub struct Viewport {
     max_height: usize,

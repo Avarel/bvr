@@ -1,8 +1,5 @@
-use super::{composite::inflight::InflightComposite, Buffer, SearchResults, Viewport};
-use bvr_core::{
-    cowvec::CowVec,
-    search::{inflight::InflightSearchProgress, BufferSearch},
-};
+use super::{Buffer, SearchResults, Viewport};
+use bvr_core::{composite::inflight::InflightComposite, cowvec::CowVec, matches::BufferMatches};
 use ratatui::style::Color;
 use regex::bytes::Regex;
 
@@ -48,23 +45,23 @@ impl Filter {
         self.enabled = !self.enabled;
     }
 
-    pub fn len(&self) -> Option<usize> {
+    pub fn try_finalize(&mut self) {
+        if let FilterRepr::Search(lines) = &mut self.repr {
+            lines.try_finalize();
+        }
+    }
+}
+
+impl BufferMatches for Filter {
+    fn get(&self, index: usize) -> Option<usize> {
         match &self.repr {
-            FilterRepr::All => None,
-            FilterRepr::Bookmarks(lines) => Some(lines.len()),
-            FilterRepr::Search(lines) => Some(lines.len()),
+            FilterRepr::All => Some(index),
+            FilterRepr::Bookmarks(lines) => lines.get(index),
+            FilterRepr::Search(lines) => lines.get(index),
         }
     }
 
-    pub fn translate_to_file_line(&self, line_number: usize) -> Option<usize> {
-        match &self.repr {
-            FilterRepr::All => Some(line_number),
-            FilterRepr::Bookmarks(lines) => lines.get(line_number),
-            FilterRepr::Search(lines) => lines.get(line_number),
-        }
-    }
-
-    pub fn has_line(&self, line_number: usize) -> bool {
+    fn has_line(&self, line_number: usize) -> bool {
         match &self.repr {
             FilterRepr::All => true,
             FilterRepr::Bookmarks(lines) => lines.has_line(line_number),
@@ -72,17 +69,18 @@ impl Filter {
         }
     }
 
-    pub(crate) fn is_complete(&self) -> bool {
+    fn len(&self) -> usize {
         match &self.repr {
-            FilterRepr::All => true,
-            FilterRepr::Bookmarks(_) => true,
-            FilterRepr::Search(lines) => matches!(lines.progress(), InflightSearchProgress::Done),
+            FilterRepr::All => 0,
+            FilterRepr::Bookmarks(lines) => lines.len(),
+            FilterRepr::Search(lines) => lines.len(),
         }
     }
 
-    pub fn try_finalize(&mut self) {
-        if let FilterRepr::Search(lines) = &mut self.repr {
-            lines.try_finalize();
+    fn is_complete(&self) -> bool {
+        match &self.repr {
+            FilterRepr::All | FilterRepr::Bookmarks(_) => true,
+            FilterRepr::Search(search) => search.is_complete(),
         }
     }
 }
@@ -111,7 +109,7 @@ impl Bookmarks {
     }
 }
 
-impl BufferSearch for Bookmarks {
+impl BufferMatches for Bookmarks {
     fn get(&self, index: usize) -> Option<usize> {
         self.lines.get(index).copied()
     }
@@ -130,6 +128,10 @@ impl BufferSearch for Bookmarks {
 
     fn len(&self) -> usize {
         self.lines.len()
+    }
+
+    fn is_complete(&self) -> bool {
+        true
     }
 }
 
@@ -274,7 +276,10 @@ impl Filterer {
             filters.push(FilterData {
                 name: &filter.name,
                 color: filter.color,
-                len: filter.len(),
+                len: match &filter.repr {
+                    FilterRepr::All => None,
+                    _ => Some(filter.len()),
+                },
                 enabled: filter.enabled,
                 selected: index == self.viewport.current(),
             });

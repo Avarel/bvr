@@ -11,7 +11,8 @@ use crate::components::{
 use anyhow::Result;
 use bvr_core::{
     buf::SegBuffer,
-    index::inflight::{InflightIndex, Stream},
+    InflightIndex,
+    index::inflight::Stream,
 };
 use crossterm::{
     event::{
@@ -120,7 +121,10 @@ impl App {
 
             match action {
                 Action::Exit => break,
-                Action::SwitchMode(new_mode) => self.mode = new_mode,
+                Action::SwitchMode(new_mode) => {
+                    self.command.submit();
+                    self.mode = new_mode;
+                }
                 Action::Viewer(action) => match action {
                     ViewerAction::Pan { direction, delta } => {
                         if let Some(viewer) = self.mux.active_viewer_mut() {

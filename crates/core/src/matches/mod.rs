@@ -4,25 +4,26 @@ use regex::bytes::Regex;
 
 use crate::{buf::ContiguousSegmentIterator, cowvec::CowVec, index::BufferIndex, Result};
 
-pub trait BufferSearch {
+pub trait BufferMatches {
     fn get(&self, index: usize) -> Option<usize>;
     fn has_line(&self, line_number: usize) -> bool;
     fn len(&self) -> usize;
+    fn is_complete(&self) -> bool;
     fn is_empty(&self) -> bool {
         self.len() == 0
     }
 }
 
 #[derive(Clone)]
-pub struct IncompleteSearch {
-    inner: CompleteSearch,
+pub struct IncompleteMatches {
+    inner: Matches,
 }
 
-impl IncompleteSearch {
+impl IncompleteMatches {
     /// Create a new [IncompleteSearch].
     pub fn new() -> Self {
         Self {
-            inner: CompleteSearch::empty(),
+            inner: Matches::empty(),
         }
     }
 
@@ -32,7 +33,7 @@ impl IncompleteSearch {
         mut self,
         mut iter: ContiguousSegmentIterator<Idx>,
         regex: Regex,
-    ) -> Result<CompleteSearch>
+    ) -> Result<Matches>
     where
         Idx: BufferIndex,
     {
@@ -54,23 +55,23 @@ impl IncompleteSearch {
     }
 
     #[must_use]
-    pub fn finish(self) -> CompleteSearch {
+    pub fn finish(self) -> Matches {
         self.inner
     }
 }
 
-impl Default for IncompleteSearch {
+impl Default for IncompleteMatches {
     fn default() -> Self {
         Self::new()
     }
 }
 
 #[derive(Clone)]
-pub struct CompleteSearch {
+pub struct Matches {
     lines: CowVec<usize>,
 }
 
-impl CompleteSearch {
+impl Matches {
     pub fn empty() -> Self {
         Self {
             lines: CowVec::new(),
@@ -78,9 +79,13 @@ impl CompleteSearch {
     }
 }
 
-impl BufferSearch for CompleteSearch {
+impl BufferMatches for Matches {
     fn get(&self, index: usize) -> Option<usize> {
         self.lines.get(index).copied()
+    }
+
+    fn is_complete(&self) -> bool {
+        true
     }
 
     fn has_line(&self, line_number: usize) -> bool {
