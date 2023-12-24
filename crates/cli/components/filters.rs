@@ -216,8 +216,8 @@ impl Filterer {
     pub fn update_and_filter_view(&mut self, viewport_height: usize) -> Vec<FilterData> {
         self.filters.try_finalize();
 
-        self.viewport.update_max_height(self.filters.searches.len() + 2);
-        self.viewport.fit_view(viewport_height);
+        self.viewport.update_end(self.filters.searches.len() + 2);
+        self.viewport.fit_view(viewport_height, 0);
 
         let range = self.viewport.line_range();
 

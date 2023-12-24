@@ -15,6 +15,7 @@ pub struct Instance {
 pub struct LineData {
     pub line_number: usize,
     pub data: SegStr,
+    pub start: usize,
     pub color: Color,
     pub bookmarked: bool,
     pub selected: bool,
@@ -42,18 +43,18 @@ impl Instance {
         &mut self.viewport
     }
 
-    pub fn update_and_view(&mut self, viewport_height: usize) -> Vec<LineData> {
+    pub fn update_and_view(&mut self, viewport_height: usize, viewport_width: usize) -> Vec<LineData> {
         self.file.try_finalize();
         self.filterer.filters.try_finalize();
         self.filterer.composite.try_finalize();
 
-        self.viewport.fit_view(viewport_height);
+        self.viewport.fit_view(viewport_height, viewport_width);
 
         let mut lines = Vec::with_capacity(self.viewport.line_range().len());
         if self.filterer.filters.all().is_enabled() {
-            self.viewport.update_max_height(self.file.line_count());
+            self.viewport.update_end(self.file.line_count());
         } else {
-            self.viewport.update_max_height(self.filterer.composite.len());
+            self.viewport.update_end(self.filterer.composite.len());
         }
 
         let filters = self.filterer.filters.iter_active().collect::<Vec<_>>();
@@ -83,6 +84,7 @@ impl Instance {
             lines.push(LineData {
                 line_number,
                 data,
+                start: self.viewport.left(),
                 color,
                 bookmarked,
                 selected: index == self.viewport.current(),

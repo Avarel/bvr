@@ -141,7 +141,7 @@ pub struct ViewerWidget<'a> {
 
 impl ViewerWidget<'_> {
     fn render(self, area: Rect, buf: &mut Buffer, handle: &mut MouseHandler) {
-        let view = self.viewer.update_and_view(area.height as usize);
+        let view = self.viewer.update_and_view(area.height as usize, area.width as usize);
 
         let gutter_size = self.gutter.then(|| {
             view.last()
@@ -176,15 +176,12 @@ impl ViewerWidget<'_> {
 
         handle.on_mouse(area, |event| match event.kind {
             MouseEventKind::ScrollUp | MouseEventKind::ScrollDown => {
-                Some(Action::Viewer(ViewerAction::Pan {
+                Some(Action::Viewer(ViewerAction::PanVertical {
                     direction: VDirection::up_if(event.kind == MouseEventKind::ScrollUp),
                     delta: Delta::Number(5),
                     target_view: Some(self.view_index),
                 }))
             }
-            // MouseEventKind::Down(_) => Some(Action::Viewer(ViewerAction::SwitchActiveIndex(
-            //     self.view_index,
-            // ))),
             _ => None,
         });
     }
@@ -285,7 +282,12 @@ impl ViewerLineWidget<'_> {
                     ln.render(type_chunk, buf);
                 }
 
-                let data = Paragraph::new(line.data.as_str()).fg(line.color);
+                let mut chars = line.data.chars();
+                for _ in 0..line.start {
+                    chars.next();
+                }
+
+                let data = Paragraph::new(chars.as_str()).fg(line.color);
                 data.render(data_chunk, buf);
             } else {
                 let ln = Paragraph::new("~")

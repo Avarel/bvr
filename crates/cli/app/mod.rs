@@ -149,7 +149,7 @@ impl App {
                 }
             }
             Action::Viewer(action) => match action {
-                ViewerAction::Pan {
+                ViewerAction::PanVertical {
                     direction,
                     delta,
                     target_view,
@@ -167,7 +167,28 @@ impl App {
                             Delta::HalfPage => viewer.viewport().height().div_ceil(2),
                             Delta::Boundary => usize::MAX,
                         };
-                        viewer.viewport_mut().pan_view(direction, delta);
+                        viewer.viewport_mut().pan_vertical(direction, delta);
+                    }
+                }
+                ViewerAction::PanHorizontal {
+                    direction,
+                    delta,
+                    target_view,
+                } => {
+                    let viewer = if let Some(index) = target_view {
+                        self.mux.viewers_mut().get_mut(index)
+                    } else {
+                        self.mux.active_viewer_mut()
+                    };
+
+                    if let Some(viewer) = viewer {
+                        let delta = match delta {
+                            Delta::Number(n) => usize::from(n),
+                            Delta::Page => viewer.viewport().width(),
+                            Delta::HalfPage => viewer.viewport().width().div_ceil(2),
+                            _ => 0,
+                        };
+                        viewer.viewport_mut().pan_horizontal(direction, delta);
                     }
                 }
                 ViewerAction::FollowOutput => {

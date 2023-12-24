@@ -33,7 +33,7 @@ impl Keybinding {
         match input_mode {
             InputMode::Viewer => match event {
                 Event::Key(key) => match key.code {
-                    KeyCode::Up | KeyCode::Down => Some(Action::Viewer(ViewerAction::Pan {
+                    KeyCode::Up | KeyCode::Down => Some(Action::Viewer(ViewerAction::PanVertical {
                         direction: VDirection::up_if(key.code == KeyCode::Up),
                         delta: if key.modifiers.contains(KeyModifiers::SHIFT) {
                             Delta::HalfPage
@@ -42,8 +42,19 @@ impl Keybinding {
                         },
                         target_view: None,
                     })),
+                    KeyCode::Left | KeyCode::Right => {
+                        Some(Action::Viewer(ViewerAction::PanHorizontal {
+                            direction: HDirection::left_if(key.code == KeyCode::Left),
+                            delta: if key.modifiers.contains(KeyModifiers::SHIFT) {
+                                Delta::HalfPage
+                            } else {
+                                Delta::Number(1)
+                            },
+                            target_view: None,
+                        }))
+                    }
                     KeyCode::Home | KeyCode::End | KeyCode::Char('g') => {
-                        Some(Action::Viewer(ViewerAction::Pan {
+                        Some(Action::Viewer(ViewerAction::PanVertical {
                             direction: VDirection::up_if(matches!(
                                 key.code,
                                 KeyCode::Home | KeyCode::Char('g')
@@ -54,13 +65,13 @@ impl Keybinding {
                     }
                     KeyCode::Char('G') => Some(Action::Viewer(ViewerAction::FollowOutput)),
                     KeyCode::PageUp | KeyCode::PageDown | KeyCode::Char(' ') => {
-                        Some(Action::Viewer(ViewerAction::Pan {
+                        Some(Action::Viewer(ViewerAction::PanVertical {
                             direction: VDirection::up_if(key.code == KeyCode::PageUp),
                             delta: Delta::Page,
                             target_view: None,
                         }))
                     }
-                    KeyCode::Char(c @ ('u' | 'd')) => Some(Action::Viewer(ViewerAction::Pan {
+                    KeyCode::Char(c @ ('u' | 'd')) => Some(Action::Viewer(ViewerAction::PanVertical {
                         direction: VDirection::up_if(c == 'u'),
                         delta: Delta::HalfPage,
                         target_view: None,

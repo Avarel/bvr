@@ -18,8 +18,13 @@ pub enum Delta {
 }
 
 pub enum ViewerAction {
-    Pan {
+    PanVertical {
         direction: VDirection,
+        delta: Delta,
+        target_view: Option<usize>,
+    },
+    PanHorizontal {
+        direction: HDirection,
         delta: Delta,
         target_view: Option<usize>,
     },
