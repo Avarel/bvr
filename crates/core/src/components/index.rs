@@ -1,17 +1,12 @@
-//! Contains the [InflightIndex] and [InflightIndexRemote], which are abstractions
-//! that allow the use of [IncompleteIndex] functionalities while it is "inflight"
-//! or in the middle of the indexing operation.
-
 use crate::{
     buf::segment::{Segment, SegmentMut},
-    cowvec::inflight::{InflightCowVec, InflightCowVecWriter},
+    cowvec::inflight::{InflightVec, InflightVecWriter},
     err::{Error, Result},
 };
 use std::sync::mpsc::{Receiver, Sender};
 use std::thread::JoinHandle;
 use std::{fs::File, sync::Arc};
 
-/// Internal indexing task used by [InflightIndexImpl].
 struct IndexingTask {
     /// This is the sender side of the channel that receives byte indexes of `\n`.
     sx: Sender<u64>,
@@ -41,7 +36,7 @@ pub type BoxedStream = Box<dyn std::io::Read + Send>;
 
 /// A remote type that can be used to set off the indexing process of a
 /// file or a stream.
-pub struct InflightIndexRemote(Arc<InflightCowVecWriter<u64>>);
+pub struct InflightIndexRemote(Arc<InflightVecWriter<u64>>);
 
 impl InflightIndexRemote {
     pub fn index_file(self, file: File) -> Result<()> {
@@ -134,13 +129,13 @@ impl InflightIndexRemote {
 }
 
 #[derive(Clone)]
-pub struct InflightIndex(InflightCowVec<u64>);
+pub struct InflightIndex(InflightVec<u64>);
 
 impl InflightIndex {
     pub fn new() -> (Self, InflightIndexRemote) {
-        let inner = Arc::new(InflightCowVecWriter::<u64>::new());
+        let inner = Arc::new(InflightVecWriter::<u64>::new());
         (
-            Self(InflightCowVec::Incomplete(inner.clone())),
+            Self(InflightVec::Incomplete(inner.clone())),
             InflightIndexRemote(inner),
         )
     }

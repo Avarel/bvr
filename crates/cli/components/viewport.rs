@@ -56,15 +56,15 @@ impl Viewport {
         }
     }
 
-    pub(crate) fn jump_to_current(&mut self) {
-        if !(self.top..self.bottom()).contains(&self.current) {
+    pub fn jump_to(&mut self, index: usize) {
+        if !(self.top..self.bottom()).contains(&index) {
             // height remains unchanged
-            if self.top.abs_diff(self.current) < self.bottom().abs_diff(self.current) {
+            if self.top.abs_diff(index) < self.bottom().abs_diff(index) {
                 // bring the top to current
-                self.top = self.current;
+                self.top = index;
             } else {
                 // bring the bottom to current
-                self.top = self.current.saturating_sub(self.height).saturating_add(1);
+                self.top = index.saturating_sub(self.height).saturating_add(1);
             }
         }
     }
@@ -97,7 +97,7 @@ impl Viewport {
                 .saturating_add(delta)
                 .min(self.max_height.saturating_sub(1)),
         };
-        self.jump_to_current()
+        self.jump_to(self.current);
     }
 
     pub fn line_range(&self) -> Range<usize> {

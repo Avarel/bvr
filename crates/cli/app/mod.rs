@@ -128,138 +128,148 @@ impl App {
                 }
             };
 
-            match action {
-                Action::Exit => break,
-                Action::SwitchMode(new_mode) => {
-                    self.command.submit();
-                    self.mode = new_mode;
-
-                    if new_mode == InputMode::Select {
-                        if let Some(viewer) = self.mux.active_viewer_mut() {
-                            viewer.viewport_mut().move_select_within_view();
-                        }
-                    }
-                }
-                Action::Viewer(action) => match action {
-                    ViewerAction::Pan {
-                        direction,
-                        delta,
-                        target_view,
-                    } => {
-                        let viewer = if let Some(index) = target_view {
-                            self.mux.viewers_mut().get_mut(index)
-                        } else {
-                            self.mux.active_viewer_mut()
-                        };
-
-                        if let Some(viewer) = viewer {
-                            let delta = match delta {
-                                Delta::Number(n) => usize::from(n),
-                                Delta::Page => viewer.viewport().height(),
-                                Delta::HalfPage => viewer.viewport().height().div_ceil(2),
-                                Delta::Boundary => usize::MAX,
-                            };
-                            viewer.viewport_mut().pan_view(direction, delta);
-                        }
-                    }
-                    ViewerAction::FollowOutput => {
-                        if let Some(viewer) = self.mux.active_viewer_mut() {
-                            viewer.viewport_mut().follow_output();
-                        }
-                    }
-                    ViewerAction::SwitchActive(direction) => self.mux.move_active(direction),
-                    ViewerAction::SwitchActiveIndex { target_view } => self.mux.move_active_index(target_view),
-                    ViewerAction::MoveSelect { direction, delta } => {
-                        if let Some(viewer) = self.mux.active_viewer_mut() {
-                            let delta = match delta {
-                                Delta::Number(n) => usize::from(n),
-                                Delta::Page => viewer.viewport().height(),
-                                Delta::HalfPage => viewer.viewport().height().div_ceil(2),
-                                Delta::Boundary => usize::MAX,
-                            };
-                            viewer.viewport_mut().move_select(direction, delta)
-                        }
-                    }
-                    ViewerAction::ToggleSelectedLine => {
-                        if let Some(viewer) = self.mux.active_viewer_mut() {
-                            let ln = viewer.current_selected_file_line();
-                            viewer.filterer.filters.bookmarks_mut().toggle(ln);
-                            viewer.filterer.compute_composite();
-                        }
-                    }
-                    ViewerAction::ToggleLine {
-                        target_view,
-                        line_number,
-                    } => {
-                        let Some(viewer) = self.mux.viewers_mut().get_mut(target_view) else {
-                            continue;
-                        };
-                        viewer.filterer.filters.bookmarks_mut().toggle(line_number);
-                        viewer.filterer.compute_composite();
-                    }
-                },
-                Action::Filter(action) => match action {
-                    actions::FilterAction::MoveSelect { direction, delta } => {
-                        if let Some(viewer) = self.mux.active_viewer_mut() {
-                            let viewport = &mut viewer.filterer.viewport;
-                            let delta = match delta {
-                                Delta::Number(n) => usize::from(n),
-                                Delta::Page => viewport.height(),
-                                Delta::HalfPage => viewport.height().div_ceil(2),
-                                Delta::Boundary => usize::MAX,
-                            };
-                            viewport.move_select(direction, delta)
-                        }
-                    }
-                    actions::FilterAction::ToggleSelectedFilter => {
-                        if let Some(viewer) = self.mux.active_viewer_mut() {
-                            viewer.filterer.current_filter_mut().toggle();
-                            viewer.filterer.compute_composite();
-                        }
-                    }
-                    actions::FilterAction::RemoveSelectedFilter => {
-                        if let Some(viewer) = self.mux.active_viewer_mut() {
-                            viewer.filterer.remove_current_filter();
-                            viewer.filterer.compute_composite();
-                        }
-                    }
-                },
-                Action::Command(action) => match action {
-                    CommandAction::Move {
-                        direction,
-                        select,
-                        jump,
-                    } => self.command.move_cursor(
-                        direction,
-                        CursorMovement::new(
-                            select,
-                            match jump {
-                                actions::Jump::Word => crate::components::command::CursorJump::Word,
-                                actions::Jump::Boundary => {
-                                    crate::components::command::CursorJump::Boundary
-                                }
-                                actions::Jump::None => crate::components::command::CursorJump::None,
-                            },
-                        ),
-                    ),
-                    CommandAction::Type(c) => self.command.enter_char(c),
-                    CommandAction::Paste(s) => self.command.enter_str(&s),
-                    CommandAction::Backspace => {
-                        if !self.command.delete() {
-                            self.mode = InputMode::Viewer;
-                        }
-                    }
-                    CommandAction::Submit => {
-                        let command = self.command.submit();
-                        if !self.process_command(command) {
-                            break;
-                        }
-                        self.mode = InputMode::Viewer;
-                    }
-                },
+            if !self.process_action(action) {
+                break;
             }
         }
         Ok(())
+    }
+
+    fn process_action(&mut self, action: Action) -> bool {
+        match action {
+            Action::Exit => return false,
+            Action::SwitchMode(new_mode) => {
+                self.command.submit();
+                self.mode = new_mode;
+
+                if new_mode == InputMode::Select {
+                    if let Some(viewer) = self.mux.active_viewer_mut() {
+                        viewer.viewport_mut().move_select_within_view();
+                    }
+                }
+            }
+            Action::Viewer(action) => match action {
+                ViewerAction::Pan {
+                    direction,
+                    delta,
+                    target_view,
+                } => {
+                    let viewer = if let Some(index) = target_view {
+                        self.mux.viewers_mut().get_mut(index)
+                    } else {
+                        self.mux.active_viewer_mut()
+                    };
+
+                    if let Some(viewer) = viewer {
+                        let delta = match delta {
+                            Delta::Number(n) => usize::from(n),
+                            Delta::Page => viewer.viewport().height(),
+                            Delta::HalfPage => viewer.viewport().height().div_ceil(2),
+                            Delta::Boundary => usize::MAX,
+                        };
+                        viewer.viewport_mut().pan_view(direction, delta);
+                    }
+                }
+                ViewerAction::FollowOutput => {
+                    if let Some(viewer) = self.mux.active_viewer_mut() {
+                        viewer.viewport_mut().follow_output();
+                    }
+                }
+                ViewerAction::SwitchActive(direction) => self.mux.move_active(direction),
+                ViewerAction::SwitchActiveIndex { target_view } => {
+                    self.mux.move_active_index(target_view)
+                }
+                ViewerAction::MoveSelect { direction, delta } => {
+                    if let Some(viewer) = self.mux.active_viewer_mut() {
+                        let delta = match delta {
+                            Delta::Number(n) => usize::from(n),
+                            Delta::Page => viewer.viewport().height(),
+                            Delta::HalfPage => viewer.viewport().height().div_ceil(2),
+                            Delta::Boundary => usize::MAX,
+                        };
+                        viewer.viewport_mut().move_select(direction, delta)
+                    }
+                }
+                ViewerAction::ToggleSelectedLine => {
+                    if let Some(viewer) = self.mux.active_viewer_mut() {
+                        let ln = viewer.current_selected_file_line();
+                        viewer.filterer.filters.bookmarks_mut().toggle(ln);
+                        viewer.filterer.compute_composite();
+                    }
+                }
+                ViewerAction::ToggleLine {
+                    target_view,
+                    line_number,
+                } => {
+                    let Some(viewer) = self.mux.viewers_mut().get_mut(target_view) else {
+                        return true;
+                    };
+                    viewer.filterer.filters.bookmarks_mut().toggle(line_number);
+                    viewer.filterer.compute_composite();
+                }
+            },
+            Action::Filter(action) => match action {
+                actions::FilterAction::MoveSelect { direction, delta } => {
+                    if let Some(viewer) = self.mux.active_viewer_mut() {
+                        let viewport = &mut viewer.filterer.viewport;
+                        let delta = match delta {
+                            Delta::Number(n) => usize::from(n),
+                            Delta::Page => viewport.height(),
+                            Delta::HalfPage => viewport.height().div_ceil(2),
+                            Delta::Boundary => usize::MAX,
+                        };
+                        viewport.move_select(direction, delta)
+                    }
+                }
+                actions::FilterAction::ToggleSelectedFilter => {
+                    if let Some(viewer) = self.mux.active_viewer_mut() {
+                        viewer.filterer.current_filter_mut().toggle();
+                        viewer.filterer.compute_composite();
+                    }
+                }
+                actions::FilterAction::RemoveSelectedFilter => {
+                    if let Some(viewer) = self.mux.active_viewer_mut() {
+                        viewer.filterer.remove_current_filter();
+                        viewer.filterer.compute_composite();
+                    }
+                }
+            },
+            Action::Command(action) => match action {
+                CommandAction::Move {
+                    direction,
+                    select,
+                    jump,
+                } => self.command.move_cursor(
+                    direction,
+                    CursorMovement::new(
+                        select,
+                        match jump {
+                            actions::Jump::Word => crate::components::command::CursorJump::Word,
+                            actions::Jump::Boundary => {
+                                crate::components::command::CursorJump::Boundary
+                            }
+                            actions::Jump::None => crate::components::command::CursorJump::None,
+                        },
+                    ),
+                ),
+                CommandAction::Type(c) => self.command.enter_char(c),
+                CommandAction::Paste(s) => self.command.enter_str(&s),
+                CommandAction::Backspace => {
+                    if !self.command.delete() {
+                        self.mode = InputMode::Viewer;
+                    }
+                }
+                CommandAction::Submit => {
+                    let command = self.command.submit();
+                    if !self.process_command(command) {
+                        return false;
+                    }
+                    self.mode = InputMode::Viewer;
+                }
+            },
+        };
+
+        true
     }
 
     fn process_command(&mut self, command: String) -> bool {
@@ -313,6 +323,10 @@ impl App {
             if let Some(viewer) = self.mux.active_viewer_mut() {
                 viewer.filter_search(regex);
                 viewer.filterer.compute_composite();
+            }
+        } else if let Ok(n) = usize::from_str_radix(&command, 10) {
+            if let Some(viewer) = self.mux.active_viewer_mut() {
+                viewer.viewport_mut().jump_to(n.saturating_sub(1));
             }
         } else {
             self.status.submit_message(

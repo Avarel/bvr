@@ -1,7 +1,7 @@
 use crate::{
     buf::ContiguousSegmentIterator,
     cowvec::{
-        inflight::{InflightCowVec, InflightCowVecWriter},
+        inflight::{InflightVec, InflightVecWriter},
         CowVec,
     },
     Result, SegBuffer,
@@ -9,7 +9,7 @@ use crate::{
 use regex::bytes::Regex;
 use std::sync::Arc;
 
-pub struct InflightMatchRemote(Arc<InflightCowVecWriter<usize>>);
+pub struct InflightMatchRemote(Arc<InflightVecWriter<usize>>);
 
 impl InflightMatchRemote {
     /// Index a file and load the data into the associated [InflightIndex].
@@ -60,23 +60,23 @@ impl InflightMatches {
 }
 
 #[derive(Clone)]
-pub struct InflightMatches(InflightCowVec<usize>);
+pub struct InflightMatches(InflightVec<usize>);
 
 impl InflightMatches {
     pub fn new() -> (Self, InflightMatchRemote) {
-        let inner = Arc::new(InflightCowVecWriter::<usize>::new());
+        let inner = Arc::new(InflightVecWriter::<usize>::new());
         (
-            Self(InflightCowVec::Incomplete(inner.clone())),
+            Self(InflightVec::Incomplete(inner.clone())),
             InflightMatchRemote(inner),
         )
     }
 
     pub fn complete_from_vec(inner: Vec<usize>) -> Self {
-        Self(InflightCowVec::Complete(CowVec::from(inner)))
+        Self(InflightVec::Complete(CowVec::from(inner)))
     }
 
     pub fn complete(inner: CowVec<usize>) -> Self {
-        Self(InflightCowVec::Complete(inner))
+        Self(InflightVec::Complete(inner))
     }
 
     pub fn empty() -> Self {

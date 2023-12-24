@@ -3,13 +3,13 @@
 use super::CowVec;
 use std::sync::{atomic::AtomicBool, Arc, Mutex};
 
-pub struct InflightCowVecWriter<T> {
+pub struct InflightVecWriter<T> {
     inflight: Mutex<CowVec<T>>,
     snapshot: Mutex<Option<CowVec<T>>>,
     complete: AtomicBool,
 }
 
-impl<T: Copy> InflightCowVecWriter<T> {
+impl<T: Copy> InflightVecWriter<T> {
     pub fn new() -> Self {
         Self {
             inflight: Mutex::new(CowVec::new()),
@@ -58,18 +58,18 @@ impl<T: Copy> InflightCowVecWriter<T> {
 }
 
 #[derive(Clone)]
-pub enum InflightCowVec<T: Copy> {
-    Incomplete(#[doc(hidden)] Arc<InflightCowVecWriter<T>>),
+pub enum InflightVec<T: Copy> {
+    Incomplete(#[doc(hidden)] Arc<InflightVecWriter<T>>),
     Complete(CowVec<T>),
 }
 
-impl<T: Copy> InflightCowVec<T> {
+impl<T: Copy> InflightVec<T> {
     pub fn try_finalize(&mut self) -> bool {
         match self {
             Self::Incomplete(inner) => {
                 match Arc::try_unwrap(std::mem::replace(
                     inner,
-                    Arc::new(InflightCowVecWriter::<T>::new()),
+                    Arc::new(InflightVecWriter::<T>::new()),
                 )) {
                     Ok(unwrapped) => {
                         *self = Self::Complete(unwrapped.inflight.into_inner().unwrap());
@@ -97,8 +97,8 @@ impl<T: Copy> InflightCowVec<T> {
 
     pub fn is_complete(&self) -> bool {
         match self {
-            InflightCowVec::Incomplete(r) => r.complete.load(std::sync::atomic::Ordering::Relaxed),
-            InflightCowVec::Complete(_) => true,
+            InflightVec::Incomplete(r) => r.complete.load(std::sync::atomic::Ordering::Relaxed),
+            InflightVec::Complete(_) => true,
         }
     }
 }

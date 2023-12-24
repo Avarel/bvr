@@ -1,6 +1,6 @@
 use crate::{
     cowvec::{
-        inflight::{InflightCowVec, InflightCowVecWriter},
+        inflight::{InflightVec, InflightVecWriter},
         CowVec,
     },
     err::Result,
@@ -63,7 +63,7 @@ impl Queues {
     }
 }
 
-pub struct InflightCompositeRemote(Arc<InflightCowVecWriter<usize>>);
+pub struct InflightCompositeRemote(Arc<InflightVecWriter<usize>>);
 
 impl InflightCompositeRemote {
     pub fn compute(self, filters: Vec<InflightMatches>) -> Result<()> {
@@ -90,15 +90,15 @@ impl InflightCompositeRemote {
 
 impl InflightComposite {
     pub fn new() -> (Self, InflightCompositeRemote) {
-        let inner = Arc::new(InflightCowVecWriter::<usize>::new());
+        let inner = Arc::new(InflightVecWriter::<usize>::new());
         (
-            Self(InflightCowVec::Incomplete(inner.clone())),
+            Self(InflightVec::Incomplete(inner.clone())),
             InflightCompositeRemote(inner),
         )
     }
 
     pub fn empty() -> Self {
-        Self(InflightCowVec::Complete(CowVec::new()))
+        Self(InflightVec::Complete(CowVec::new()))
     }
 
     pub fn len(&self) -> usize {
@@ -114,4 +114,4 @@ impl InflightComposite {
     }
 }
 
-pub struct InflightComposite(InflightCowVec<usize>);
+pub struct InflightComposite(InflightVec<usize>);

@@ -67,14 +67,15 @@ This is the default mode. You can scroll through files.
 ### Command Mode
 In this mode, you can enter commands to interact with the pager.
 
-| Command        | Description                                          |
-| -------------- | ---------------------------------------------------- |
-| `q`            | Quit.                                                |
-| `mux`          | Toggle the multiplexer mode between windows or tabs. |
-| `open <file>`  | Open a file in a new tab/view.                       |
-| `close`        | Close the current tab/view.                          |
-| `find <regex>` | Create a new filter searching for the regex.         |
-| `findl <lit>`  | Create a new filter searching for the literal.       |
+| Command         | Description                                          |
+| --------------- | ---------------------------------------------------- |
+| `:q`            | Quit.                                                |
+| `:mux`          | Toggle the multiplexer mode between windows or tabs. |
+| `:open <file>`  | Open a file in a new tab/view.                       |
+| `:close`        | Close the current tab/view.                          |
+| `:find <regex>` | Create a new filter searching for the regex.         |
+| `:findl <lit>`  | Create a new filter searching for the literal.       |
+| `:<number>`     | Go to the specific line number.                      |
 
 ### Selection Mode
 In this mode, you can select lines to bookmark.
