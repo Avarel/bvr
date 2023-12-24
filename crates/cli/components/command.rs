@@ -102,7 +102,14 @@ impl CommandApp {
                 }
             }
             CursorJump::Boundary => 0,
-            CursorJump::None => i.saturating_sub(movement.delta),
+            CursorJump::None => i.saturating_sub(
+                self.buf[..i]
+                    .chars()
+                    .rev()
+                    .take(movement.delta)
+                    .map(|c| c.len_utf8())
+                    .sum::<usize>(),
+            ),
         }
     }
 
@@ -130,7 +137,13 @@ impl CommandApp {
                 }
             }
             CursorJump::Boundary => usize::MAX,
-            CursorJump::None => i.saturating_add(movement.delta),
+            CursorJump::None => i.saturating_add(
+                self.buf[i..]
+                    .chars()
+                    .take(movement.delta)
+                    .map(|c| c.len_utf8())
+                    .sum::<usize>(),
+            ),
         }
         .min(self.buf.len())
     }
@@ -203,14 +216,11 @@ impl CommandApp {
     }
 
     pub fn enter_char(&mut self, input: char) {
-        let mut b = [0];
+        let mut b = [0; 4];
         self.enter_str(input.encode_utf8(&mut b));
     }
 
     pub fn enter_str(&mut self, input: &str) {
-        if !input.is_ascii() {
-            return;
-        }
         match self.cursor {
             Cursor::Singleton(i) => {
                 self.buf.insert_str(i, input);
@@ -238,12 +248,15 @@ impl CommandApp {
 
     pub fn delete(&mut self) -> bool {
         match self.cursor {
-            Cursor::Singleton(i) => {
-                if i == 0 {
+            Cursor::Singleton(curr) => {
+                if curr == 0 {
                     return !self.buf.is_empty();
                 }
-                self.buf.remove(i - 1);
-                self.move_cursor(HDirection::Left, CursorMovement::DEFAULT)
+                self.move_cursor(HDirection::Left, CursorMovement::DEFAULT);
+                let Cursor::Singleton(prev) = self.cursor else {
+                    unreachable!()
+                };
+                self.buf.replace_range(prev..curr, "");
             }
             Cursor::Selection(start, end, _) => {
                 self.buf.replace_range(start..end, "");
