@@ -6,7 +6,8 @@ use super::{
 use crate::{
     colors,
     components::{
-        command::{CommandApp, Cursor, SelectionOrigin},
+        command::CommandApp,
+        cursor::{Cursor, SelectionOrigin},
         filters::FilterData,
         mux::{MultiplexerApp, MultiplexerMode},
         status::StatusApp,
@@ -102,9 +103,9 @@ impl Widget for CommandWidget<'_> {
 
         if self.active {
             let i = match *self.inner.cursor() {
-                Cursor::Singleton(i) => i,
-                Cursor::Selection(start, _, SelectionOrigin::Right) => start,
-                Cursor::Selection(_, end, SelectionOrigin::Left) => end,
+                Cursor::Singleton(i)
+                | Cursor::Selection(_, i, SelectionOrigin::Right)
+                | Cursor::Selection(i, _, SelectionOrigin::Left) => i,
             };
             *self.cursor = Some((area.x + i as u16 + 1, area.y));
         }
@@ -141,7 +142,9 @@ pub struct ViewerWidget<'a> {
 
 impl ViewerWidget<'_> {
     fn render(self, area: Rect, buf: &mut Buffer, handle: &mut MouseHandler) {
-        let view = self.viewer.update_and_view(area.height as usize, area.width as usize);
+        let view = self
+            .viewer
+            .update_and_view(area.height as usize, area.width as usize);
 
         let gutter_size = self.gutter.then(|| {
             view.last()
