@@ -97,6 +97,12 @@ impl<T> Debug for CowVec<T> {
     }
 }
 
+impl<T> Default for CowVec<T> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl<T> CowVec<T> {
     /// Constructs a new, empty `CowVec<T>`.
     ///
@@ -142,6 +148,19 @@ macro_rules! cowvec {
     });
 }
 
+impl<T: Copy> From<Vec<T>> for CowVec<T> {
+    fn from(vec: Vec<T>) -> Self {
+        let mut me = std::mem::ManuallyDrop::new(vec);
+        let (ptr, len, cap) = (me.as_mut_ptr(), me.len(), me.capacity());
+
+        Self {
+            repr: CowVecRepr::Owned {
+                buf: Arc::new(RawBuf::new(NonNull::new(ptr).unwrap(), len, cap)),
+            },
+        }
+    }
+}
+
 impl<T: Copy> CowVec<T> {
     fn fixup_mut_buf(&mut self) -> (&Arc<RawBuf<T>>, usize) {
         match self.repr {
@@ -163,6 +182,10 @@ impl<T: Copy> CowVec<T> {
                 )
             }
         }
+    }
+
+    pub fn get(&self, index: usize) -> Option<T> {
+        self.as_slice().get(index).copied()
     }
 
     /// Appends an element to the back of this collection.

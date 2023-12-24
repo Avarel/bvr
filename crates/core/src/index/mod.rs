@@ -191,7 +191,7 @@ impl BufferIndex for Index {
     }
 
     fn data_of_line(&self, line_number: usize) -> Option<u64> {
-        self.line_index.get(line_number).copied()
+        self.line_index.get(line_number)
     }
 
     fn line_of_data(&self, key: u64) -> Option<usize> {

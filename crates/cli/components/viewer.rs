@@ -1,4 +1,4 @@
-use bvr_core::{matches::BufferMatches, SegStr};
+use bvr_core::SegStr;
 use ratatui::style::Color;
 use regex::bytes::Regex;
 use std::ops::Range;

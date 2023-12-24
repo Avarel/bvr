@@ -2,38 +2,21 @@ use std::sync::Arc;
 
 use crate::{
     err::Result,
-    inflight_tool::{Inflight, InflightImpl, Inflightable},
-    matches::BufferMatches,
+    inflight_tool::{Inflight, InflightImpl},
+    matches::InflightMatches, cowvec::CowVec,
 };
 
-use super::{Composite, IncompleteComposite};
-
-impl Inflightable for Composite {
-    type Incomplete = IncompleteComposite;
-
-    fn finish(inner: Self::Incomplete) -> Self {
-        inner.finish()
-    }
-
-    fn snapshot(inner: &Self::Incomplete) -> Self {
-        inner.inner.clone()
-    }
-}
-
-struct QueueMatch<B> {
-    matches: B,
+struct QueueMatch {
+    matches: InflightMatches,
     index: usize,
 }
 
-struct Queues<B> {
-    queues: Vec<QueueMatch<B>>,
+struct Queues {
+    queues: Vec<QueueMatch>,
 }
 
-impl<B> Queues<B>
-where
-    B: BufferMatches,
-{
-    fn new(queues: Vec<B>) -> Self {
+impl Queues {
+    fn new(queues: Vec<InflightMatches>) -> Self {
         Self {
             queues: queues
                 .into_iter()
@@ -78,59 +61,62 @@ where
     }
 }
 
-impl InflightImpl<Composite> {
-    fn compute<B>(self: Arc<Self>, filters: Vec<B>) -> Result<()>
-    where
-        B: BufferMatches,
-    {
+pub struct InflightCompositeRemote(Arc<InflightImpl<CowVec<usize>>>);
+
+impl InflightCompositeRemote {
+    pub fn compute(self, filters: Vec<InflightMatches>) -> Result<()> {
         let mut queues = Queues::new(filters);
 
         while let Some(line_number) = queues.take_lowest() {
-            if Arc::strong_count(&self) < 2 {
+            if Arc::strong_count(&self.0) < 2 {
                 break;
             }
-            self.write(|inner| inner.add_line(line_number));
+            self.0.write(|inner| {
+                if inner.last() == Some(&line_number) {
+                    return;
+                } else if let Some(last) = inner.last() {
+                    assert!(line_number > *last);
+                }
+                inner.push(line_number)
+            });
         }
 
-        self.mark_complete();
+        self.0.mark_complete();
         Ok(())
     }
+    
 }
 
-pub struct InflightCompositeRemote(Arc<InflightImpl<Composite>>);
-
-impl InflightCompositeRemote {
-    pub fn compute<B>(self, filters: Vec<B>) -> Result<()>
-    where
-        B: BufferMatches,
-    {
-        self.0.compute(filters)
-    }
-}
-
-impl Inflight<Composite> {
+impl InflightComposite {
     pub fn new() -> (Self, InflightCompositeRemote) {
-        let inner = Arc::new(InflightImpl::<Composite>::new());
-        (Self::Incomplete(inner.clone()), InflightCompositeRemote(inner))
+        let inner = Arc::new(InflightImpl::<CowVec<usize>>::new());
+        (
+            Self(Inflight::Incomplete(inner.clone())),
+            InflightCompositeRemote(inner),
+        )
     }
 
     pub fn empty() -> Self {
-        Self::Complete(Composite::empty())
+        Self(Inflight::Complete(CowVec::new()))
     }
 
     pub fn len(&self) -> usize {
-        match self {
-            Self::Incomplete(inner) => inner.read(|v| v.len()),
-            Self::Complete(inner) => inner.len(),
+        match &self.0 {
+            Inflight::Incomplete(inner) => inner.read(|v| v.len()),
+            Inflight::Complete(inner) => inner.len(),
         }
     }
 
     pub fn get(&self, index: usize) -> Option<usize> {
-        match self {
-            Self::Incomplete(inner) => inner.read(|v| v.get(index)),
-            Self::Complete(inner) => inner.get(index),
+        match &self.0 {
+            Inflight::Incomplete(inner) => inner.read(|v| v.get(index)),
+            Inflight::Complete(inner) => inner.get(index),
         }
+    }
+
+    pub fn try_finalize(&mut self) -> bool {
+        self.0.try_finalize()
     }
 }
 
-pub type InflightComposite = Inflight<Composite>;
+pub struct  InflightComposite(Inflight<CowVec<usize>>);

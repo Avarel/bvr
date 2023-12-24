@@ -1,7 +1,7 @@
 use crate::colors;
 
 use super::viewer::{Buffer, Viewport};
-use bvr_core::{composite::inflight::InflightComposite, cowvec::CowVec, matches::BufferMatches};
+use bvr_core::{cowvec::CowVec, InflightComposite, InflightMatches};
 use ratatui::style::Color;
 use regex::bytes::Regex;
 
@@ -54,18 +54,8 @@ impl Filter {
             lines.try_finalize();
         }
     }
-}
 
-impl BufferMatches for Filter {
-    fn get(&self, index: usize) -> Option<usize> {
-        match &self.repr {
-            FilterRepr::All => Some(index),
-            FilterRepr::Bookmarks(lines) => lines.get(index),
-            FilterRepr::Search(lines) => lines.get(index),
-        }
-    }
-
-    fn has_line(&self, line_number: usize) -> bool {
+    pub fn has_line(&self, line_number: usize) -> bool {
         match &self.repr {
             FilterRepr::All => true,
             FilterRepr::Bookmarks(lines) => lines.has_line(line_number),
@@ -81,10 +71,11 @@ impl BufferMatches for Filter {
         }
     }
 
-    fn is_complete(&self) -> bool {
+    fn arc_inflight_matches(&self) -> InflightMatches {
         match &self.repr {
-            FilterRepr::All | FilterRepr::Bookmarks(_) => true,
-            FilterRepr::Search(search) => search.is_complete(),
+            FilterRepr::All => InflightMatches::empty(),
+            FilterRepr::Bookmarks(mask) => InflightMatches::complete(mask.lines.clone()),
+            FilterRepr::Search(mask) => mask.clone(),
         }
     }
 }
@@ -111,14 +102,9 @@ impl Bookmarks {
             }
         };
     }
-}
 
-impl BufferMatches for Bookmarks {
-    fn get(&self, index: usize) -> Option<usize> {
-        self.lines.get(index).copied()
-    }
-
-    fn has_line(&self, line_number: usize) -> bool {
+    
+    pub fn has_line(&self, line_number: usize) -> bool {
         let slice = self.lines.as_slice();
         if let &[first, .., last] = slice {
             if (first..=last).contains(&line_number) {
@@ -132,10 +118,6 @@ impl BufferMatches for Bookmarks {
 
     fn len(&self) -> usize {
         self.lines.len()
-    }
-
-    fn is_complete(&self) -> bool {
-        true
     }
 }
 
@@ -269,7 +251,11 @@ impl Filterer {
         }
         let (composite, remote) = InflightComposite::new();
         std::thread::spawn({
-            let filters = self.filters.iter_active().cloned().collect();
+            let filters = self
+                .filters
+                .iter_active()
+                .map(|filter| filter.arc_inflight_matches())
+                .collect();
             move || {
                 remote.compute(filters).unwrap();
             }

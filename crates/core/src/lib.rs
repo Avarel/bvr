@@ -12,6 +12,6 @@ pub use buf::segment::SegStr;
 pub use buf::SegBuffer;
 pub use err::Result;
 
-pub use composite::inflight::InflightComposite;
+pub use composite::InflightComposite;
 pub use index::inflight::InflightIndex;
-pub use matches::inflight::InflightMatches;
+pub use matches::InflightMatches;
