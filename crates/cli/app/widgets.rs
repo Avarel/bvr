@@ -349,9 +349,9 @@ impl TabWidget<'_> {
         .render(area, buf);
 
         handle.on_mouse(area, |event| match event.kind {
-            MouseEventKind::Down(_) => Some(Action::Viewer(ViewerAction::SwitchActiveIndex(
-                self.view_index,
-            ))),
+            MouseEventKind::Down(_) => Some(Action::Viewer(ViewerAction::SwitchActiveIndex {
+                target_view: self.view_index,
+            })),
             _ => None,
         });
     }

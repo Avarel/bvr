@@ -37,16 +37,18 @@ a plethora of other features that I couldn't find in any other pager.
 | Horizontal Scrolling | Pan the view horizontally.                                  | Planned        |
 | Custom Keybindings   | Customize the keybindings of the program.                   | Planned        |
 | Word-Wrapping        | Wrap long lines.                                            | Planned        |
-| Follow Output        | Constantly scroll down as new data is loaded.               | Planned        |
 | Export Output        | Export selected data to a file or pipe it to a new command. | Planned        |
 
 ### Basic Support
-| Search Filters     | Select and disable additive search filters.                 | Basic          |
-| Searching          | Search regex in the file.                                   | Basic          |
-| Multiplexing       | View multiple files through tabs or windows.                | Basic          |
-| Piping Files       | View piped outputs of other programs, ie. `cat file \| bvr` | Basic          |
-| Status Bar         | View current state of the pager.                            | Basic          |
-| Commands           | Use modal commands to interact with the pager.              | Basic          |
+| Feature        | Description                                                 | Progress |
+| -------------- | ----------------------------------------------------------- | -------- |
+| Search Filters | Select and disable additive search filters.                 | Basic    |
+| Searching      | Search regex in the file.                                   | Basic    |
+| Multiplexing   | View multiple files through tabs or windows.                | Basic    |
+| Piping Files   | View piped outputs of other programs, ie. `cat file \| bvr` | Basic    |
+| Status Bar     | View current state of the pager.                            | Basic    |
+| Commands       | Use modal commands to interact with the pager.              | Basic    |
+| Follow Output  | Constantly scroll down as new data is loaded.               | Done     |
 
 ## Built-in Keybindings
 * Custom keybindings will be added in the future.
@@ -54,12 +56,13 @@ a plethora of other features that I couldn't find in any other pager.
 ### Viewer Mode
 This is the default mode. You can scroll through files.
 
-| Keybinding                | Description                                   |
-| ------------------------- | --------------------------------------------- |
-| `Up` and `Down`           | Pan the view.                                 |
-| `Home` and `End`          | Pan the view to the start or end of the file. |
-| `PageUp` and `PageDown`   | Pan the view by a page.                       |
-| `Shift` + `Up` and `Down` | Pan the view by a half-page.                  |
+| Keybinding                      | Description                                          |
+| ------------------------------- | ---------------------------------------------------- |
+| `Up` and `Down`                 | Pan the view.                                        |
+| `Home`/`g` and `End`            | Pan the view to the start or end of the file.        |
+| `G`                             | Pan the view to the end of the file (follow output). |
+| `PageUp` and `PageDown`/`Space` | Pan the view by a page.                              |
+| `Shift` + `Up` and `Down`       | Pan the view by a half-page.                         |
 
 ### Command Mode
 In this mode, you can enter commands to interact with the pager.

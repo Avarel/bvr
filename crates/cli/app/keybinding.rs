@@ -42,12 +42,18 @@ impl Keybinding {
                         },
                         target_view: None,
                     })),
-                    KeyCode::Home | KeyCode::End => Some(Action::Viewer(ViewerAction::Pan {
-                        direction: VDirection::up_if(key.code == KeyCode::Home),
-                        delta: Delta::Boundary,
-                        target_view: None,
-                    })),
-                    KeyCode::PageUp | KeyCode::PageDown => {
+                    KeyCode::Home | KeyCode::End | KeyCode::Char('g') => {
+                        Some(Action::Viewer(ViewerAction::Pan {
+                            direction: VDirection::up_if(matches!(
+                                key.code,
+                                KeyCode::Home | KeyCode::Char('g')
+                            )),
+                            delta: Delta::Boundary,
+                            target_view: None,
+                        }))
+                    }
+                    KeyCode::Char('G') => Some(Action::Viewer(ViewerAction::FollowOutput)),
+                    KeyCode::PageUp | KeyCode::PageDown | KeyCode::Char(' ') => {
                         Some(Action::Viewer(ViewerAction::Pan {
                             direction: VDirection::up_if(key.code == KeyCode::PageUp),
                             delta: Delta::Page,

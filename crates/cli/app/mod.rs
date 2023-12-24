@@ -162,8 +162,13 @@ impl App {
                             viewer.viewport_mut().pan_view(direction, delta);
                         }
                     }
+                    ViewerAction::FollowOutput => {
+                        if let Some(viewer) = self.mux.active_viewer_mut() {
+                            viewer.viewport_mut().follow_output();
+                        }
+                    }
                     ViewerAction::SwitchActive(direction) => self.mux.move_active(direction),
-                    ViewerAction::SwitchActiveIndex(index) => self.mux.move_active_index(index),
+                    ViewerAction::SwitchActiveIndex { target_view } => self.mux.move_active_index(target_view),
                     ViewerAction::MoveSelect { direction, delta } => {
                         if let Some(viewer) = self.mux.active_viewer_mut() {
                             let delta = match delta {

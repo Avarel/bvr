@@ -1,4 +1,4 @@
-use super::viewer::{Buffer, Viewport};
+use super::{viewer::Buffer, viewport::Viewport};
 use crate::colors;
 use bvr_core::{InflightComposite, InflightMatches};
 use ratatui::style::Color;
@@ -216,11 +216,10 @@ impl Filterer {
     pub fn update_and_filter_view(&mut self, viewport_height: usize) -> Vec<FilterData> {
         self.filters.try_finalize();
 
-        let viewport = &mut self.viewport;
-        viewport.max_height = self.filters.searches.len() + 2;
-        viewport.height = viewport_height;
+        self.viewport.update_max_height(self.filters.searches.len() + 2);
+        self.viewport.fit_view(viewport_height);
 
-        let range = viewport.line_range();
+        let range = self.viewport.line_range();
 
         self.filters
             .iter()

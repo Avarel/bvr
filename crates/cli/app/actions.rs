@@ -23,6 +23,7 @@ pub enum ViewerAction {
         delta: Delta,
         target_view: Option<usize>,
     },
+    FollowOutput,
     MoveSelect {
         direction: VDirection,
         delta: Delta,
@@ -33,7 +34,9 @@ pub enum ViewerAction {
         line_number: usize,
     },
     SwitchActive(HDirection),
-    SwitchActiveIndex(usize),
+    SwitchActiveIndex {
+        target_view: usize,
+    },
 }
 
 pub enum FilterAction {

@@ -359,7 +359,7 @@ mod test {
     fn file_stream_consistency_base(file: File, line_count: usize) -> Result<()> {
         let stream = BufReader::new(file.try_clone()?);
 
-        let mut file_index = SegBuffer::read_file(file, NonZeroUsize::new(25).unwrap())?;
+        let mut file_index = SegBuffer::read_file_complete(file, NonZeroUsize::new(25).unwrap())?;
         let mut stream_index = SegBuffer::read_stream_complete(Box::new(stream))?;
 
         assert_eq!(file_index.line_count(), stream_index.line_count());
