@@ -396,7 +396,7 @@ mod test {
         let file_len = file.metadata()?.len();
         let mut reader = BufReader::new(file.try_clone()?);
 
-        let file_buffer = SegBuffer::read_file(file, NonZeroUsize::new(25).unwrap())?;
+        let file_buffer = SegBuffer::read_file_complete(file, NonZeroUsize::new(25).unwrap())?;
         let mut buffers = file_buffer.segment_iter()?;
 
         let mut total_bytes = 0;
