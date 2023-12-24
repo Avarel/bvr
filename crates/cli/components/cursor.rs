@@ -41,6 +41,15 @@ impl CursorState {
         }
     }
 
+    pub fn clamp(&mut self, bound: usize) {
+        self.state = match self.state {
+            Cursor::Singleton(i) => Cursor::Singleton(i.min(bound)),
+            Cursor::Selection(start, end, dir) => {
+                Cursor::new_range(start.min(bound), end.min(bound), dir)
+            }
+        }
+    }
+
     pub fn reset(&mut self) -> Self {
         std::mem::replace(self, Self::new())
     }
@@ -54,38 +63,28 @@ impl CursorState {
                     Cursor::Singleton(transform(i))
                 }
             }
-            Cursor::Selection(start, end, dir) => {
-                if select {
-                    match dir {
-                        SelectionOrigin::Right => Cursor::new_range(start, transform(end), dir),
-                        SelectionOrigin::Left => Cursor::new_range(transform(start), end, dir),
-                    }
-                } else {
-                    Cursor::Singleton(start)
-                }
-            }
+            Cursor::Selection(start, end, dir) if select => match dir {
+                SelectionOrigin::Right => Cursor::new_range(start, transform(end), dir),
+                SelectionOrigin::Left => Cursor::new_range(transform(start), end, dir),
+            },
+            Cursor::Selection(start, _, _) => Cursor::Singleton(start),
         }
     }
 
-    pub fn forward(&mut self, select: bool, bound: usize, transform: impl FnOnce(usize) -> usize) {
+    pub fn forward(&mut self, select: bool, transform: impl FnOnce(usize) -> usize) {
         self.state = match self.state {
             Cursor::Singleton(i) => {
-                if select && i < bound {
+                if select {
                     Cursor::new_range(i, transform(i), SelectionOrigin::Right)
                 } else {
                     Cursor::Singleton(transform(i))
                 }
             }
-            Cursor::Selection(start, end, dir) => {
-                if select {
-                    match dir {
-                        SelectionOrigin::Right => Cursor::new_range(start, transform(end), dir),
-                        SelectionOrigin::Left => Cursor::new_range(transform(start), end, dir),
-                    }
-                } else {
-                    Cursor::Singleton(end)
-                }
-            }
+            Cursor::Selection(start, end, dir) if select => match dir {
+                SelectionOrigin::Right => Cursor::new_range(start, transform(end), dir),
+                SelectionOrigin::Left => Cursor::new_range(transform(start), end, dir),
+            },
+            Cursor::Selection(_, end, _) => Cursor::Singleton(end),
         }
     }
 }

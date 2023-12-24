@@ -1,15 +1,30 @@
-use super::{filters::Filterer, viewport::Viewport};
-use bvr_core::SegStr;
+use crate::direction::Direction;
+
+use super::{
+    cursor::{Cursor, CursorState, SelectionOrigin},
+    filters::Filterer,
+    viewport::Viewport,
+};
+use bitflags::bitflags;
+use bvr_core::{SegBuffer, SegStr};
 use ratatui::style::Color;
 use regex::bytes::Regex;
 
-pub type Buffer = bvr_core::SegBuffer;
-
 pub struct Instance {
     name: String,
-    file: Buffer,
+    buf: SegBuffer,
     viewport: Viewport,
+    cursor: CursorState,
     pub filterer: Filterer,
+}
+
+bitflags! {
+    pub struct LineType: u8 {
+        const None = 0;
+        const Origin = 1 << 0;
+        const Within = 1 << 1;
+        const Bookmarked = 1 << 2;
+    }
 }
 
 pub struct LineData {
@@ -17,22 +32,22 @@ pub struct LineData {
     pub data: SegStr,
     pub start: usize,
     pub color: Color,
-    pub bookmarked: bool,
-    pub selected: bool,
+    pub ty: LineType,
 }
 
 impl Instance {
-    pub fn new(name: String, file: Buffer) -> Self {
+    pub fn new(name: String, buf: SegBuffer) -> Self {
         Self {
             name,
-            file,
+            buf,
+            cursor: CursorState::new(),
             viewport: Viewport::new(),
             filterer: Filterer::new(),
         }
     }
 
-    pub fn file(&self) -> &Buffer {
-        &self.file
+    pub fn file(&self) -> &SegBuffer {
+        &self.buf
     }
 
     pub fn viewport(&self) -> &Viewport {
@@ -43,22 +58,30 @@ impl Instance {
         &mut self.viewport
     }
 
-    pub fn update_and_view(&mut self, viewport_height: usize, viewport_width: usize) -> Vec<LineData> {
-        self.file.try_finalize();
+    pub fn visible_line_count(&self) -> usize {
+        if self.filterer.filters.all().is_enabled() {
+            self.buf.line_count()
+        } else {
+            self.filterer.composite.len()
+        }
+    }
+
+    pub fn update_and_view(
+        &mut self,
+        viewport_height: usize,
+        viewport_width: usize,
+    ) -> Vec<LineData> {
+        self.buf.try_finalize();
         self.filterer.filters.try_finalize();
         self.filterer.composite.try_finalize();
 
         self.viewport.fit_view(viewport_height, viewport_width);
 
-        let mut lines = Vec::with_capacity(self.viewport.line_range().len());
-        if self.filterer.filters.all().is_enabled() {
-            self.viewport.update_end(self.file.line_count());
-        } else {
-            self.viewport.update_end(self.filterer.composite.len());
-        }
+        self.viewport.update_end(self.visible_line_count());
 
         let filters = self.filterer.filters.iter_active().collect::<Vec<_>>();
 
+        let mut lines = Vec::with_capacity(self.viewport.line_range().len());
         for index in self.viewport.line_range() {
             let line_number = if self.filterer.filters.all().is_enabled() {
                 index
@@ -69,7 +92,7 @@ impl Instance {
                     .expect("valid index into composite")
             };
 
-            let Some(data) = self.file.get_line(line_number) else {
+            let Some(data) = self.buf.get_line(line_number) else {
                 break;
             };
             let color = filters
@@ -86,29 +109,91 @@ impl Instance {
                 data,
                 start: self.viewport.left(),
                 color,
-                bookmarked,
-                selected: index == self.viewport.current(),
+                ty: match self.cursor.state {
+                    Cursor::Singleton(i) => {
+                        if index == i {
+                            LineType::Origin
+                        } else {
+                            LineType::None
+                        }
+                    }
+                    Cursor::Selection(start, end, origin) => {
+                        if !(start..=end).contains(&index) {
+                            LineType::None
+                        } else if index == start && matches!(origin, SelectionOrigin::Left)
+                            || index == end && matches!(origin, SelectionOrigin::Right)
+                        {
+                            LineType::Origin
+                        } else {
+                            LineType::Within
+                        }
+                    }
+                } | if bookmarked {
+                    LineType::Bookmarked
+                } else {
+                    LineType::None
+                },
             });
         }
         lines
     }
 
-    pub fn current_selected_file_line(&mut self) -> usize {
+    fn line_at_view_index(&mut self, index: usize) -> usize {
         if self.filterer.filters.all().is_enabled() {
-            self.viewport.current()
+            index
         } else {
-            self.filterer
-                .composite
-                .get(self.viewport.current())
-                .unwrap()
+            self.filterer.composite.get(index).unwrap()
         }
     }
 
     pub fn filter_search(&mut self, regex: Regex) {
-        self.filterer.filter_search(&self.file, regex);
+        self.filterer.filter_search(&self.buf, regex);
     }
 
     pub fn name(&self) -> &str {
         &self.name
+    }
+
+    pub fn move_selected_into_view(&mut self) {
+        let current = match self.cursor.state {
+            Cursor::Singleton(i)
+            | Cursor::Selection(i, _, SelectionOrigin::Left)
+            | Cursor::Selection(_, i, SelectionOrigin::Right) => i,
+        };
+        if current < self.viewport.top() {
+            self.cursor.state = Cursor::Singleton(self.viewport.top());
+        } else if current >= self.viewport.bottom() {
+            self.cursor.state = Cursor::Singleton(self.viewport.bottom().saturating_sub(1));
+        }
+    }
+
+    pub fn move_select(&mut self, dir: Direction, select: bool, delta: usize) {
+        match dir {
+            Direction::Back => self.cursor.back(select, |i| i.saturating_sub(delta)),
+            Direction::Next => self.cursor.forward(select, |i| i.saturating_add(delta)),
+        }
+        self.cursor
+            .clamp(self.visible_line_count().saturating_sub(1));
+        let i = match self.cursor.state {
+            Cursor::Singleton(i)
+            | Cursor::Selection(i, _, SelectionOrigin::Left)
+            | Cursor::Selection(_, i, SelectionOrigin::Right) => i,
+        };
+        self.viewport.jump_to(i);
+    }
+
+    pub fn toggle_select_bookmarks(&mut self) {
+        match self.cursor.state {
+            Cursor::Singleton(i) => {
+                let line_number = self.line_at_view_index(i);
+                self.filterer.filters.bookmarks_mut().toggle(line_number);
+            }
+            Cursor::Selection(start, end, _) => {
+                for i in start..=end {
+                    let line_number = self.line_at_view_index(i);
+                    self.filterer.filters.bookmarks_mut().toggle(line_number);
+                }
+            }
+        }
     }
 }

@@ -1,5 +1,5 @@
 use super::InputMode;
-use crate::direction::{HDirection, VDirection};
+use crate::direction::Direction;
 
 pub enum Action {
     #[allow(dead_code)]
@@ -19,18 +19,19 @@ pub enum Delta {
 
 pub enum ViewerAction {
     PanVertical {
-        direction: VDirection,
+        direction: Direction,
         delta: Delta,
         target_view: Option<usize>,
     },
     PanHorizontal {
-        direction: HDirection,
+        direction: Direction,
         delta: Delta,
         target_view: Option<usize>,
     },
     FollowOutput,
-    MoveSelect {
-        direction: VDirection,
+    Move {
+        direction: Direction,
+        select: bool,
         delta: Delta,
     },
     ToggleSelectedLine,
@@ -38,23 +39,27 @@ pub enum ViewerAction {
         target_view: usize,
         line_number: usize,
     },
-    SwitchActive(HDirection),
+    SwitchActive(Direction),
     SwitchActiveIndex {
         target_view: usize,
     },
 }
 
 pub enum FilterAction {
-    MoveSelect { direction: VDirection, delta: Delta },
+    Move {
+        direction: Direction,
+        select: bool,
+        delta: Delta,
+    },
     ToggleSelectedFilter,
     RemoveSelectedFilter,
 }
 
 pub enum CommandAction {
     Move {
-        direction: HDirection,
+        direction: Direction,
         select: bool,
-        jump: Jump,
+        jump: CommandJump,
     },
     Type(char),
     Paste(String),
@@ -63,7 +68,7 @@ pub enum CommandAction {
 }
 
 #[derive(Clone, Copy)]
-pub enum Jump {
+pub enum CommandJump {
     Word,
     Boundary,
     None,

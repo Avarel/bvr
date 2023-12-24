@@ -1,5 +1,6 @@
+use crate::direction::Direction;
+
 use super::viewer::Instance;
-use crate::direction::HDirection;
 
 #[derive(Clone, Copy)]
 pub enum MultiplexerMode {
@@ -61,10 +62,10 @@ impl MultiplexerApp {
         self.active
     }
 
-    pub fn move_active(&mut self, direction: HDirection) {
+    pub fn move_active(&mut self, direction: Direction) {
         self.move_active_index(match direction {
-            HDirection::Left => self.active.saturating_sub(1),
-            HDirection::Right => self.active.saturating_add(1),
+            Direction::Back => self.active.saturating_sub(1),
+            Direction::Next => self.active.saturating_add(1),
         })
     }
 

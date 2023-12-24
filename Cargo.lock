@@ -106,6 +106,7 @@ name = "bvr"
 version = "0.0.3"
 dependencies = [
  "anyhow",
+ "bitflags 2.4.1",
  "bvr-core",
  "clap",
  "crossterm",

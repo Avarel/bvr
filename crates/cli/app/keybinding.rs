@@ -1,9 +1,9 @@
 use super::{
-    actions::{Action, CommandAction, Delta, FilterAction, Jump, ViewerAction},
+    actions::{Action, CommandAction, CommandJump, Delta, FilterAction, ViewerAction},
     InputMode,
 };
-use crate::direction::{HDirection, VDirection};
-use crossterm::event::{Event, KeyCode, KeyEventKind, KeyModifiers, MouseEventKind};
+use crate::direction::Direction;
+use crossterm::event::{Event, KeyCode, KeyEventKind, KeyModifiers};
 
 pub enum Keybinding {
     // The keybindings are hardcoded into the program.
@@ -33,18 +33,20 @@ impl Keybinding {
         match input_mode {
             InputMode::Viewer => match event {
                 Event::Key(key) => match key.code {
-                    KeyCode::Up | KeyCode::Down => Some(Action::Viewer(ViewerAction::PanVertical {
-                        direction: VDirection::up_if(key.code == KeyCode::Up),
-                        delta: if key.modifiers.contains(KeyModifiers::SHIFT) {
-                            Delta::HalfPage
-                        } else {
-                            Delta::Number(1)
-                        },
-                        target_view: None,
-                    })),
+                    KeyCode::Up | KeyCode::Down => {
+                        Some(Action::Viewer(ViewerAction::PanVertical {
+                            direction: Direction::back_if(key.code == KeyCode::Up),
+                            delta: if key.modifiers.contains(KeyModifiers::SHIFT) {
+                                Delta::HalfPage
+                            } else {
+                                Delta::Number(1)
+                            },
+                            target_view: None,
+                        }))
+                    }
                     KeyCode::Left | KeyCode::Right => {
                         Some(Action::Viewer(ViewerAction::PanHorizontal {
-                            direction: HDirection::left_if(key.code == KeyCode::Left),
+                            direction: Direction::back_if(key.code == KeyCode::Left),
                             delta: if key.modifiers.contains(KeyModifiers::SHIFT) {
                                 Delta::HalfPage
                             } else {
@@ -55,7 +57,7 @@ impl Keybinding {
                     }
                     KeyCode::Home | KeyCode::End | KeyCode::Char('g') => {
                         Some(Action::Viewer(ViewerAction::PanVertical {
-                            direction: VDirection::up_if(matches!(
+                            direction: Direction::back_if(matches!(
                                 key.code,
                                 KeyCode::Home | KeyCode::Char('g')
                             )),
@@ -66,44 +68,46 @@ impl Keybinding {
                     KeyCode::Char('G') => Some(Action::Viewer(ViewerAction::FollowOutput)),
                     KeyCode::PageUp | KeyCode::PageDown | KeyCode::Char(' ') => {
                         Some(Action::Viewer(ViewerAction::PanVertical {
-                            direction: VDirection::up_if(key.code == KeyCode::PageUp),
+                            direction: Direction::back_if(key.code == KeyCode::PageUp),
                             delta: Delta::Page,
                             target_view: None,
                         }))
                     }
-                    KeyCode::Char(c @ ('u' | 'd')) => Some(Action::Viewer(ViewerAction::PanVertical {
-                        direction: VDirection::up_if(c == 'u'),
-                        delta: Delta::HalfPage,
-                        target_view: None,
-                    })),
+                    KeyCode::Char(c @ ('u' | 'd')) => {
+                        Some(Action::Viewer(ViewerAction::PanVertical {
+                            direction: Direction::back_if(c == 'u'),
+                            delta: Delta::HalfPage,
+                            target_view: None,
+                        }))
+                    }
                     _ => None,
                 },
                 _ => None,
             },
             InputMode::Filter => match event {
                 Event::Key(key) => match key.code {
-                    KeyCode::Up | KeyCode::Down => Some(Action::Filter(FilterAction::MoveSelect {
-                        direction: VDirection::up_if(key.code == KeyCode::Up),
+                    KeyCode::Up | KeyCode::Down => Some(Action::Filter(FilterAction::Move {
+                        direction: Direction::back_if(key.code == KeyCode::Up),
+                        select: key.modifiers.contains(KeyModifiers::SHIFT),
                         delta: Delta::Number(1),
                     })),
-                    KeyCode::Home | KeyCode::End => {
-                        Some(Action::Filter(FilterAction::MoveSelect {
-                            direction: VDirection::up_if(key.code == KeyCode::Home),
-                            delta: Delta::Boundary,
-                        }))
-                    }
+                    KeyCode::Home | KeyCode::End => Some(Action::Filter(FilterAction::Move {
+                        direction: Direction::back_if(key.code == KeyCode::Home),
+                        select: key.modifiers.contains(KeyModifiers::SHIFT),
+                        delta: Delta::Boundary,
+                    })),
                     KeyCode::PageUp | KeyCode::PageDown => {
-                        Some(Action::Filter(FilterAction::MoveSelect {
-                            direction: VDirection::up_if(key.code == KeyCode::PageUp),
+                        Some(Action::Filter(FilterAction::Move {
+                            direction: Direction::back_if(key.code == KeyCode::PageUp),
+                            select: key.modifiers.contains(KeyModifiers::SHIFT),
                             delta: Delta::Page,
                         }))
                     }
-                    KeyCode::Char(c @ ('u' | 'd')) => {
-                        Some(Action::Filter(FilterAction::MoveSelect {
-                            direction: VDirection::up_if(c == 'u'),
-                            delta: Delta::HalfPage,
-                        }))
-                    }
+                    KeyCode::Char(c @ ('u' | 'd')) => Some(Action::Filter(FilterAction::Move {
+                        direction: Direction::back_if(c == 'u'),
+                        select: key.modifiers.contains(KeyModifiers::SHIFT),
+                        delta: Delta::HalfPage,
+                    })),
                     KeyCode::Char(' ') | KeyCode::Enter => {
                         Some(Action::Filter(FilterAction::ToggleSelectedFilter))
                     }
@@ -113,20 +117,31 @@ impl Keybinding {
                 _ => None,
             },
             InputMode::Select => match event {
-                Event::Mouse(mouse) => match mouse.kind {
-                    MouseEventKind::ScrollUp | MouseEventKind::ScrollDown => {
-                        Some(Action::Viewer(ViewerAction::MoveSelect {
-                            direction: VDirection::up_if(mouse.kind == MouseEventKind::ScrollUp),
-                            delta: Delta::Number(1),
+                Event::Key(key) => match key.code {
+                    KeyCode::Up | KeyCode::Down => Some(Action::Viewer(ViewerAction::Move {
+                        direction: Direction::back_if(key.code == KeyCode::Up),
+                        select: key.modifiers.contains(KeyModifiers::SHIFT),
+                        delta: if key
+                            .modifiers
+                            .intersects(KeyModifiers::ALT | KeyModifiers::CONTROL)
+                        {
+                            Delta::HalfPage
+                        } else {
+                            Delta::Number(1)
+                        },
+                    })),
+                    KeyCode::Home | KeyCode::End => Some(Action::Viewer(ViewerAction::Move {
+                        direction: Direction::back_if(key.code == KeyCode::Home),
+                        select: key.modifiers.contains(KeyModifiers::SHIFT),
+                        delta: Delta::Boundary,
+                    })),
+                    KeyCode::PageUp | KeyCode::PageDown => {
+                        Some(Action::Viewer(ViewerAction::Move {
+                            direction: Direction::back_if(key.code == KeyCode::PageUp),
+                            select: key.modifiers.contains(KeyModifiers::SHIFT),
+                            delta: Delta::Page,
                         }))
                     }
-                    _ => None,
-                },
-                Event::Key(key) => match key.code {
-                    KeyCode::Up | KeyCode::Down => Some(Action::Viewer(ViewerAction::MoveSelect {
-                        direction: VDirection::up_if(key.code == KeyCode::Up),
-                        delta: Delta::Number(1),
-                    })),
                     KeyCode::Char(' ') | KeyCode::Enter => {
                         Some(Action::Viewer(ViewerAction::ToggleSelectedLine))
                     }
@@ -141,36 +156,36 @@ impl Keybinding {
                 Event::Key(key) => match key.code {
                     KeyCode::Enter => Some(Action::Command(CommandAction::Submit)),
                     KeyCode::Left | KeyCode::Right => Some(Action::Command(CommandAction::Move {
-                        direction: HDirection::left_if(key.code == KeyCode::Left),
+                        direction: Direction::back_if(key.code == KeyCode::Left),
                         select: key.modifiers.contains(KeyModifiers::SHIFT),
                         jump: if key
                             .modifiers
                             .intersects(KeyModifiers::ALT | KeyModifiers::CONTROL)
                         {
-                            Jump::Word
+                            CommandJump::Word
                         } else {
-                            Jump::None
+                            CommandJump::None
                         },
                     })),
                     KeyCode::Home | KeyCode::End => Some(Action::Command(CommandAction::Move {
-                        direction: HDirection::left_if(key.code == KeyCode::Home),
+                        direction: Direction::back_if(key.code == KeyCode::Home),
                         select: key.modifiers.contains(KeyModifiers::SHIFT),
-                        jump: Jump::Boundary,
+                        jump: CommandJump::Boundary,
                     })),
                     KeyCode::Backspace => Some(Action::Command(CommandAction::Backspace)),
                     KeyCode::Char(to_insert) => match to_insert {
                         'b' | 'f' if key.modifiers.contains(KeyModifiers::ALT) => {
                             Some(Action::Command(CommandAction::Move {
-                                direction: HDirection::left_if(to_insert == 'b'),
+                                direction: Direction::back_if(to_insert == 'b'),
                                 select: key.modifiers.contains(KeyModifiers::SHIFT),
-                                jump: Jump::Word,
+                                jump: CommandJump::Word,
                             }))
                         }
                         'a' | 'e' if key.modifiers.contains(KeyModifiers::CONTROL) => {
                             Some(Action::Command(CommandAction::Move {
-                                direction: HDirection::left_if(to_insert == 'a'),
+                                direction: Direction::back_if(to_insert == 'a'),
                                 select: key.modifiers.contains(KeyModifiers::SHIFT),
-                                jump: Jump::Boundary,
+                                jump: CommandJump::Boundary,
                             }))
                         }
                         c => Some(Action::Command(CommandAction::Type(c))),
@@ -191,7 +206,7 @@ impl Keybinding {
                 KeyCode::Char('i') => Some(Action::SwitchMode(InputMode::Select)),
                 KeyCode::Left | KeyCode::Right if key.modifiers.contains(KeyModifiers::SHIFT) => {
                     Some(Action::Viewer(ViewerAction::SwitchActive(
-                        HDirection::left_if(key.code == KeyCode::Left),
+                        Direction::back_if(key.code == KeyCode::Left),
                     )))
                 }
                 KeyCode::Char('q') => Some(Action::Exit),

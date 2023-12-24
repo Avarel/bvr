@@ -1,31 +1,15 @@
 #[derive(Clone, Copy)]
-pub enum HDirection {
-    Left,
-    Right,
+pub enum Direction {
+    Back,
+    Next,
 }
 
-impl HDirection {
-    pub fn left_if(condition: bool) -> Self {
+impl Direction {
+    pub fn back_if(condition: bool) -> Self {
         if condition {
-            Self::Left
+            Self::Back
         } else {
-            Self::Right
-        }
-    }
-}
-
-#[derive(Clone, Copy)]
-pub enum VDirection {
-    Up,
-    Down,
-}
-
-impl VDirection {
-    pub fn up_if(condition: bool) -> Self {
-        if condition {
-            Self::Up
-        } else {
-            Self::Down
+            Self::Next
         }
     }
 }

@@ -10,7 +10,7 @@ use self::{
     widgets::{CommandWidget, MultiplexerWidget},
 };
 use crate::components::{
-    command::{CommandApp, CursorMovement},
+    command::{self, CommandApp, PromptMovement},
     mux::MultiplexerApp,
     status::StatusApp,
     viewer::Instance,
@@ -144,7 +144,7 @@ impl App {
 
                 if new_mode == InputMode::Select {
                     if let Some(viewer) = self.mux.active_viewer_mut() {
-                        viewer.viewport_mut().move_select_within_view();
+                        viewer.move_selected_into_view()
                     }
                 }
             }
@@ -200,7 +200,11 @@ impl App {
                 ViewerAction::SwitchActiveIndex { target_view } => {
                     self.mux.move_active_index(target_view)
                 }
-                ViewerAction::MoveSelect { direction, delta } => {
+                ViewerAction::Move {
+                    direction,
+                    select,
+                    delta,
+                } => {
                     if let Some(viewer) = self.mux.active_viewer_mut() {
                         let delta = match delta {
                             Delta::Number(n) => usize::from(n),
@@ -208,13 +212,12 @@ impl App {
                             Delta::HalfPage => viewer.viewport().height().div_ceil(2),
                             Delta::Boundary => usize::MAX,
                         };
-                        viewer.viewport_mut().move_select(direction, delta)
+                        viewer.move_select(direction, select, delta)
                     }
                 }
                 ViewerAction::ToggleSelectedLine => {
                     if let Some(viewer) = self.mux.active_viewer_mut() {
-                        let ln = viewer.current_selected_file_line();
-                        viewer.filterer.filters.bookmarks_mut().toggle(ln);
+                        viewer.toggle_select_bookmarks();
                         viewer.filterer.compute_composite();
                     }
                 }
@@ -230,27 +233,31 @@ impl App {
                 }
             },
             Action::Filter(action) => match action {
-                actions::FilterAction::MoveSelect { direction, delta } => {
+                actions::FilterAction::Move {
+                    direction,
+                    select,
+                    delta,
+                } => {
                     if let Some(viewer) = self.mux.active_viewer_mut() {
-                        let viewport = &mut viewer.filterer.viewport;
+                        let viewport = &viewer.filterer.viewport;
                         let delta = match delta {
                             Delta::Number(n) => usize::from(n),
                             Delta::Page => viewport.height(),
                             Delta::HalfPage => viewport.height().div_ceil(2),
                             Delta::Boundary => usize::MAX,
                         };
-                        viewport.move_select(direction, delta)
+                        viewer.filterer.move_select(direction, select, delta)
                     }
                 }
                 actions::FilterAction::ToggleSelectedFilter => {
                     if let Some(viewer) = self.mux.active_viewer_mut() {
-                        viewer.filterer.current_filter_mut().toggle();
+                        viewer.filterer.toggle_select_filters();
                         viewer.filterer.compute_composite();
                     }
                 }
                 actions::FilterAction::RemoveSelectedFilter => {
                     if let Some(viewer) = self.mux.active_viewer_mut() {
-                        viewer.filterer.remove_current_filter();
+                        viewer.filterer.remove_select_filters();
                         viewer.filterer.compute_composite();
                     }
                 }
@@ -262,14 +269,12 @@ impl App {
                     jump,
                 } => self.command.move_cursor(
                     direction,
-                    CursorMovement::new(
+                    PromptMovement::new(
                         select,
                         match jump {
-                            actions::Jump::Word => crate::components::command::CursorJump::Word,
-                            actions::Jump::Boundary => {
-                                crate::components::command::CursorJump::Boundary
-                            }
-                            actions::Jump::None => crate::components::command::CursorJump::None,
+                            actions::CommandJump::Word => command::PromptJump::Word,
+                            actions::CommandJump::Boundary => command::PromptJump::Boundary,
+                            actions::CommandJump::None => command::PromptJump::Delta(1),
                         },
                     ),
                 ),
@@ -345,7 +350,7 @@ impl App {
                 viewer.filter_search(regex);
                 viewer.filterer.compute_composite();
             }
-        } else if let Ok(n) = usize::from_str_radix(&command, 10) {
+        } else if let Ok(n) = command.parse::<usize>() {
             if let Some(viewer) = self.mux.active_viewer_mut() {
                 viewer.viewport_mut().jump_to(n.saturating_sub(1));
             }
@@ -359,7 +364,7 @@ impl App {
     }
 
     fn ui(&mut self, f: &mut Frame, handler: &mut MouseHandler) {
-        let [mux_chunk, cmd_chunk] = MultiplexerWidget::split_status(f.size());
+        let [mux_chunk, cmd_chunk] = MultiplexerWidget::split_bottom(f.size(), 1);
 
         MultiplexerWidget {
             mux: &mut self.mux,

@@ -1,31 +1,24 @@
-use crate::direction::HDirection;
-
 use super::cursor::{Cursor, CursorState};
+use crate::direction::Direction;
 
-#[derive(Clone, Copy, Default)]
-pub enum CursorJump {
+#[derive(Clone, Copy)]
+pub enum PromptJump {
     Word,
     Boundary,
-    #[default]
-    None,
+    Delta(usize),
 }
 
 #[derive(Clone, Copy)]
-pub struct CursorMovement {
-    delta: usize,
+pub struct PromptMovement {
     select: bool,
-    jump: CursorJump,
+    jump: PromptJump,
 }
 
-impl CursorMovement {
-    pub const DEFAULT: Self = Self::new(false, CursorJump::None);
+impl PromptMovement {
+    pub const DEFAULT: Self = Self::new(false, PromptJump::Delta(1));
 
-    pub const fn new(range_selection: bool, jump: CursorJump) -> Self {
-        Self {
-            delta: 1,
-            select: range_selection,
-            jump,
-        }
+    pub const fn new(select: bool, jump: PromptJump) -> Self {
+        Self { select, jump }
     }
 }
 
@@ -50,10 +43,10 @@ impl CommandApp {
         &self.cursor.state
     }
 
-    pub fn move_cursor(&mut self, direction: HDirection, movement: CursorMovement) {
+    pub fn move_cursor(&mut self, direction: Direction, movement: PromptMovement) {
         match direction {
-            HDirection::Left => self.cursor.back(movement.select, |i| match movement.jump {
-                CursorJump::Word => {
+            Direction::Back => self.cursor.back(movement.select, |i| match movement.jump {
+                PromptJump::Word => {
                     if self.buf[..i]
                         .chars()
                         .rev()
@@ -72,19 +65,19 @@ impl CommandApp {
                         self.buf[..i].rfind(' ').map(|p| p + 1).unwrap_or(0)
                     }
                 }
-                CursorJump::Boundary => 0,
-                CursorJump::None => i.saturating_sub(
+                PromptJump::Boundary => 0,
+                PromptJump::Delta(delta) => i.saturating_sub(
                     self.buf[..i]
                         .chars()
                         .rev()
-                        .take(movement.delta)
+                        .take(delta)
                         .map(|c| c.len_utf8())
                         .sum::<usize>(),
                 ),
             }),
-            HDirection::Right => self.cursor.forward(movement.select, self.buf.len(), |i| {
+            Direction::Next => self.cursor.forward(movement.select, |i| {
                 match movement.jump {
-                    CursorJump::Word => {
+                    PromptJump::Word => {
                         if self.buf[i..]
                             .chars()
                             .nth(0)
@@ -105,11 +98,11 @@ impl CommandApp {
                                 .unwrap_or(usize::MAX)
                         }
                     }
-                    CursorJump::Boundary => usize::MAX,
-                    CursorJump::None => i.saturating_add(
+                    PromptJump::Boundary => usize::MAX,
+                    PromptJump::Delta(delta) => i.saturating_add(
                         self.buf[i..]
                             .chars()
-                            .take(movement.delta)
+                            .take(delta)
                             .map(|c| c.len_utf8())
                             .sum::<usize>(),
                     ),
@@ -129,21 +122,21 @@ impl CommandApp {
             Cursor::Singleton(i) => {
                 self.buf.insert_str(i, input);
                 self.move_cursor(
-                    HDirection::Right,
-                    CursorMovement {
-                        delta: input.len(),
-                        ..CursorMovement::DEFAULT
+                    Direction::Next,
+                    PromptMovement {
+                        select: false,
+                        jump: PromptJump::Delta(input.len()),
                     },
                 )
             }
             Cursor::Selection(start, end, _) => {
                 self.buf.replace_range(start..end, input);
-                self.move_cursor(HDirection::Left, CursorMovement::DEFAULT);
+                self.move_cursor(Direction::Back, PromptMovement::DEFAULT);
                 self.move_cursor(
-                    HDirection::Right,
-                    CursorMovement {
-                        delta: input.len(),
-                        ..CursorMovement::DEFAULT
+                    Direction::Next,
+                    PromptMovement {
+                        select: false,
+                        jump: PromptJump::Delta(input.len()),
                     },
                 )
             }
@@ -156,7 +149,7 @@ impl CommandApp {
                 if curr == 0 {
                     return !self.buf.is_empty();
                 }
-                self.move_cursor(HDirection::Left, CursorMovement::DEFAULT);
+                self.move_cursor(Direction::Back, PromptMovement::DEFAULT);
                 let Cursor::Singleton(prev) = self.cursor.state else {
                     unreachable!()
                 };
@@ -164,7 +157,7 @@ impl CommandApp {
             }
             Cursor::Selection(start, end, _) => {
                 self.buf.replace_range(start..end, "");
-                self.move_cursor(HDirection::Left, CursorMovement::DEFAULT);
+                self.move_cursor(Direction::Back, PromptMovement::DEFAULT);
             }
         }
         true

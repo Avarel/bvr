@@ -1,5 +1,6 @@
-use crate::direction::{VDirection, HDirection};
 use std::ops::Range;
+
+use crate::direction::Direction;
 
 pub struct Viewport {
     // End of the view
@@ -11,8 +12,6 @@ pub struct Viewport {
     /// Visible height
     height: usize,
     width: usize,
-    /// Current line
-    current: usize,
     /// True if the view should follow the output
     follow_output: bool,
 }
@@ -25,7 +24,6 @@ impl Viewport {
             left: 0,
             height: 0,
             width: 0,
-            current: 0,
             follow_output: false,
         }
     }
@@ -55,19 +53,8 @@ impl Viewport {
         if self.height > self.vend {
             self.height = self.vend;
         }
-        if self.current >= self.vend {
-            self.current = self.vend.saturating_sub(1);
-        }
         if self.follow_output {
             self.top = self.vend.saturating_sub(self.height);
-        }
-    }
-
-    pub fn move_select_within_view(&mut self) {
-        if self.current < self.top {
-            self.current = self.top;
-        } else if self.current >= self.bottom() {
-            self.current = self.bottom().saturating_sub(1);
         }
     }
 
@@ -84,23 +71,21 @@ impl Viewport {
         }
     }
 
-    pub fn pan_vertical(&mut self, direction: VDirection, delta: usize) {
+    pub fn pan_vertical(&mut self, direction: Direction, delta: usize) {
         self.follow_output = false;
         self.top = match direction {
-            VDirection::Up => self.top.saturating_sub(delta),
-            VDirection::Down => self
+            Direction::Back => self.top.saturating_sub(delta),
+            Direction::Next => self
                 .top
                 .saturating_add(delta)
                 .min(self.vend.saturating_sub(1)),
         }
     }
 
-    pub fn pan_horizontal(&mut self, direction: HDirection, delta: usize) {
+    pub fn pan_horizontal(&mut self, direction: Direction, delta: usize) {
         self.left = match direction {
-            HDirection::Left => self.left.saturating_sub(delta),
-            HDirection::Right => self
-                .left
-                .saturating_add(delta)
+            Direction::Back => self.left.saturating_sub(delta),
+            Direction::Next => self.left.saturating_add(delta),
         }
     }
 
@@ -113,26 +98,15 @@ impl Viewport {
         self.fixup();
     }
 
-    pub fn move_select(&mut self, direction: VDirection, delta: usize) {
-        self.current = match direction {
-            VDirection::Up => self.current.saturating_sub(delta),
-            VDirection::Down => self
-                .current
-                .saturating_add(delta)
-                .min(self.vend.saturating_sub(1)),
-        };
-        self.jump_to(self.current);
-    }
-
     pub fn line_range(&self) -> Range<usize> {
         self.top..self.bottom().min(self.vend)
     }
 
-    pub fn current(&self) -> usize {
-        self.current
-    }
-
     pub fn left(&self) -> usize {
         self.left
+    }
+
+    pub(crate) fn top(&self) -> usize {
+        self.top
     }
 }

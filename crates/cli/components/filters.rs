@@ -1,6 +1,10 @@
-use super::{viewer::Buffer, viewport::Viewport};
-use crate::colors;
-use bvr_core::{InflightComposite, InflightMatches};
+use super::{
+    cursor::{Cursor, CursorState, SelectionOrigin},
+    viewport::Viewport,
+};
+use crate::{colors, direction::Direction};
+use bitflags::bitflags;
+use bvr_core::{InflightComposite, InflightMatches, SegBuffer};
 use ratatui::style::Color;
 use regex::bytes::Regex;
 
@@ -62,11 +66,11 @@ impl Filter {
         }
     }
 
-    fn len(&self) -> usize {
+    fn len(&self) -> Option<usize> {
         match &self.repr {
-            FilterRepr::All => 0,
-            FilterRepr::Bookmarks(lines) => lines.len(),
-            FilterRepr::Search(lines) => lines.len(),
+            FilterRepr::All => None,
+            FilterRepr::Bookmarks(lines) => Some(lines.len()),
+            FilterRepr::Search(lines) => Some(lines.len()),
         }
     }
 
@@ -120,6 +124,7 @@ impl Bookmarks {
 pub struct Filterer {
     pub(super) composite: InflightComposite,
     pub viewport: Viewport,
+    cursor: CursorState,
     pub(crate) filters: Filters,
 }
 
@@ -196,12 +201,20 @@ impl Filters {
     }
 }
 
+bitflags! {
+    pub struct FilterType: u8 {
+        const None = 0;
+        const Enabled = 1 << 0;
+        const Origin = 1 << 1;
+        const Within = 1 << 2;
+    }
+}
+
 pub struct FilterData<'a> {
     pub name: &'a str,
     pub color: Color,
     pub len: Option<usize>,
-    pub enabled: bool,
-    pub selected: bool,
+    pub ty: FilterType,
 }
 
 impl Filterer {
@@ -209,14 +222,18 @@ impl Filterer {
         Self {
             composite: InflightComposite::empty(),
             viewport: Viewport::new(),
+            cursor: CursorState::new(),
             filters: Filters::new(),
         }
     }
 
-    pub fn update_and_filter_view(&mut self, viewport_height: usize) -> Vec<FilterData> {
+    pub fn update_and_filter_view(
+        &mut self,
+        viewport_height: usize,
+    ) -> impl Iterator<Item = FilterData> {
         self.filters.try_finalize();
 
-        self.viewport.update_end(self.filters.searches.len() + 2);
+        self.viewport.update_end(self.filters.len());
         self.viewport.fit_view(viewport_height, 0);
 
         let range = self.viewport.line_range();
@@ -229,14 +246,32 @@ impl Filterer {
             .map(|(index, filter)| FilterData {
                 name: &filter.name,
                 color: filter.color,
-                len: match &filter.repr {
-                    FilterRepr::All => None,
-                    _ => Some(filter.len()),
+                len: filter.len(),
+                ty: match self.cursor.state {
+                    Cursor::Singleton(i) => {
+                        if index == i {
+                            FilterType::Origin
+                        } else {
+                            FilterType::None
+                        }
+                    }
+                    Cursor::Selection(start, end, origin) => {
+                        if !(start..=end).contains(&index) {
+                            FilterType::None
+                        } else if index == start && matches!(origin, SelectionOrigin::Left)
+                            || index == end && matches!(origin, SelectionOrigin::Right)
+                        {
+                            FilterType::Origin
+                        } else {
+                            FilterType::Within
+                        }
+                    }
+                } | if filter.enabled {
+                    FilterType::Enabled
+                } else {
+                    FilterType::None
                 },
-                enabled: filter.enabled,
-                selected: index == self.viewport.current(),
             })
-            .collect()
     }
 
     pub fn compute_composite(&mut self) {
@@ -258,29 +293,62 @@ impl Filterer {
         self.composite = composite;
     }
 
-    pub fn current_filter_mut(&mut self) -> &mut Filter {
-        assert!(self.viewport.current() < self.filters.len());
+    fn filter_index(&mut self, index: usize) -> &mut Filter {
+        assert!(index < self.filters.len());
 
-        match self.viewport.current() {
+        match index {
             0 => &mut self.filters.all,
             1 => &mut self.filters.bookmarks,
-            _ => &mut self.filters.searches[self.viewport.current() - 2],
+            _ => &mut self.filters.searches[index - 2],
         }
     }
 
-    pub fn remove_current_filter(&mut self) {
-        assert!(self.viewport.current() < self.filters.len());
+    pub fn move_select(&mut self, dir: Direction, select: bool, delta: usize) {
+        match dir {
+            Direction::Back => self.cursor.back(select, |i| i.saturating_sub(delta)),
+            Direction::Next => self.cursor.forward(select, |i| i.saturating_add(delta)),
+        }
+        self.cursor.clamp(self.filters.len().saturating_sub(1));
+        let i = match self.cursor.state {
+            Cursor::Singleton(i)
+            | Cursor::Selection(i, _, SelectionOrigin::Left)
+            | Cursor::Selection(_, i, SelectionOrigin::Right) => i,
+        };
+        self.viewport.jump_to(i);
+    }
 
-        match self.viewport.current() {
-            0 => self.filters.all.enabled = false,
-            1 => self.filters.bookmarks.enabled = false,
-            _ => {
-                self.filters.searches.remove(self.viewport.current() - 2);
+    pub fn toggle_select_filters(&mut self) {
+        match self.cursor.state {
+            Cursor::Singleton(i) => {
+                self.filter_index(i).toggle();
+            }
+            Cursor::Selection(start, end, _) => {
+                for i in start..=end {
+                    self.filter_index(i).toggle();
+                }
             }
         }
     }
 
-    pub fn filter_search(&mut self, file: &Buffer, regex: Regex) {
+    pub fn remove_select_filters(&mut self) {
+        match self.cursor.state {
+            Cursor::Singleton(i) => {
+                if i > 1 {
+                    self.filters.searches.remove(i - 2);
+                }
+            }
+            Cursor::Selection(start, end, _) => {
+                let start = start.max(2);
+                if start <= end {
+                    self.filters.searches.drain(start - 2..=end - 2);
+                }
+            }
+        }
+        self.cursor.clamp(self.filters.len().saturating_sub(1));
+        self.viewport.update_end(self.filters.len());
+    }
+
+    pub fn filter_search(&mut self, file: &SegBuffer, regex: Regex) {
         self.filters.searches.push(Filter {
             name: regex.to_string(),
             enabled: true,
