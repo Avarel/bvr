@@ -1,7 +1,6 @@
+use super::actions::Action;
 use crossterm::event::{Event, MouseEvent};
 use ratatui::layout::Rect;
-
-use super::actions::Action;
 
 pub struct MouseHandler {
     event: Option<Event>,

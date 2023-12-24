@@ -1,6 +1,5 @@
-use crate::direction::{HDirection, VDirection};
-
 use super::InputMode;
+use crate::direction::{HDirection, VDirection};
 
 pub enum Action {
     #[allow(dead_code)]
@@ -19,8 +18,15 @@ pub enum Delta {
 }
 
 pub enum ViewerAction {
-    Pan { direction: VDirection, delta: Delta, target_view: Option<usize> },
-    MoveSelect { direction: VDirection, delta: Delta },
+    Pan {
+        direction: VDirection,
+        delta: Delta,
+        target_view: Option<usize>,
+    },
+    MoveSelect {
+        direction: VDirection,
+        delta: Delta,
+    },
     ToggleSelectedLine,
     ToggleLine {
         target_view: usize,

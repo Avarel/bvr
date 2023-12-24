@@ -1,11 +1,9 @@
-use crossterm::event::{Event, KeyCode, KeyEventKind, KeyModifiers, MouseEventKind};
-
-use crate::direction::{HDirection, VDirection};
-
 use super::{
     actions::{Action, CommandAction, Delta, FilterAction, Jump, ViewerAction},
     InputMode,
 };
+use crate::direction::{HDirection, VDirection};
+use crossterm::event::{Event, KeyCode, KeyEventKind, KeyModifiers, MouseEventKind};
 
 pub enum Keybinding {
     // The keybindings are hardcoded into the program.
@@ -71,20 +69,24 @@ impl Keybinding {
                         direction: VDirection::up_if(key.code == KeyCode::Up),
                         delta: Delta::Number(1),
                     })),
-                    KeyCode::Home | KeyCode::End => Some(Action::Filter(FilterAction::MoveSelect {
-                        direction: VDirection::up_if(key.code == KeyCode::Home),
-                        delta: Delta::Boundary,
-                    })),
+                    KeyCode::Home | KeyCode::End => {
+                        Some(Action::Filter(FilterAction::MoveSelect {
+                            direction: VDirection::up_if(key.code == KeyCode::Home),
+                            delta: Delta::Boundary,
+                        }))
+                    }
                     KeyCode::PageUp | KeyCode::PageDown => {
                         Some(Action::Filter(FilterAction::MoveSelect {
                             direction: VDirection::up_if(key.code == KeyCode::PageUp),
                             delta: Delta::Page,
                         }))
                     }
-                    KeyCode::Char(c @ ('u' | 'd')) => Some(Action::Filter(FilterAction::MoveSelect {
-                        direction: VDirection::up_if(c == 'u'),
-                        delta: Delta::HalfPage,
-                    })),
+                    KeyCode::Char(c @ ('u' | 'd')) => {
+                        Some(Action::Filter(FilterAction::MoveSelect {
+                            direction: VDirection::up_if(c == 'u'),
+                            delta: Delta::HalfPage,
+                        }))
+                    }
                     KeyCode::Char(' ') | KeyCode::Enter => {
                         Some(Action::Filter(FilterAction::ToggleSelectedFilter))
                     }
@@ -124,7 +126,10 @@ impl Keybinding {
                     KeyCode::Left | KeyCode::Right => Some(Action::Command(CommandAction::Move {
                         direction: HDirection::left_if(key.code == KeyCode::Left),
                         select: key.modifiers.contains(KeyModifiers::SHIFT),
-                        jump: if key.modifiers.contains(KeyModifiers::ALT) {
+                        jump: if key
+                            .modifiers
+                            .intersects(KeyModifiers::ALT | KeyModifiers::CONTROL)
+                        {
                             Jump::Word
                         } else {
                             Jump::None
@@ -171,6 +176,10 @@ impl Keybinding {
                     Some(Action::Viewer(ViewerAction::SwitchActive(
                         HDirection::left_if(key.code == KeyCode::Left),
                     )))
+                }
+                KeyCode::Char('q') => Some(Action::Exit),
+                KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                    Some(Action::Exit)
                 }
                 _ => None,
             },

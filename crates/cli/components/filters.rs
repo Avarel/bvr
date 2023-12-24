@@ -1,7 +1,6 @@
-use crate::colors;
-
 use super::viewer::{Buffer, Viewport};
-use bvr_core::{cowvec::CowVec, InflightComposite, InflightMatches};
+use crate::colors;
+use bvr_core::{InflightComposite, InflightMatches};
 use ratatui::style::Color;
 use regex::bytes::Regex;
 
@@ -74,7 +73,7 @@ impl Filter {
     fn arc_inflight_matches(&self) -> InflightMatches {
         match &self.repr {
             FilterRepr::All => InflightMatches::empty(),
-            FilterRepr::Bookmarks(mask) => InflightMatches::complete(mask.lines.clone()),
+            FilterRepr::Bookmarks(mask) => InflightMatches::complete_from_vec(mask.lines.clone()),
             FilterRepr::Search(mask) => mask.clone(),
         }
     }
@@ -82,14 +81,12 @@ impl Filter {
 
 #[derive(Clone)]
 pub struct Bookmarks {
-    lines: CowVec<usize>,
+    lines: Vec<usize>,
 }
 
 impl Bookmarks {
     fn new() -> Bookmarks {
-        Bookmarks {
-            lines: CowVec::new(),
-        }
+        Bookmarks { lines: Vec::new() }
     }
 
     pub fn toggle(&mut self, line_number: usize) {
@@ -103,7 +100,6 @@ impl Bookmarks {
         };
     }
 
-    
     pub fn has_line(&self, line_number: usize) -> bool {
         let slice = self.lines.as_slice();
         if let &[first, .., last] = slice {

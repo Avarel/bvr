@@ -1,13 +1,11 @@
+use super::filters::Filterer;
+use crate::direction::VDirection;
 use bvr_core::SegStr;
 use ratatui::style::Color;
 use regex::bytes::Regex;
 use std::ops::Range;
 
-use crate::direction::VDirection;
-
-use super::filters::Filterer;
-
-pub type Buffer = bvr_core::SegBuffer<bvr_core::InflightIndex>;
+pub type Buffer = bvr_core::SegBuffer;
 
 pub struct Viewport {
     pub max_height: usize,

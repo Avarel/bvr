@@ -1,21 +1,19 @@
+use crate::{
+    buf::ContiguousSegmentIterator,
+    cowvec::{
+        inflight::{InflightCowVec, InflightCowVecWriter},
+        CowVec,
+    },
+    Result, SegBuffer,
+};
+use regex::bytes::Regex;
 use std::sync::Arc;
 
-use regex::bytes::Regex;
-
-use crate::buf::ContiguousSegmentIterator;
-use crate::cowvec::CowVec;
-use crate::inflight_tool::{Inflight, InflightImpl, Inflightable};
-use crate::SegBuffer;
-use crate::{index::BufferIndex, Result};
-
-pub struct InflightMatchRemote(Arc<InflightImpl<CowVec<usize>>>);
+pub struct InflightMatchRemote(Arc<InflightCowVecWriter<usize>>);
 
 impl InflightMatchRemote {
     /// Index a file and load the data into the associated [InflightIndex].
-    pub fn search<Idx>(self, mut iter: ContiguousSegmentIterator<Idx>, regex: Regex) -> Result<()>
-    where
-        Idx: BufferIndex,
-    {
+    pub fn search(self, mut iter: ContiguousSegmentIterator, regex: Regex) -> Result<()> {
         while let Some((idx, start, buf)) = iter.next_buf() {
             if Arc::strong_count(&self.0) <= 1 {
                 break;
@@ -26,11 +24,11 @@ impl InflightMatchRemote {
                     let match_start = res.start() as u64 + start;
 
                     let line_number = idx.line_of_data(match_start).unwrap();
-                    
+
                     if inner.last() == Some(&line_number) {
                         continue;
-                    } else if let Some(last) = inner.last() {
-                        assert!(line_number > *last);
+                    } else if let Some(&last) = inner.last() {
+                        debug_assert!(line_number > last);
                     }
 
                     inner.push(line_number)
@@ -48,55 +46,37 @@ impl InflightMatches {
     }
 
     pub fn get(&self, idx: usize) -> Option<usize> {
-        match &self.0 {
-            Inflight::Incomplete(inner) => inner.read(|index| index.get(idx)),
-            Inflight::Complete(index) => index.get(idx)
-        }
+        self.0.read(|index| index.get(idx))
     }
 
     pub fn has_line(&self, line_number: usize) -> bool {
-        match &self.0 {
-            Inflight::Incomplete(inner) => {
-                inner.read(|index| Self::sorted_binary_search(index.as_slice(), line_number))
-            }
-            Inflight::Complete(index) => Self::sorted_binary_search(index.as_slice(), line_number),
-        }
+        self.0
+            .read(|index| Self::sorted_binary_search(index.as_slice(), line_number))
     }
 
     pub fn len(&self) -> usize {
-        match &self.0 {
-            Inflight::Incomplete(inner) => inner.read(|index| index.len()),
-            Inflight::Complete(index) => index.len(),
-        }
-    }
-}
-
-impl<T> Inflightable for CowVec<T>
-where
-    T: Copy,
-{
-    type Incomplete = CowVec<T>;
-
-    fn finish(inner: Self::Incomplete) -> Self {
-        inner
-    }
-
-    fn snapshot(inner: &Self::Incomplete) -> Self {
-        inner.clone()
+        self.0.read(|index| index.len())
     }
 }
 
 #[derive(Clone)]
-pub struct InflightMatches(Inflight<CowVec<usize>>);
+pub struct InflightMatches(InflightCowVec<usize>);
 
 impl InflightMatches {
     pub fn new() -> (Self, InflightMatchRemote) {
-        let inner = Arc::new(InflightImpl::<CowVec<usize>>::new());
-        (Self(Inflight::Incomplete(inner.clone())), InflightMatchRemote(inner))
+        let inner = Arc::new(InflightCowVecWriter::<usize>::new());
+        (
+            Self(InflightCowVec::Incomplete(inner.clone())),
+            InflightMatchRemote(inner),
+        )
     }
-    
+
+    pub fn complete_from_vec(inner: Vec<usize>) -> Self {
+        Self(InflightCowVec::Complete(CowVec::from(inner)))
+    }
+
     pub fn complete(inner: CowVec<usize>) -> Self {
-        Self(Inflight::Complete(inner))
+        Self(InflightCowVec::Complete(inner))
     }
 
     pub fn empty() -> Self {
@@ -109,10 +89,7 @@ impl InflightMatches {
     ///
     /// Returns a `Result` containing the `InflightSearch` object
     /// if the internal iterator creation was successful, and an error otherwise.
-    pub fn search<Idx>(buf: &SegBuffer<Idx>, regex: Regex) -> Result<Self>
-    where
-        Idx: BufferIndex + Clone + Send + 'static,
-    {
+    pub fn search(buf: &SegBuffer, regex: Regex) -> Result<Self> {
         let (search, remote) = InflightMatches::new();
         std::thread::spawn({
             let iter = buf.segment_iter()?;

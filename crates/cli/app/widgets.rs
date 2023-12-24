@@ -1,3 +1,8 @@
+use super::{
+    actions::{Action, Delta, ViewerAction},
+    mouse::MouseHandler,
+    InputMode,
+};
 use crate::{
     colors,
     components::{
@@ -11,12 +16,6 @@ use crate::{
 };
 use crossterm::event::MouseEventKind;
 use ratatui::{prelude::*, widgets::*};
-
-use super::{
-    actions::{Action, Delta, ViewerAction},
-    mouse::MouseHandler,
-    InputMode,
-};
 
 enum StatusWidgetState<'a> {
     Normal { line_count: usize, name: &'a str },
@@ -179,7 +178,7 @@ impl ViewerWidget<'_> {
             MouseEventKind::ScrollUp | MouseEventKind::ScrollDown => {
                 Some(Action::Viewer(ViewerAction::Pan {
                     direction: VDirection::up_if(event.kind == MouseEventKind::ScrollUp),
-                    delta: Delta::Number(2),
+                    delta: Delta::Number(5),
                     target_view: Some(self.view_index),
                 }))
             }

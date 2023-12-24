@@ -1,10 +1,12 @@
-use std::sync::Arc;
-
 use crate::{
+    cowvec::{
+        inflight::{InflightCowVec, InflightCowVecWriter},
+        CowVec,
+    },
     err::Result,
-    inflight_tool::{Inflight, InflightImpl},
-    matches::InflightMatches, cowvec::CowVec,
+    InflightMatches,
 };
+use std::sync::Arc;
 
 struct QueueMatch {
     matches: InflightMatches,
@@ -61,7 +63,7 @@ impl Queues {
     }
 }
 
-pub struct InflightCompositeRemote(Arc<InflightImpl<CowVec<usize>>>);
+pub struct InflightCompositeRemote(Arc<InflightCowVecWriter<usize>>);
 
 impl InflightCompositeRemote {
     pub fn compute(self, filters: Vec<InflightMatches>) -> Result<()> {
@@ -74,8 +76,8 @@ impl InflightCompositeRemote {
             self.0.write(|inner| {
                 if inner.last() == Some(&line_number) {
                     return;
-                } else if let Some(last) = inner.last() {
-                    assert!(line_number > *last);
+                } else if let Some(&last) = inner.last() {
+                    debug_assert!(line_number > last);
                 }
                 inner.push(line_number)
             });
@@ -84,34 +86,27 @@ impl InflightCompositeRemote {
         self.0.mark_complete();
         Ok(())
     }
-    
 }
 
 impl InflightComposite {
     pub fn new() -> (Self, InflightCompositeRemote) {
-        let inner = Arc::new(InflightImpl::<CowVec<usize>>::new());
+        let inner = Arc::new(InflightCowVecWriter::<usize>::new());
         (
-            Self(Inflight::Incomplete(inner.clone())),
+            Self(InflightCowVec::Incomplete(inner.clone())),
             InflightCompositeRemote(inner),
         )
     }
 
     pub fn empty() -> Self {
-        Self(Inflight::Complete(CowVec::new()))
+        Self(InflightCowVec::Complete(CowVec::new()))
     }
 
     pub fn len(&self) -> usize {
-        match &self.0 {
-            Inflight::Incomplete(inner) => inner.read(|v| v.len()),
-            Inflight::Complete(inner) => inner.len(),
-        }
+        self.0.read(|v| v.len())
     }
 
     pub fn get(&self, index: usize) -> Option<usize> {
-        match &self.0 {
-            Inflight::Incomplete(inner) => inner.read(|v| v.get(index)),
-            Inflight::Complete(inner) => inner.get(index),
-        }
+        self.0.read(|v| v.get(index))
     }
 
     pub fn try_finalize(&mut self) -> bool {
@@ -119,4 +114,4 @@ impl InflightComposite {
     }
 }
 
-pub struct  InflightComposite(Inflight<CowVec<usize>>);
+pub struct InflightComposite(InflightCowVec<usize>);

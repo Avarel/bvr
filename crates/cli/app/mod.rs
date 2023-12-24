@@ -3,6 +3,12 @@ mod keybinding;
 mod mouse;
 mod widgets;
 
+use self::{
+    actions::{Action, CommandAction, Delta, ViewerAction},
+    keybinding::Keybinding,
+    mouse::MouseHandler,
+    widgets::{CommandWidget, MultiplexerWidget},
+};
 use crate::components::{
     command::{CommandApp, CursorMovement},
     mux::MultiplexerApp,
@@ -10,7 +16,7 @@ use crate::components::{
     viewer::Instance,
 };
 use anyhow::Result;
-use bvr_core::{buf::SegBuffer, index::inflight::Stream, InflightIndex};
+use bvr_core::{buf::SegBuffer, components::index::BoxedStream};
 use crossterm::{
     event::{
         self, DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture,
@@ -21,13 +27,6 @@ use crossterm::{
 use ratatui::{prelude::*, widgets::Widget};
 use regex::bytes::RegexBuilder;
 use std::{num::NonZeroUsize, path::Path, time::Duration};
-
-use self::{
-    actions::{Action, CommandAction, Delta, ViewerAction},
-    keybinding::Keybinding,
-    mouse::MouseHandler,
-    widgets::{CommandWidget, MultiplexerWidget},
-};
 
 pub type Backend<'a> = ratatui::backend::CrosstermBackend<std::io::StdoutLock<'a>>;
 pub type Terminal<'a> = ratatui::Terminal<Backend<'a>>;
@@ -68,18 +67,18 @@ impl App {
             .unwrap_or_else(|| String::from("Unnamed File"));
         self.push_instance(
             name,
-            SegBuffer::<InflightIndex>::read_file(file, NonZeroUsize::new(25).unwrap())?,
+            SegBuffer::read_file(file, NonZeroUsize::new(25).unwrap())?,
         );
         Ok(())
     }
 
-    pub fn open_stream(&mut self, stream: Stream) -> Result<()> {
+    pub fn open_stream(&mut self, stream: BoxedStream) -> Result<()> {
         let name = String::from("Stream");
-        self.push_instance(name, SegBuffer::<InflightIndex>::read_stream(stream));
+        self.push_instance(name, SegBuffer::read_stream(stream));
         Ok(())
     }
 
-    fn push_instance(&mut self, name: String, file: SegBuffer<InflightIndex>) {
+    fn push_instance(&mut self, name: String, file: SegBuffer) {
         let viewer = Instance::new(name, file);
         self.mux.push_viewer(viewer);
     }
@@ -326,14 +325,16 @@ impl App {
             mux: &mut self.mux,
             status: &mut self.status,
             mode: self.mode,
-        }.render(mux_chunk, f.buffer_mut(), handler);
+        }
+        .render(mux_chunk, f.buffer_mut(), handler);
 
         let mut cursor = None;
         CommandWidget {
             active: self.mode == InputMode::Command,
             inner: &self.command,
             cursor: &mut cursor,
-        }.render(cmd_chunk, f.buffer_mut());
+        }
+        .render(cmd_chunk, f.buffer_mut());
 
         if let Some((x, y)) = cursor {
             f.set_cursor(x, y);

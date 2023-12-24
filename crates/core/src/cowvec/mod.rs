@@ -1,5 +1,7 @@
-//! Contains the [`CowVec`], which is a vector for [Copy]-elements
+//! Contains the [`CowVec`], which is an append-only vector for [Copy]-elements
 //! based on the standard library's [Vec].
+
+pub mod inflight;
 
 use std::{
     alloc::{self, Layout},
@@ -200,39 +202,6 @@ impl<T: Copy> CowVec<T> {
         // Can't fail, we'll OOM first.
         // There should be no other writers, but lets be safe.
         buf.len.store(len + 1, Release);
-    }
-
-    pub fn insert(&mut self, index: usize, elem: T) {
-        // Note: `<=` because it's valid to insert after everything
-        // which would be equivalent to push.
-        assert!(index <= self.len(), "index out of bounds");
-        let (buf, len) = self.fixup_mut_buf();
-        unsafe {
-            // ptr::copy(src, dest, len): "copy from src to dest len elems"
-            std::ptr::copy(
-                buf.ptr.as_ptr().add(index),
-                buf.ptr.as_ptr().add(index + 1),
-                len - index,
-            );
-            std::ptr::write(buf.ptr.as_ptr().add(index), elem);
-        }
-        buf.len.store(len + 1, Release);
-    }
-
-    pub fn remove(&mut self, index: usize) -> T {
-        // Note: `<` because it's *not* valid to remove after everything
-        assert!(index < self.len(), "index out of bounds");
-        let (buf, len) = self.fixup_mut_buf();
-        buf.len.store(len - 1, Release);
-        unsafe {
-            let result = std::ptr::read(buf.ptr.as_ptr().add(index));
-            std::ptr::copy(
-                buf.ptr.as_ptr().add(index + 1),
-                buf.ptr.as_ptr().add(index),
-                len - index,
-            );
-            result
-        }
     }
 
     /// Grow will return a buffer that the caller can write to.

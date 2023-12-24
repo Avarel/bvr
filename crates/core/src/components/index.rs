@@ -2,11 +2,10 @@
 //! that allow the use of [IncompleteIndex] functionalities while it is "inflight"
 //! or in the middle of the indexing operation.
 
-use super::{BufferIndex, IncompleteIndex, Index};
 use crate::{
     buf::segment::{Segment, SegmentMut},
+    cowvec::inflight::{InflightCowVec, InflightCowVecWriter},
     err::{Error, Result},
-    inflight_tool::{Inflight, InflightImpl, Inflightable},
 };
 use std::sync::mpsc::{Receiver, Sender};
 use std::thread::JoinHandle;
@@ -37,28 +36,22 @@ impl IndexingTask {
     }
 }
 
-impl Inflightable for Index {
-    type Incomplete = IncompleteIndex;
-
-    fn finish(inner: Self::Incomplete) -> Self {
-        inner.finish()
-    }
-
-    fn snapshot(inner: &Self::Incomplete) -> Self {
-        inner.inner.clone()
-    }
-}
-
 /// Generalized type for streams passed into [InflightIndexRemote].
-pub type Stream = Box<dyn std::io::Read + Send>;
+pub type BoxedStream = Box<dyn std::io::Read + Send>;
 
-impl InflightImpl<Index> {
-    fn index_file(self: Arc<Self>, file: File) -> Result<()> {
+/// A remote type that can be used to set off the indexing process of a
+/// file or a stream.
+pub struct InflightIndexRemote(Arc<InflightCowVecWriter<u64>>);
+
+impl InflightIndexRemote {
+    pub fn index_file(self, file: File) -> Result<()> {
         // Build index
         let (sx, rx) = std::sync::mpsc::sync_channel(4);
 
         let len = file.metadata()?.len();
         let file = file.try_clone()?;
+
+        self.0.write(|inner| inner.push(0));
 
         // We have up to 3 primary holders:
         // - Someone who needs to read the inflight
@@ -71,7 +64,7 @@ impl InflightImpl<Index> {
 
         // Indexing worker
         let spawner: JoinHandle<Result<()>> = std::thread::spawn({
-            let r = self.clone();
+            let r = self.0.clone();
             move || {
                 let mut curr = 0;
 
@@ -91,17 +84,19 @@ impl InflightImpl<Index> {
 
         while let Ok(task_rx) = rx.recv() {
             while let Ok(line_data) = task_rx.recv() {
-                self.write(|inner| inner.push_line_data(line_data));
+                self.0.write(|inner| inner.push(line_data));
             }
         }
 
         spawner.join().unwrap().unwrap();
-        self.write(|inner| inner.finalize(len));
+        self.0.write(|inner| inner.push(len));
         Ok(())
     }
 
-    fn index_stream(self: Arc<Self>, mut stream: Stream, outgoing: Sender<Segment>) -> Result<()> {
+    pub fn index_stream(self, mut stream: BoxedStream, outgoing: Sender<Segment>) -> Result<()> {
         let mut len = 0;
+
+        self.0.write(|inner| inner.push(0));
 
         loop {
             let mut segment = SegmentMut::new(len)?;
@@ -114,10 +109,10 @@ impl InflightImpl<Index> {
                 }
             }
 
-            self.write(|inner| {
+            self.0.write(|inner| {
                 for i in memchr::memchr_iter(b'\n', &segment) {
                     let line_data = len + i as u64;
-                    inner.push_line_data(line_data + 1);
+                    inner.push(line_data + 1);
                 }
             });
 
@@ -132,71 +127,61 @@ impl InflightImpl<Index> {
             len += buf_len as u64;
         }
 
-        self.write(|inner| inner.finalize(len));
-        self.mark_complete();
+        self.0.write(|inner| inner.push(len));
+        self.0.mark_complete();
         Ok(())
     }
 }
 
-/// A remote type that can be used to set off the indexing process of a
-/// file or a stream.
-pub struct InflightIndexRemote(Arc<InflightImpl<Index>>);
+#[derive(Clone)]
+pub struct InflightIndex(InflightCowVec<u64>);
 
-impl InflightIndexRemote {
-    /// Index a file and load the data into the associated [InflightIndex].
-    pub fn index_file(self, file: File) -> Result<()> {
-        self.0.index_file(file)
-    }
-
-    /// Index a stream and load the data into the associated [InflightIndex].
-    pub fn index_stream(self, stream: Stream, outgoing: Sender<Segment>) -> Result<()> {
-        self.0.index_stream(stream, outgoing)
-    }
-}
-
-impl Inflight<Index> {
+impl InflightIndex {
     pub fn new() -> (Self, InflightIndexRemote) {
-        let inner = Arc::new(InflightImpl::<Index>::new());
-        (Self::Incomplete(inner.clone()), InflightIndexRemote(inner))
+        let inner = Arc::new(InflightCowVecWriter::<u64>::new());
+        (
+            Self(InflightCowVec::Incomplete(inner.clone())),
+            InflightIndexRemote(inner),
+        )
     }
 
-    /// Creates a new complete index from a file.
-    ///
-    /// This function creates a new complete index from the provided file. It internally
-    /// initializes an [InflightIndex] in file mode, indexes the file, and returns the
-    /// resulting [CompleteIndex].
-    ///
-    /// # Returns
-    ///
-    /// A `Result` containing the `CompleteIndex` if successful, or an error if the
-    /// indexing process fails.
-    pub fn new_complete(file: &File) -> Result<Index> {
-        let (result, indexer) = Self::new();
-        indexer.index_file(file.try_clone()?)?;
-        Ok(result.unwrap())
+    pub fn line_count(&self) -> usize {
+        self.0.read(|index| index.len().saturating_sub(1))
+    }
+
+    pub fn data_of_line(&self, line_number: usize) -> Option<u64> {
+        self.0.read(|index| index.get(line_number))
+    }
+
+    pub fn line_of_data(&self, key: u64) -> Option<usize> {
+        self.0.read(|index| {
+            // Safety: this code was pulled from Vec::binary_search_by
+            let mut size = index.len() - 1;
+            let mut left = 0;
+            let mut right = size;
+            while left < right {
+                let mid = left + size / 2;
+
+                // mid must be less than size, which is self.line_index.len() - 1
+                let start = unsafe { *index.get_unchecked(mid) };
+                let end = unsafe { *index.get_unchecked(mid + 1) };
+
+                if end <= key {
+                    left = mid + 1;
+                } else if start > key {
+                    right = mid;
+                } else {
+                    return Some(mid);
+                }
+
+                size = right - left;
+            }
+
+            None
+        })
+    }
+
+    pub fn try_finalize(&mut self) -> bool {
+        self.0.try_finalize()
     }
 }
-impl BufferIndex for Inflight<Index> {
-    fn line_count(&self) -> usize {
-        match self {
-            Self::Incomplete(inner) => inner.read(|index| (index.line_count())),
-            Self::Complete(index) => index.line_count(),
-        }
-    }
-
-    fn data_of_line(&self, line_number: usize) -> Option<u64> {
-        match self {
-            Self::Incomplete(inner) => inner.read(|index| (index.data_of_line(line_number))),
-            Self::Complete(index) => index.data_of_line(line_number),
-        }
-    }
-
-    fn line_of_data(&self, start: u64) -> Option<usize> {
-        match self {
-            Self::Incomplete(inner) => inner.read(|index| (index.line_of_data(start))),
-            Self::Complete(index) => index.line_of_data(start),
-        }
-    }
-}
-
-pub type InflightIndex = Inflight<Index>;
