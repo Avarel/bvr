@@ -82,7 +82,25 @@ impl CommandApp {
 
     fn backward_index(&self, i: usize, movement: CursorMovement) -> usize {
         match movement.jump {
-            CursorJump::Word => self.buf[..i].rfind(' ').unwrap_or(0),
+            CursorJump::Word => {
+                if self.buf[..i]
+                    .chars()
+                    .rev()
+                    .nth(0)
+                    .map(|c| c.is_whitespace())
+                    .unwrap_or(false)
+                {
+                    i.saturating_sub(
+                        self.buf[..i]
+                            .chars()
+                            .rev()
+                            .position(|c| c.is_alphanumeric())
+                            .unwrap_or(0),
+                    )
+                } else {
+                    self.buf[..i].rfind(' ').map(|p| p + 1).unwrap_or(0)
+                }
+            }
             CursorJump::Boundary => 0,
             CursorJump::None => i.saturating_sub(movement.delta),
         }
@@ -90,10 +108,27 @@ impl CommandApp {
 
     fn forward_index(&self, i: usize, movement: CursorMovement) -> usize {
         match movement.jump {
-            CursorJump::Word => self.buf[(i + 1).min(self.buf.len())..]
-                .find(' ')
-                .map(|z| z + i + 1)
-                .unwrap_or(usize::MAX),
+            CursorJump::Word => {
+                if self.buf[i..]
+                    .chars()
+                    .nth(0)
+                    .map(|c| c.is_whitespace())
+                    .unwrap_or(false)
+                {
+                    i.saturating_add(
+                        self.buf[i..]
+                            .chars()
+                            .position(|c| c.is_alphanumeric())
+                            .unwrap_or(usize::MAX),
+                    )
+                } else {
+                    self.buf[(i + 1).min(self.buf.len())..]
+                        .chars()
+                        .position(|c| c.is_whitespace())
+                        .map(|z| z + i + 1)
+                        .unwrap_or(usize::MAX)
+                }
+            }
             CursorJump::Boundary => usize::MAX,
             CursorJump::None => i.saturating_add(movement.delta),
         }
