@@ -3,7 +3,7 @@
 
 pub mod segment;
 
-use self::segment::{SegStr, Segment};
+use self::segment::{SegStr, Segment, SegBytes};
 use crate::{components::index::BoxedStream, InflightIndex, Result};
 use lru::LruCache;
 use std::{
@@ -161,17 +161,7 @@ impl SegBuffer {
         &self.index
     }
 
-    /// Retrieves a line of text from the buffer based on the given line number.
-    ///
-    /// # Panics
-    ///
-    /// This function will panic if the `line_number` is greater than the total number
-    /// of lines in the buffer's index.
-    ///
-    /// # Returns
-    ///
-    /// The line of text as a [SegStr] object.
-    pub fn get_line(&mut self, line_number: usize) -> Option<SegStr> {
+    pub fn get_bytes(&mut self, line_number: usize) -> Option<SegBytes> {
         assert!(line_number <= self.line_count());
 
         let data_start = self.index.data_of_line(line_number)?;
@@ -183,7 +173,7 @@ impl SegBuffer {
             // The data is in a single segment
             let seg = self.repr.fetch(seg_start)?;
             let range = seg.translate_inner_data_range(data_start, data_end);
-            Some(seg.get_line(range))
+            Some(seg.get_bytes(range))
         } else {
             debug_assert!(seg_start < seg_end);
             // The data may cross several segments, so we must piece together
@@ -202,9 +192,22 @@ impl SegBuffer {
             }
             buf.extend_from_slice(&seg_last[..end as usize]);
 
-            let buf = String::from_utf8_lossy(&buf).into_owned();
-            Some(SegStr::new_owned(buf))
+            Some(SegBytes::new_owned(buf))
         }
+    }
+
+    /// Retrieves a line of text from the buffer based on the given line number.
+    ///
+    /// # Panics
+    ///
+    /// This function will panic if the `line_number` is greater than the total number
+    /// of lines in the buffer's index.
+    ///
+    /// # Returns
+    ///
+    /// The line of text as a [SegStr] object.
+    pub fn get_line(&mut self, line_number: usize) -> Option<SegStr> {
+        Some(SegStr::from_bytes(self.get_bytes(line_number)?))
     }
 
     pub fn segment_iter(&self) -> Result<ContiguousSegmentIterator> {

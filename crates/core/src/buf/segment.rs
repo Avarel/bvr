@@ -105,9 +105,96 @@ impl Segment {
     }
 
     pub fn get_line(self: &Arc<Self>, range: Range<u64>) -> SegStr {
-        SegStr::new(self.clone(), range)
+        SegStr::from_bytes(self.get_bytes(range))
+    }
+
+    pub fn get_bytes(self: &Arc<Self>, range: Range<u64>) -> SegBytes {
+        SegBytes::new_borrow(self.clone(), range)
     }
 }
+
+/// Line buffer that comes from a [Segment].
+///
+/// If the [SegSlice] borrows from the segment, the segment will not be dropped until
+/// all of its referents is dropped.
+///
+/// This structure avoids cloning unnecessarily.
+pub struct SegBytes(SegBytesRepr);
+
+/// Internal representation of [SegSlice].
+enum SegBytesRepr {
+    Borrowed {
+        // This field refs the segment so its data does not get munmap'd and remains valid.
+        _ref: Arc<Segment>,
+        // This data point to the ref-counted `_pin` field.
+        // Maybe if polonius supports self-referential slices one day, this
+        // spicy unsafe code can be dropped.
+        ptr: NonNull<u8>,
+        len: usize,
+    },
+    Owned(Vec<u8>),
+}
+
+impl SegBytes {
+    /// Constructs a string that might borrows data from a [Segment]. If the data
+    /// is invalid utf-8, it will be converted into an owned [String] using `String::from_utf8_lossy`.
+    ///
+    /// # Safety
+    ///
+    /// 1. The provided slice must point to data that lives inside the ref-counted [Segment].
+    /// 2. The length must encompass a valid range of data inside the [Segment].
+    fn new_borrow(origin: Arc<Segment>, range: Range<u64>) -> Self {
+        // Safety: This ptr came from a slice that we prevent from
+        //         being dropped by having it inside a ref counter
+        // Safety: The length is computed by a (assumed to be correct)
+        //         index. It is undefined behavior if the file changes
+        //         in a non-appending way after the index is created.
+        let data = &origin.data[range.start as usize..range.end as usize];
+        Self(SegBytesRepr::Borrowed {
+            ptr: unsafe { NonNull::new(data.as_ptr().cast_mut()).unwrap_unchecked() },
+            len: data.len(),
+            _ref: origin,
+        })
+    }
+
+    /// Constructs a string that owns its data.
+    pub fn new_owned(s: Vec<u8>) -> Self {
+        Self(SegBytesRepr::Owned(s))
+    }
+
+    /// Returns a byte slice of this [SegBytes]'s components.
+    pub fn as_bytes(&self) -> &[u8] {
+        // Safety: We have already checked in the constructor.
+        match &self.0 {
+            SegBytesRepr::Borrowed { ptr, len, .. } => unsafe {
+                std::slice::from_raw_parts(ptr.as_ptr(), *len)
+            },
+            SegBytesRepr::Owned(s) => s.as_slice(),
+        }
+    }
+}
+
+
+impl std::borrow::Borrow<[u8]> for SegBytes {
+    fn borrow(&self) -> &[u8] {
+        self
+    }
+}
+
+impl std::ops::Deref for SegBytes {
+    type Target = [u8];
+
+    fn deref(&self) -> &Self::Target {
+        self.as_bytes()
+    }
+}
+
+impl std::convert::AsRef<[u8]> for SegBytes {
+    fn as_ref(&self) -> &[u8] {
+        self.as_bytes()
+    }
+}
+
 
 /// Line string that comes from a [Segment].
 ///
@@ -134,31 +221,25 @@ enum SegStrRepr {
 impl SegStr {
     /// Constructs a string that might borrows data from a [Segment]. If the data
     /// is invalid utf-8, it will be converted into an owned [String] using `String::from_utf8_lossy`.
-    ///
-    /// # Safety
-    ///
-    /// 1. The provided slice must point to data that lives inside the ref-counted [Segment].
-    /// 2. The length must encompass a valid range of data inside the [Segment].
-    fn new(origin: Arc<Segment>, range: Range<u64>) -> Self {
-        // Safety: This ptr came from a slice that we prevent from
-        //         being dropped by having it inside a ref counter
-        // Safety: The length is computed by a (assumed to be correct)
-        //         index. It is undefined behavior if the file changes
-        //         in a non-appending way after the index is created.
-        let data = &origin.data[range.start as usize..range.end as usize];
-        match String::from_utf8_lossy(data) {
-            Cow::Borrowed(_) => Self(SegStrRepr::Borrowed {
-                ptr: unsafe { NonNull::new(data.as_ptr().cast_mut()).unwrap_unchecked() },
-                len: data.len(),
-                _ref: origin,
-            }),
-            Cow::Owned(s) => Self::new_owned(s),
+    pub fn from_bytes(bytes: SegBytes) -> Self {
+        match bytes.0 {
+            SegBytesRepr::Borrowed { _ref, ptr, len } => {
+                // Safety: by construction of SegBytes
+                let data = unsafe { std::slice::from_raw_parts(ptr.as_ptr(), len) };
+                match String::from_utf8_lossy(data) {
+                    Cow::Owned(s) => Self(SegStrRepr::Owned(s)),
+                    Cow::Borrowed(_) => Self(SegStrRepr::Borrowed { ptr, len, _ref }),
+                }
+            }
+            SegBytesRepr::Owned(b) => match String::from_utf8_lossy(&b) {
+                Cow::Owned(s) => Self(SegStrRepr::Owned(s)),
+                Cow::Borrowed(_) => {
+                    // Safety: We already checked that the data is valid utf-8
+                    //         in the `String::from_utf8_lossy` call.
+                    Self(SegStrRepr::Owned(unsafe { String::from_utf8_unchecked(b) }))
+                }
+            },
         }
-    }
-
-    /// Constructs a string that owns its data.
-    pub fn new_owned(s: String) -> Self {
-        Self(SegStrRepr::Owned(s))
     }
 
     /// Returns a byte slice of this [SegStr]'s components.
