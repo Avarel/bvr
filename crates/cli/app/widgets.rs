@@ -453,7 +453,7 @@ impl MultiplexerWidget<'_> {
         if !self.mux.is_empty() {
             let active = self.mux.active();
             match self.mux.mode() {
-                MultiplexerMode::Windows => {
+                MultiplexerMode::Panes => {
                     for (i, (&chunk, viewer)) in Self::split_horizontal(mux_chunk, self.mux.len())
                         .iter()
                         .zip(self.mux.viewers_mut())

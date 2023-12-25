@@ -68,7 +68,7 @@ In this mode, you can enter commands to interact with the pager.
 
 | Command         | Description                                          |
 | --------------- | ---------------------------------------------------- |
-| `:q`            | Quit.                                                |
+| `:q` `:quit`    | Quit.                                                |
 | `:mux`          | Toggle the multiplexer mode between windows or tabs. |
 | `:open <file>`  | Open a file in a new tab/view.                       |
 | `:close`        | Close the current tab/view.                          |
@@ -97,11 +97,13 @@ In this mode, you can toggle filters from bookmarks or searches to omit or inclu
 | `Space` and `Enter` | Toggle selected filter.                  |
 
 ### Mode-Independent
-| Keybinding      | Description                               |
-| --------------- | ----------------------------------------- |
-| `Esc`           | Exit selection mode (enter normal mode).  |
-| `:`             | Enter command mode.                       |
-| `v`             | Enter visual mode.                        |
-| `Tab`           | Enter filter mode.                        |
-| `` ` `` and `~` | Switch selected view.                     |
-| `1` .. `9`      | Switch selected view to the `n`th buffer. |
+| Keybinding      | Description                                  |
+| --------------- | -------------------------------------------- |
+| `Esc`           | Exit selection mode (enter normal mode).     |
+| `:`             | Enter command mode.                          |
+| `+`             | Create a new filter.                         |
+| `-`             | Create a new filter (literal).               |
+| `v`             | Enter visual mode.                           |
+| `Tab`           | Enter filter mode.                           |
+| `` ` `` and `~` | Switch selected view (forward and backward). |
+| `1` .. `9`      | Switch selected view to the `n`th buffer.    |

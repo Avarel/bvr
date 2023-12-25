@@ -11,7 +11,7 @@ use self::{
 };
 use crate::components::{
     filters::Filter,
-    mux::MultiplexerApp,
+    mux::{MultiplexerApp, MultiplexerMode},
     prompt::{self, PromptApp, PromptMovement},
     status::StatusApp,
     viewer::Instance,
@@ -323,9 +323,7 @@ impl App {
                     self.mode = InputMode::Normal;
                     return result;
                 }
-                CommandAction::Complete => {
-                    ()
-                }
+                CommandAction::Complete => (),
             },
         };
 
@@ -342,7 +340,13 @@ impl App {
             Ok(r) => r,
             Err(err) => {
                 self.status.submit_message(
-                    format!("Invalid regex `{pat}`: {err}"),
+                    match err {
+                        regex::Error::Syntax(err) => format!("{pat}: syntax ({err})"),
+                        regex::Error::CompiledTooBig(sz) => {
+                            format!("{pat}: regex surpassed size limit ({sz} bytes)")
+                        }
+                        _ => format!("{pat}: {err}"),
+                    },
                     Some(Duration::from_secs(2)),
                 );
                 return true;
@@ -358,38 +362,40 @@ impl App {
     }
 
     fn process_command(&mut self, command: String) -> bool {
-        if command == "q" {
-            return false;
-        } else if let Some(path) = command.strip_prefix("open ") {
-            if let Err(err) = self.open_file(path) {
-                self.status.submit_message(
-                    format!("Error opening file `{path}`: {err}"),
-                    Some(Duration::from_secs(2)),
-                );
+        let mut parts = command.split_whitespace();
+
+        match parts.next() {
+            Some("q" | "quit") => return false,
+            Some("open") => {
+                let path = parts.collect::<String>();
+                if let Err(err) = self.open_file(&path) {
+                    self.status
+                        .submit_message(format!("{path}: {err}"), Some(Duration::from_secs(2)));
+                }
             }
-        } else if command == "close" {
-            self.mux.close_active_viewer()
-        } else if command == "mux" {
-            self.mux.swap_mode();
-        } else if command == "clearfilter" {
-            if let Some(viewer) = self.mux.active_viewer_mut() {
-                viewer.filterer.filters.clear();
-                viewer.filterer.compute_composite();
+            Some("close") => self.mux.close_active_viewer(),
+            Some("tabs") => self.mux.set_mode(MultiplexerMode::Tabs),
+            Some("split" | "panes" | "windows") => self.mux.set_mode(MultiplexerMode::Panes),
+            Some("mux") => self.mux.set_mode(self.mux.mode().swap()),
+            Some(f @ ("find" | "findl")) => {
+                let pat = parts.collect::<String>();
+                return self.process_search(&pat, f == "findl");
             }
-        } else if let Some(pat) = command.strip_prefix("find ") {
-            return self.process_search(pat, false);
-        } else if let Some(pat) = command.strip_prefix("findl ") {
-            return self.process_search(pat, true);
-        } else if let Ok(n) = command.parse::<usize>() {
-            if let Some(viewer) = self.mux.active_viewer_mut() {
-                viewer.viewport_mut().jump_to(n.saturating_sub(1));
+            Some(cmd) => {
+                if let Ok(n) = cmd.parse::<usize>() {
+                    if let Some(viewer) = self.mux.active_viewer_mut() {
+                        viewer.viewport_mut().jump_to(n.saturating_sub(1));
+                    }
+                } else {
+                    self.status.submit_message(
+                        format!("{cmd}: Invalid command"),
+                        Some(Duration::from_secs(2)),
+                    )
+                }
             }
-        } else {
-            self.status.submit_message(
-                format!("Invalid command `{command}`"),
-                Some(Duration::from_secs(2)),
-            );
+            None => return true,
         }
+
         true
     }
 

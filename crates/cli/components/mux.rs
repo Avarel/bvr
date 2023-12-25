@@ -3,15 +3,15 @@ use super::viewer::Instance;
 
 #[derive(Clone, Copy)]
 pub enum MultiplexerMode {
-    Windows,
+    Panes,
     Tabs,
 }
 
 impl MultiplexerMode {
-    fn swap(self) -> Self {
+    pub fn swap(self) -> Self {
         match self {
-            Self::Windows => Self::Tabs,
-            Self::Tabs => Self::Windows,
+            Self::Panes => Self::Tabs,
+            Self::Tabs => Self::Panes,
         }
     }
 }
@@ -85,7 +85,7 @@ impl MultiplexerApp {
         self.mode
     }
 
-    pub(crate) fn swap_mode(&mut self) {
-        self.mode = self.mode.swap();
+    pub fn set_mode(&mut self, mode: MultiplexerMode) {
+        self.mode = mode;
     }
 }
