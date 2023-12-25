@@ -1,3 +1,4 @@
+use crate::direction::Direction;
 use super::viewer::Instance;
 
 #[derive(Clone, Copy)]
@@ -58,6 +59,13 @@ impl MultiplexerApp {
 
     pub fn active(&self) -> usize {
         self.active
+    }
+
+    pub fn move_active(&mut self, direction: Direction) {
+        self.move_active_index(match direction {
+            Direction::Back => self.active.saturating_sub(1),
+            Direction::Next => self.active.saturating_add(1),
+        })
     }
 
     pub fn move_active_index(&mut self, index: usize) {

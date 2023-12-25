@@ -52,7 +52,7 @@ a plethora of other features that I couldn't find in any other pager.
 ## Built-in Keybindings
 * Custom keybindings will be added in the future.
 
-### Viewer Mode
+### Normal Mode
 This is the default mode. You can scroll through files.
 
 | Keybinding                      | Description                                          |
@@ -76,13 +76,14 @@ In this mode, you can enter commands to interact with the pager.
 | `:findl <lit>`  | Create a new filter searching for the literal.       |
 | `:<number>`     | Go to the specific line number.                      |
 
-### Selection Mode
+### Visual Mode
 In this mode, you can select lines to bookmark.
 
-| Keybinding          | Description                      |
-| ------------------- | -------------------------------- |
-| `Up` and `Down`     | Move the select cursor.          |
-| `Space` and `Enter` | Toggle bookmark at current line. |
+| Keybinding                | Description                                      |
+| ------------------------- | ------------------------------------------------ |
+| `Up` and `Down`           | Move the select cursor.                          |
+| `Shift` + `Up` and `Down` | Expand the select cursor into a selection range. |
+| `Space` and `Enter`       | Toggle bookmark at current line.                 |
 
 ### Filter Mode
 In this mode, you can toggle filters from bookmarks or searches to omit or include certain lines in the viewer.
@@ -98,9 +99,9 @@ In this mode, you can toggle filters from bookmarks or searches to omit or inclu
 ### Mode-Independent
 | Keybinding      | Description                               |
 | --------------- | ----------------------------------------- |
-| `Esc`           | Exit selection mode (enter viewer mode).  |
+| `Esc`           | Exit selection mode (enter normal mode).  |
 | `:`             | Enter command mode.                       |
-| `i`             | Enter selection mode.                     |
+| `v`             | Enter visual mode.                        |
 | `Tab`           | Enter filter mode.                        |
 | `` ` `` and `~` | Switch selected view.                     |
 | `1` .. `9`      | Switch selected view to the `n`th buffer. |

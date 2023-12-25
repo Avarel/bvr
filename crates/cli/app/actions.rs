@@ -6,7 +6,8 @@ pub enum Action {
     Exit,
     SwitchMode(InputMode),
     Command(CommandAction),
-    Viewer(ViewerAction),
+    Normal(NormalAction),
+    Visual(VisualAction),
     Filter(FilterAction),
 }
 
@@ -17,7 +18,7 @@ pub enum Delta {
     Boundary,
 }
 
-pub enum ViewerAction {
+pub enum NormalAction {
     PanVertical {
         direction: Direction,
         delta: Delta,
@@ -29,6 +30,13 @@ pub enum ViewerAction {
         target_view: Option<usize>,
     },
     FollowOutput,
+    SwitchActive(Direction),
+    SwitchActiveIndex {
+        target_view: usize,
+    },
+}
+
+pub enum VisualAction {
     Move {
         direction: Direction,
         select: bool,
@@ -38,9 +46,6 @@ pub enum ViewerAction {
     ToggleLine {
         target_view: usize,
         line_number: usize,
-    },
-    SwitchActiveIndex {
-        target_view: usize,
     },
 }
 

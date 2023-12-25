@@ -1,5 +1,5 @@
 use super::{
-    actions::{Action, Delta, FilterAction, ViewerAction},
+    actions::{Action, Delta, FilterAction, NormalAction},
     mouse::MouseHandler,
     InputMode,
 };
@@ -13,7 +13,7 @@ use crate::{
         status::StatusApp,
         viewer::{Instance, LineData, LineType},
     },
-    direction::Direction,
+    direction::Direction, app::actions::VisualAction,
 };
 use crossterm::event::MouseEventKind;
 use ratatui::{prelude::*, widgets::*};
@@ -37,8 +37,8 @@ impl<'a> Widget for StatusWidget<'a> {
 
         let accent_color = match self.input_mode {
             InputMode::Command => colors::COMMAND_ACCENT,
-            InputMode::Viewer => colors::VIEWER_ACCENT,
-            InputMode::Select => colors::SELECT_ACCENT,
+            InputMode::Normal => colors::VIEWER_ACCENT,
+            InputMode::Visual => colors::SELECT_ACCENT,
             InputMode::Filter => colors::FILTER_ACCENT,
         };
 
@@ -47,8 +47,8 @@ impl<'a> Widget for StatusWidget<'a> {
         v.push(
             Span::from(match self.input_mode {
                 InputMode::Command => " COMMAND ",
-                InputMode::Viewer => " VIEWER ",
-                InputMode::Select => " SELECT ",
+                InputMode::Normal => " NORMAL ",
+                InputMode::Visual => " VISUAL ",
                 InputMode::Filter => " FILTER ",
             })
             .fg(colors::WHITE)
@@ -184,7 +184,7 @@ impl ViewerWidget<'_> {
 
         handle.on_mouse(area, |event| match event.kind {
             MouseEventKind::ScrollUp | MouseEventKind::ScrollDown => {
-                Some(Action::Viewer(ViewerAction::PanVertical {
+                Some(Action::Normal(NormalAction::PanVertical {
                     direction: Direction::back_if(event.kind == MouseEventKind::ScrollUp),
                     delta: Delta::Number(5),
                     target_view: Some(self.view_index),
@@ -352,7 +352,7 @@ impl ViewerLineWidget<'_> {
 
         if let Some(line) = self.line {
             handle.on_mouse(area, |event| match event.kind {
-                MouseEventKind::Down(_) => Some(Action::Viewer(ViewerAction::ToggleLine {
+                MouseEventKind::Down(_) => Some(Action::Visual(VisualAction::ToggleLine {
                     line_number: line.line_number,
                     target_view: self.view_index,
                 })),
@@ -391,7 +391,7 @@ impl TabWidget<'_> {
         .render(area, buf);
 
         handle.on_mouse(area, |event| match event.kind {
-            MouseEventKind::Down(_) => Some(Action::Viewer(ViewerAction::SwitchActiveIndex {
+            MouseEventKind::Down(_) => Some(Action::Normal(NormalAction::SwitchActiveIndex {
                 target_view: self.view_index,
             })),
             _ => None,

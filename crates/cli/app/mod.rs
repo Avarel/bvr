@@ -4,7 +4,7 @@ mod mouse;
 mod widgets;
 
 use self::{
-    actions::{Action, CommandAction, Delta, ViewerAction},
+    actions::{Action, CommandAction, Delta, NormalAction, VisualAction},
     keybinding::Keybinding,
     mouse::MouseHandler,
     widgets::{CommandWidget, MultiplexerWidget},
@@ -35,8 +35,8 @@ pub type Terminal<'a> = ratatui::Terminal<Backend<'a>>;
 #[derive(PartialEq, Clone, Copy)]
 pub enum InputMode {
     Command,
-    Viewer,
-    Select,
+    Normal,
+    Visual,
     Filter,
 }
 
@@ -51,7 +51,7 @@ pub struct App {
 impl App {
     pub fn new() -> Self {
         Self {
-            mode: InputMode::Viewer,
+            mode: InputMode::Normal,
             command: CommandApp::new(),
             mux: MultiplexerApp::new(),
             status: StatusApp::new(),
@@ -143,14 +143,14 @@ impl App {
                 self.command.submit();
                 self.mode = new_mode;
 
-                if new_mode == InputMode::Select {
+                if new_mode == InputMode::Visual {
                     if let Some(viewer) = self.mux.active_viewer_mut() {
                         viewer.move_selected_into_view()
                     }
                 }
             }
-            Action::Viewer(action) => match action {
-                ViewerAction::PanVertical {
+            Action::Normal(action) => match action {
+                NormalAction::PanVertical {
                     direction,
                     delta,
                     target_view,
@@ -171,7 +171,7 @@ impl App {
                         viewer.viewport_mut().pan_vertical(direction, delta);
                     }
                 }
-                ViewerAction::PanHorizontal {
+                NormalAction::PanHorizontal {
                     direction,
                     delta,
                     target_view,
@@ -192,15 +192,18 @@ impl App {
                         viewer.viewport_mut().pan_horizontal(direction, delta);
                     }
                 }
-                ViewerAction::FollowOutput => {
+                NormalAction::FollowOutput => {
                     if let Some(viewer) = self.mux.active_viewer_mut() {
                         viewer.viewport_mut().follow_output();
                     }
                 }
-                ViewerAction::SwitchActiveIndex { target_view } => {
+                NormalAction::SwitchActiveIndex { target_view } => {
                     self.mux.move_active_index(target_view)
                 }
-                ViewerAction::Move {
+                NormalAction::SwitchActive(direction) => self.mux.move_active(direction),
+            },
+            Action::Visual(action) => match action {
+                VisualAction::Move {
                     direction,
                     select,
                     delta,
@@ -215,13 +218,13 @@ impl App {
                         viewer.move_select(direction, select, delta)
                     }
                 }
-                ViewerAction::ToggleSelectedLine => {
+                VisualAction::ToggleSelectedLine => {
                     if let Some(viewer) = self.mux.active_viewer_mut() {
                         viewer.toggle_select_bookmarks();
                         viewer.filterer.compute_composite();
                     }
                 }
-                ViewerAction::ToggleLine {
+                VisualAction::ToggleLine {
                     target_view,
                     line_number,
                 } => {
@@ -295,7 +298,7 @@ impl App {
                 CommandAction::Paste(s) => self.command.enter_str(&s),
                 CommandAction::Backspace => {
                     if !self.command.delete() {
-                        self.mode = InputMode::Viewer;
+                        self.mode = InputMode::Normal;
                     }
                 }
                 CommandAction::Submit => {
@@ -303,7 +306,7 @@ impl App {
                     if !self.process_command(command) {
                         return false;
                     }
-                    self.mode = InputMode::Viewer;
+                    self.mode = InputMode::Normal;
                 }
             },
         };

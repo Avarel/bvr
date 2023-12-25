@@ -1,5 +1,5 @@
 use super::{
-    actions::{Action, CommandAction, CommandJump, Delta, FilterAction, ViewerAction},
+    actions::{Action, CommandAction, CommandJump, Delta, FilterAction, NormalAction, VisualAction},
     InputMode,
 };
 use crate::direction::Direction;
@@ -31,10 +31,10 @@ impl Keybinding {
 
     fn mode_dependent_bind(input_mode: InputMode, event: &mut Event) -> Option<Action> {
         match input_mode {
-            InputMode::Viewer => match event {
+            InputMode::Normal => match event {
                 Event::Key(key) => match key.code {
                     KeyCode::Up | KeyCode::Down => {
-                        Some(Action::Viewer(ViewerAction::PanVertical {
+                        Some(Action::Normal(NormalAction::PanVertical {
                             direction: Direction::back_if(key.code == KeyCode::Up),
                             delta: if key.modifiers.contains(KeyModifiers::SHIFT) {
                                 Delta::HalfPage
@@ -45,7 +45,7 @@ impl Keybinding {
                         }))
                     }
                     KeyCode::Left | KeyCode::Right => {
-                        Some(Action::Viewer(ViewerAction::PanHorizontal {
+                        Some(Action::Normal(NormalAction::PanHorizontal {
                             direction: Direction::back_if(key.code == KeyCode::Left),
                             delta: if key.modifiers.contains(KeyModifiers::SHIFT) {
                                 Delta::HalfPage
@@ -56,7 +56,7 @@ impl Keybinding {
                         }))
                     }
                     KeyCode::Home | KeyCode::End | KeyCode::Char('g') => {
-                        Some(Action::Viewer(ViewerAction::PanVertical {
+                        Some(Action::Normal(NormalAction::PanVertical {
                             direction: Direction::back_if(matches!(
                                 key.code,
                                 KeyCode::Home | KeyCode::Char('g')
@@ -65,16 +65,16 @@ impl Keybinding {
                             target_view: None,
                         }))
                     }
-                    KeyCode::Char('G') => Some(Action::Viewer(ViewerAction::FollowOutput)),
+                    KeyCode::Char('G') => Some(Action::Normal(NormalAction::FollowOutput)),
                     KeyCode::PageUp | KeyCode::PageDown | KeyCode::Char(' ') => {
-                        Some(Action::Viewer(ViewerAction::PanVertical {
+                        Some(Action::Normal(NormalAction::PanVertical {
                             direction: Direction::back_if(key.code == KeyCode::PageUp),
                             delta: Delta::Page,
                             target_view: None,
                         }))
                     }
                     KeyCode::Char(c @ ('u' | 'd')) => {
-                        Some(Action::Viewer(ViewerAction::PanVertical {
+                        Some(Action::Normal(NormalAction::PanVertical {
                             direction: Direction::back_if(c == 'u'),
                             delta: Delta::HalfPage,
                             target_view: None,
@@ -116,9 +116,9 @@ impl Keybinding {
                 },
                 _ => None,
             },
-            InputMode::Select => match event {
+            InputMode::Visual => match event {
                 Event::Key(key) => match key.code {
-                    KeyCode::Up | KeyCode::Down => Some(Action::Viewer(ViewerAction::Move {
+                    KeyCode::Up | KeyCode::Down => Some(Action::Visual(VisualAction::Move {
                         direction: Direction::back_if(key.code == KeyCode::Up),
                         select: key.modifiers.contains(KeyModifiers::SHIFT),
                         delta: if key
@@ -130,20 +130,20 @@ impl Keybinding {
                             Delta::Number(1)
                         },
                     })),
-                    KeyCode::Home | KeyCode::End => Some(Action::Viewer(ViewerAction::Move {
+                    KeyCode::Home | KeyCode::End => Some(Action::Visual(VisualAction::Move {
                         direction: Direction::back_if(key.code == KeyCode::Home),
                         select: key.modifiers.contains(KeyModifiers::SHIFT),
                         delta: Delta::Boundary,
                     })),
                     KeyCode::PageUp | KeyCode::PageDown => {
-                        Some(Action::Viewer(ViewerAction::Move {
+                        Some(Action::Visual(VisualAction::Move {
                             direction: Direction::back_if(key.code == KeyCode::PageUp),
                             select: key.modifiers.contains(KeyModifiers::SHIFT),
                             delta: Delta::Page,
                         }))
                     }
                     KeyCode::Char(' ') | KeyCode::Enter => {
-                        Some(Action::Viewer(ViewerAction::ToggleSelectedLine))
+                        Some(Action::Visual(VisualAction::ToggleSelectedLine))
                     }
                     _ => None,
                 },
@@ -202,13 +202,13 @@ impl Keybinding {
             Event::Key(key) => match key.code {
                 KeyCode::Char(':') => Some(Action::SwitchMode(InputMode::Command)),
                 KeyCode::Tab => Some(Action::SwitchMode(InputMode::Filter)),
-                KeyCode::Char(c @ ('`' | '~')) => Some(Action::Viewer(ViewerAction::SwitchActive(
+                KeyCode::Char(c @ ('`' | '~')) => Some(Action::Normal(NormalAction::SwitchActive(
                     Direction::back_if(c == '~'),
                 ))),
-                KeyCode::Esc => Some(Action::SwitchMode(InputMode::Viewer)),
-                KeyCode::Char('i') => Some(Action::SwitchMode(InputMode::Select)),
+                KeyCode::Esc => Some(Action::SwitchMode(InputMode::Normal)),
+                KeyCode::Char('i') => Some(Action::SwitchMode(InputMode::Visual)),
                 KeyCode::Char(c @ '1'..='9') => {
-                    Some(Action::Viewer(ViewerAction::SwitchActiveIndex {
+                    Some(Action::Normal(NormalAction::SwitchActiveIndex {
                         target_view: c as usize - '1' as usize,
                     }))
                 }
