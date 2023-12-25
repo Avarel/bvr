@@ -195,5 +195,7 @@ impl Instance {
                 }
             }
         }
+        self.cursor.clamp(self.visible_line_count().saturating_sub(1));
+        self.viewport.update_end(self.visible_line_count());
     }
 }
