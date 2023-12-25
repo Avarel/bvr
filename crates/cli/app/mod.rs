@@ -11,6 +11,7 @@ use self::{
 };
 use crate::components::{
     command::{self, CommandApp, PromptMovement},
+    filters::Filter,
     mux::MultiplexerApp,
     status::StatusApp,
     viewer::Instance,
@@ -258,6 +259,19 @@ impl App {
                 actions::FilterAction::RemoveSelectedFilter => {
                     if let Some(viewer) = self.mux.active_viewer_mut() {
                         viewer.filterer.remove_select_filters();
+                        viewer.filterer.compute_composite();
+                    }
+                }
+                actions::FilterAction::ToggleFilter {
+                    target_view,
+                    filter_index,
+                } => {
+                    if let Some(viewer) = self.mux.viewers_mut().get_mut(target_view) {
+                        viewer
+                            .filterer
+                            .filters_mut()
+                            .get_mut(filter_index)
+                            .map(Filter::toggle);
                         viewer.filterer.compute_composite();
                     }
                 }

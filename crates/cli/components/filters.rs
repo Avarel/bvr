@@ -174,6 +174,14 @@ impl Filters {
         &self.all
     }
 
+    pub fn get_mut(&mut self, index: usize) -> Option<&mut Filter> {
+        match index {
+            0 => Some(&mut self.all),
+            1 => Some(&mut self.bookmarks),
+            _ => self.searches.get_mut(index - 2),
+        }
+    }
+
     #[allow(dead_code)]
     pub fn all_mut(&mut self) -> &mut Filter {
         &mut self.all
@@ -211,6 +219,7 @@ bitflags! {
 }
 
 pub struct FilterData<'a> {
+    pub index: usize,
     pub name: &'a str,
     pub color: Color,
     pub len: Option<usize>,
@@ -225,6 +234,10 @@ impl Filterer {
             cursor: CursorState::new(),
             filters: Filters::new(),
         }
+    }
+
+    pub fn filters_mut(&mut self) -> &mut Filters {
+        &mut self.filters
     }
 
     pub fn update_and_filter_view(
@@ -244,6 +257,7 @@ impl Filterer {
             .skip(range.start)
             .take(range.len())
             .map(|(index, filter)| FilterData {
+                index,
                 name: &filter.name,
                 color: filter.color,
                 len: filter.len(),
@@ -293,16 +307,6 @@ impl Filterer {
         self.composite = composite;
     }
 
-    fn filter_index(&mut self, index: usize) -> &mut Filter {
-        assert!(index < self.filters.len());
-
-        match index {
-            0 => &mut self.filters.all,
-            1 => &mut self.filters.bookmarks,
-            _ => &mut self.filters.searches[index - 2],
-        }
-    }
-
     pub fn move_select(&mut self, dir: Direction, select: bool, delta: usize) {
         match dir {
             Direction::Back => self.cursor.back(select, |i| i.saturating_sub(delta)),
@@ -320,11 +324,11 @@ impl Filterer {
     pub fn toggle_select_filters(&mut self) {
         match self.cursor.state {
             Cursor::Singleton(i) => {
-                self.filter_index(i).toggle();
+                self.filters.get_mut(i).map(Filter::toggle);
             }
             Cursor::Selection(start, end, _) => {
                 for i in start..=end {
-                    self.filter_index(i).toggle();
+                    self.filters.get_mut(i).map(Filter::toggle);
                 }
             }
         }

@@ -1,5 +1,5 @@
 use super::{
-    actions::{Action, Delta, ViewerAction},
+    actions::{Action, Delta, FilterAction, ViewerAction},
     mouse::MouseHandler,
     InputMode,
 };
@@ -114,11 +114,12 @@ impl Widget for CommandWidget<'_> {
 }
 
 pub struct FilterViewerWidget<'a> {
+    view_index: usize,
     viewer: &'a mut Instance,
 }
 
 impl FilterViewerWidget<'_> {
-    fn render(self, area: Rect, buf: &mut Buffer) {
+    fn render(self, area: Rect, buf: &mut Buffer, handle: &mut MouseHandler) {
         const WIDGET_BLOCK: Block = Block::new().style(Style::new().bg(colors::STATUS_BAR));
         WIDGET_BLOCK.render(area, buf);
 
@@ -128,7 +129,11 @@ impl FilterViewerWidget<'_> {
             .filterer
             .update_and_filter_view(area.height as usize)
         {
-            FilterLineWidget { inner: &filter }.render(Rect::new(area.x, y, area.width, 1), buf);
+            FilterLineWidget {
+                view_index: self.view_index,
+                inner: &filter,
+            }
+            .render(Rect::new(area.x, y, area.width, 1), buf, handle);
             y += 1;
         }
     }
@@ -224,11 +229,12 @@ impl EdgeBg {
 }
 
 struct FilterLineWidget<'a> {
+    view_index: usize,
     inner: &'a FilterData<'a>,
 }
 
 impl FilterLineWidget<'_> {
-    fn render(self, area: Rect, buf: &mut Buffer) {
+    fn render(self, area: Rect, buf: &mut Buffer, handle: &mut MouseHandler) {
         let mut v = vec![
             Span::from(if self.inner.ty.contains(FilterType::Origin) {
                 " ▶"
@@ -252,6 +258,14 @@ impl FilterLineWidget<'_> {
         }
 
         Paragraph::new(Line::from(v)).render(area, buf);
+
+        handle.on_mouse(area, |event| match event.kind {
+            MouseEventKind::Down(_) => Some(Action::Filter(FilterAction::ToggleFilter {
+                target_view: self.view_index,
+                filter_index: self.inner.index,
+            })),
+            _ => None,
+        });
     }
 }
 
@@ -396,7 +410,7 @@ impl MultiplexerWidget<'_> {
         let constraints = vec![Constraint::Ratio(1, len as u32); len];
         Layout::new(ratatui::prelude::Direction::Horizontal, constraints).split(area)
     }
-    
+
     pub fn split_top(area: Rect, top_height: u16) -> [Rect; 2] {
         let mut tab_chunk = area;
         tab_chunk.height = top_height;
@@ -435,10 +449,10 @@ impl MultiplexerWidget<'_> {
             let active = self.mux.active();
             match self.mux.mode() {
                 MultiplexerMode::Windows => {
-                    let hsplit = Self::split_horizontal(mux_chunk, self.mux.len());
-
-                    for (i, (&chunk, viewer)) in
-                        hsplit.iter().zip(self.mux.viewers_mut()).enumerate()
+                    for (i, (&chunk, viewer)) in Self::split_horizontal(mux_chunk, self.mux.len())
+                        .iter()
+                        .zip(self.mux.viewers_mut())
+                        .enumerate()
                     {
                         let [tab_chunk, view_chunk] = Self::split_top(chunk, 1);
                         TabWidget {
@@ -453,7 +467,11 @@ impl MultiplexerWidget<'_> {
                         if self.mode == InputMode::Filter {
                             let [view_chunk, filter_chunk] =
                                 Self::split_bottom(view_chunk, Self::FILTER_MAX_HEIGHT);
-                            FilterViewerWidget { viewer }.render(filter_chunk, buf);
+                            FilterViewerWidget {
+                                view_index: i,
+                                viewer,
+                            }
+                            .render(filter_chunk, buf, handler);
                             viewer_chunk = view_chunk;
                         }
 
@@ -472,10 +490,11 @@ impl MultiplexerWidget<'_> {
                 }
                 MultiplexerMode::Tabs => {
                     let [tab_chunk, view_chunk] = Self::split_top(mux_chunk, 1);
-                    let hsplit = Self::split_horizontal(tab_chunk, self.mux.len());
 
-                    for (i, (&chunk, viewer)) in
-                        hsplit.iter().zip(self.mux.viewers_mut()).enumerate()
+                    for (i, (&chunk, viewer)) in Self::split_horizontal(tab_chunk, self.mux.len())
+                        .iter()
+                        .zip(self.mux.viewers_mut())
+                        .enumerate()
                     {
                         TabWidget {
                             view_index: i,
@@ -492,7 +511,11 @@ impl MultiplexerWidget<'_> {
                     if self.mode == InputMode::Filter {
                         let [view_chunk, filter_chunk] =
                             Self::split_bottom(view_chunk, Self::FILTER_MAX_HEIGHT);
-                        FilterViewerWidget { viewer }.render(filter_chunk, buf);
+                        FilterViewerWidget {
+                            view_index: 0,
+                            viewer,
+                        }
+                        .render(filter_chunk, buf, handler);
                         viewer_chunk = view_chunk;
                     }
                     ViewerWidget {
