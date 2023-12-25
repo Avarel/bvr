@@ -39,7 +39,6 @@ pub enum ViewerAction {
         target_view: usize,
         line_number: usize,
     },
-    SwitchActive(Direction),
     SwitchActiveIndex {
         target_view: usize,
     },

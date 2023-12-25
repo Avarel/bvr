@@ -204,10 +204,10 @@ impl Keybinding {
                 KeyCode::Tab => Some(Action::SwitchMode(InputMode::Filter)),
                 KeyCode::Esc => Some(Action::SwitchMode(InputMode::Viewer)),
                 KeyCode::Char('i') => Some(Action::SwitchMode(InputMode::Select)),
-                KeyCode::Left | KeyCode::Right if key.modifiers.contains(KeyModifiers::SHIFT) => {
-                    Some(Action::Viewer(ViewerAction::SwitchActive(
-                        Direction::back_if(key.code == KeyCode::Left),
-                    )))
+                KeyCode::Char(c @ '1'..='9') => {
+                    Some(Action::Viewer(ViewerAction::SwitchActiveIndex {
+                        target_view: c as usize - '1' as usize,
+                    }))
                 }
                 KeyCode::Char('q') => Some(Action::Exit),
                 KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {

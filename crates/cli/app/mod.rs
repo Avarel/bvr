@@ -197,7 +197,6 @@ impl App {
                         viewer.viewport_mut().follow_output();
                     }
                 }
-                ViewerAction::SwitchActive(direction) => self.mux.move_active(direction),
                 ViewerAction::SwitchActiveIndex { target_view } => {
                     self.mux.move_active_index(target_view)
                 }
