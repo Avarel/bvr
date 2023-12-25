@@ -1,7 +1,7 @@
 pub mod cursor;
 pub mod viewport;
 
-pub mod command;
+pub mod prompt;
 pub mod filters;
 pub mod mux;
 pub mod status;

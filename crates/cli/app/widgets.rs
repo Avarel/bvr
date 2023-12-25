@@ -1,12 +1,12 @@
 use super::{
     actions::{Action, Delta, FilterAction, NormalAction},
     mouse::MouseHandler,
-    InputMode,
+    InputMode, PromptMode,
 };
 use crate::{
     colors,
     components::{
-        command::CommandApp,
+        prompt::PromptApp,
         cursor::{Cursor, SelectionOrigin},
         filters::{FilterData, FilterType},
         mux::{MultiplexerApp, MultiplexerMode},
@@ -36,7 +36,7 @@ impl<'a> Widget for StatusWidget<'a> {
             .bg(colors::STATUS_BAR);
 
         let accent_color = match self.input_mode {
-            InputMode::Command => colors::COMMAND_ACCENT,
+            InputMode::Command(_) => colors::COMMAND_ACCENT,
             InputMode::Normal => colors::VIEWER_ACCENT,
             InputMode::Visual => colors::SELECT_ACCENT,
             InputMode::Filter => colors::FILTER_ACCENT,
@@ -46,7 +46,7 @@ impl<'a> Widget for StatusWidget<'a> {
 
         v.push(
             Span::from(match self.input_mode {
-                InputMode::Command => " COMMAND ",
+                InputMode::Command(_) => " COMMAND ",
                 InputMode::Normal => " NORMAL ",
                 InputMode::Visual => " VISUAL ",
                 InputMode::Filter => " FILTER ",
@@ -74,26 +74,32 @@ impl<'a> Widget for StatusWidget<'a> {
     }
 }
 
-pub struct CommandWidget<'a> {
-    pub inner: &'a CommandApp,
+pub struct PromptWidget<'a> {
+    pub inner: &'a PromptApp,
+    pub mode: InputMode,
     pub cursor: &'a mut Option<(u16, u16)>,
-    pub active: bool,
 }
 
-impl Widget for CommandWidget<'_> {
+impl Widget for PromptWidget<'_> {
     fn render(self, area: Rect, buf: &mut Buffer) {
-        if !self.active {
+        let InputMode::Command(mode) = self.mode else {
             const WIDGET_BLOCK: Block = Block::new().style(Style::new().bg(colors::BG));
             WIDGET_BLOCK.render(area, buf);
             return;
-        }
+        };
+
+        let c = match mode {
+            PromptMode::Command => ":",
+            PromptMode::NewFilter => "+",
+            PromptMode::NewLit => "-",
+        };
 
         let input = Paragraph::new(Line::from(match *self.inner.cursor() {
             Cursor::Singleton(_) => {
-                vec![Span::from(":"), Span::from(self.inner.buf())]
+                vec![Span::from(c), Span::from(self.inner.buf())]
             }
             Cursor::Selection(start, end, _) => vec![
-                Span::from(":"),
+                Span::from(c),
                 Span::from(&self.inner.buf()[..start]),
                 Span::from(&self.inner.buf()[start..end]).bg(colors::COMMAND_BAR_SELECT),
                 Span::from(&self.inner.buf()[end..]),
@@ -101,14 +107,13 @@ impl Widget for CommandWidget<'_> {
         }))
         .bg(colors::BG);
 
-        if self.active {
-            let i = match *self.inner.cursor() {
-                Cursor::Singleton(i)
-                | Cursor::Selection(_, i, SelectionOrigin::Right)
-                | Cursor::Selection(i, _, SelectionOrigin::Left) => i,
-            };
-            *self.cursor = Some((area.x + i as u16 + 1, area.y));
-        }
+        let i = match *self.inner.cursor() {
+            Cursor::Singleton(i)
+            | Cursor::Selection(_, i, SelectionOrigin::Right)
+            | Cursor::Selection(i, _, SelectionOrigin::Left) => i,
+        };
+        *self.cursor = Some((area.x + i as u16 + 1, area.y));
+        
         input.render(area, buf);
     }
 }

@@ -22,12 +22,12 @@ impl PromptMovement {
     }
 }
 
-pub struct CommandApp {
+pub struct PromptApp {
     buf: String,
     cursor: CursorState,
 }
 
-impl CommandApp {
+impl PromptApp {
     pub fn new() -> Self {
         Self {
             buf: String::new(),

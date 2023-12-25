@@ -7,12 +7,12 @@ use self::{
     actions::{Action, CommandAction, Delta, NormalAction, VisualAction},
     keybinding::Keybinding,
     mouse::MouseHandler,
-    widgets::{CommandWidget, MultiplexerWidget},
+    widgets::{MultiplexerWidget, PromptWidget},
 };
 use crate::components::{
-    command::{self, CommandApp, PromptMovement},
     filters::Filter,
     mux::MultiplexerApp,
+    prompt::{self, PromptApp, PromptMovement},
     status::StatusApp,
     viewer::Instance,
 };
@@ -27,24 +27,31 @@ use crossterm::{
 };
 use ratatui::{prelude::*, widgets::Widget};
 use regex::bytes::RegexBuilder;
-use std::{num::NonZeroUsize, path::Path, time::Duration};
+use std::{borrow::Cow, num::NonZeroUsize, path::Path, time::Duration};
 
 pub type Backend<'a> = ratatui::backend::CrosstermBackend<std::io::StdoutLock<'a>>;
 pub type Terminal<'a> = ratatui::Terminal<Backend<'a>>;
 
 #[derive(PartialEq, Clone, Copy)]
 pub enum InputMode {
-    Command,
+    Command(PromptMode),
     Normal,
     Visual,
     Filter,
+}
+
+#[derive(PartialEq, Clone, Copy)]
+pub enum PromptMode {
+    Command,
+    NewFilter,
+    NewLit,
 }
 
 pub struct App {
     mode: InputMode,
     mux: MultiplexerApp,
     status: StatusApp,
-    command: CommandApp,
+    prompt: PromptApp,
     keybinds: Keybinding,
 }
 
@@ -52,7 +59,7 @@ impl App {
     pub fn new() -> Self {
         Self {
             mode: InputMode::Normal,
-            command: CommandApp::new(),
+            prompt: PromptApp::new(),
             mux: MultiplexerApp::new(),
             status: StatusApp::new(),
             keybinds: Keybinding::Hardcoded,
@@ -140,7 +147,7 @@ impl App {
         match action {
             Action::Exit => return false,
             Action::SwitchMode(new_mode) => {
-                self.command.submit();
+                self.prompt.submit();
                 self.mode = new_mode;
 
                 if new_mode == InputMode::Visual {
@@ -283,33 +290,69 @@ impl App {
                     direction,
                     select,
                     jump,
-                } => self.command.move_cursor(
+                } => self.prompt.move_cursor(
                     direction,
                     PromptMovement::new(
                         select,
                         match jump {
-                            actions::CommandJump::Word => command::PromptJump::Word,
-                            actions::CommandJump::Boundary => command::PromptJump::Boundary,
-                            actions::CommandJump::None => command::PromptJump::Delta(1),
+                            actions::CommandJump::Word => prompt::PromptJump::Word,
+                            actions::CommandJump::Boundary => prompt::PromptJump::Boundary,
+                            actions::CommandJump::None => prompt::PromptJump::Delta(1),
                         },
                     ),
                 ),
-                CommandAction::Type(c) => self.command.enter_char(c),
-                CommandAction::Paste(s) => self.command.enter_str(&s),
+                CommandAction::Type(c) => self.prompt.enter_char(c),
+                CommandAction::Paste(s) => self.prompt.enter_str(&s),
                 CommandAction::Backspace => {
-                    if !self.command.delete() {
+                    if !self.prompt.delete() {
                         self.mode = InputMode::Normal;
                     }
                 }
                 CommandAction::Submit => {
-                    let command = self.command.submit();
-                    if !self.process_command(command) {
-                        return false;
-                    }
+                    let command = self.prompt.submit();
+                    let result = match self.mode {
+                        InputMode::Command(PromptMode::Command) => self.process_command(command),
+                        InputMode::Command(PromptMode::NewFilter) => {
+                            self.process_search(&command, false)
+                        }
+                        InputMode::Command(PromptMode::NewLit) => {
+                            self.process_search(&command, true)
+                        }
+                        InputMode::Normal | InputMode::Visual | InputMode::Filter => unreachable!(),
+                    };
                     self.mode = InputMode::Normal;
+                    return result;
+                }
+                CommandAction::Complete => {
+                    ()
                 }
             },
         };
+
+        true
+    }
+
+    fn process_search(&mut self, pat: &str, escaped: bool) -> bool {
+        let pat = if escaped {
+            Cow::Owned(regex::escape(pat))
+        } else {
+            Cow::Borrowed(pat)
+        };
+        let regex = match RegexBuilder::new(&pat).case_insensitive(true).build() {
+            Ok(r) => r,
+            Err(err) => {
+                self.status.submit_message(
+                    format!("Invalid regex `{pat}`: {err}"),
+                    Some(Duration::from_secs(2)),
+                );
+                return true;
+            }
+        };
+
+        if let Some(viewer) = self.mux.active_viewer_mut() {
+            viewer.filter_search(regex);
+            viewer.filterer.compute_composite();
+        }
 
         true
     }
@@ -334,38 +377,9 @@ impl App {
                 viewer.filterer.compute_composite();
             }
         } else if let Some(pat) = command.strip_prefix("find ") {
-            let regex = match RegexBuilder::new(pat).case_insensitive(true).build() {
-                Ok(r) => r,
-                Err(err) => {
-                    self.status.submit_message(
-                        format!("Invalid regex `{pat}`: {err}"),
-                        Some(Duration::from_secs(2)),
-                    );
-                    return true;
-                }
-            };
-
-            if let Some(viewer) = self.mux.active_viewer_mut() {
-                viewer.filter_search(regex);
-                viewer.filterer.compute_composite();
-            }
+            return self.process_search(pat, false);
         } else if let Some(pat) = command.strip_prefix("findl ") {
-            let pat = regex::escape(pat);
-            let regex = match RegexBuilder::new(&pat).case_insensitive(true).build() {
-                Ok(r) => r,
-                Err(err) => {
-                    self.status.submit_message(
-                        format!("Invalid regex `{pat}`: {err}"),
-                        Some(Duration::from_secs(2)),
-                    );
-                    return true;
-                }
-            };
-
-            if let Some(viewer) = self.mux.active_viewer_mut() {
-                viewer.filter_search(regex);
-                viewer.filterer.compute_composite();
-            }
+            return self.process_search(pat, true);
         } else if let Ok(n) = command.parse::<usize>() {
             if let Some(viewer) = self.mux.active_viewer_mut() {
                 viewer.viewport_mut().jump_to(n.saturating_sub(1));
@@ -390,9 +404,9 @@ impl App {
         .render(mux_chunk, f.buffer_mut(), handler);
 
         let mut cursor = None;
-        CommandWidget {
-            active: self.mode == InputMode::Command,
-            inner: &self.command,
+        PromptWidget {
+            mode: self.mode,
+            inner: &self.prompt,
             cursor: &mut cursor,
         }
         .render(cmd_chunk, f.buffer_mut());

@@ -73,6 +73,7 @@ pub enum CommandAction {
     Paste(String),
     Backspace,
     Submit,
+    Complete,
 }
 
 #[derive(Clone, Copy)]
