@@ -96,10 +96,11 @@ In this mode, you can toggle filters from bookmarks or searches to omit or inclu
 | `Space` and `Enter` | Toggle selected filter.                  |
 
 ### Mode-Independent
-| Keybinding | Description                               |
-| ---------- | ----------------------------------------- |
-| `Esc`      | Exit selection mode (enter viewer mode).  |
-| `:`        | Enter command mode.                       |
-| `i`        | Enter selection mode.                     |
-| `Tab`      | Enter filter mode.                        |
-| `1` .. `9` | Switch selected view to the `n`th buffer. |
+| Keybinding      | Description                               |
+| --------------- | ----------------------------------------- |
+| `Esc`           | Exit selection mode (enter viewer mode).  |
+| `:`             | Enter command mode.                       |
+| `i`             | Enter selection mode.                     |
+| `Tab`           | Enter filter mode.                        |
+| `` ` `` and `~` | Switch selected view.                     |
+| `1` .. `9`      | Switch selected view to the `n`th buffer. |

@@ -202,6 +202,9 @@ impl Keybinding {
             Event::Key(key) => match key.code {
                 KeyCode::Char(':') => Some(Action::SwitchMode(InputMode::Command)),
                 KeyCode::Tab => Some(Action::SwitchMode(InputMode::Filter)),
+                KeyCode::Char(c @ ('`' | '~')) => Some(Action::Viewer(ViewerAction::SwitchActive(
+                    Direction::back_if(c == '~'),
+                ))),
                 KeyCode::Esc => Some(Action::SwitchMode(InputMode::Viewer)),
                 KeyCode::Char('i') => Some(Action::SwitchMode(InputMode::Select)),
                 KeyCode::Char(c @ '1'..='9') => {
