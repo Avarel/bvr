@@ -18,17 +18,63 @@ struct RawBuf<T> {
 
 impl<T> RawBuf<T> {
     #[inline]
-    const fn empty() -> Self {
-        Self::new(std::ptr::NonNull::dangling(), 0, 0)
-    }
-
-    #[inline]
     const fn new(ptr: NonNull<T>, len: usize, cap: usize) -> Self {
         Self {
             ptr,
             len: AtomicUsize::new(len),
             cap,
         }
+    }
+
+    #[inline]
+    const fn empty() -> Self {
+        Self::new(std::ptr::NonNull::dangling(), 0, 0)
+    }
+
+    /// Allocate a new buffer with the given capacity.
+    fn allocate(init_len: usize, cap: usize) -> Self {
+        if cap == 0 {
+            return Self::empty();
+        }
+
+        // `Layout::array` checks that the number of bytes is <= usize::MAX,
+        // but this is redundant since old_layout.size() <= isize::MAX,
+        // so the `unwrap` should never fail.
+        let layout = Layout::array::<T>(cap).unwrap();
+
+        // Ensure that the new allocation doesn't exceed `isize::MAX` bytes.
+        assert!(layout.size() <= isize::MAX as usize, "Allocation too large");
+
+        let ptr = unsafe { alloc::alloc(layout) };
+
+        // If allocation fails, `new_ptr` will be null, in which case we abort.
+        let Some(new_ptr) = NonNull::new(ptr.cast::<T>()) else {
+            alloc::handle_alloc_error(layout)
+        };
+
+        RawBuf::new(new_ptr, init_len, cap)
+    }
+}
+
+impl<T> RawBuf<T>
+where
+    T: Copy,
+{
+    /// Return a new buffer with the same contents, but with a larger capacity.
+    fn grow(&self, len: usize, new_cap: Option<usize>) -> Self {
+        let new_cap = new_cap.unwrap_or((self.cap * 2).max(1));
+        debug_assert!(new_cap >= self.cap);
+
+        let new_buf = Self::allocate(len, new_cap);
+        if self.cap != 0 {
+            let old_ptr = self.ptr.as_ptr().cast::<u8>();
+            // Cannot use realloc here since it may drop the old pointer
+            let new_ptr = new_buf.ptr.as_ptr().cast::<u8>();
+            // This is fine since our elements are Copy
+            let old_layout_len = Layout::array::<T>(len).unwrap();
+            unsafe { std::ptr::copy_nonoverlapping(old_ptr, new_ptr, old_layout_len.size()) };
+        }
+        new_buf
     }
 }
 
@@ -76,6 +122,10 @@ impl<T> CowVecWriter<T>
 where
     T: Copy,
 {
+    pub fn has_readers(&self) -> bool {
+        Arc::strong_count(&self.buf) > 1
+    }
+
     /// Appends an element to the back of this collection.
     pub fn push(&mut self, elem: T) {
         let buf = self.buf.load();
@@ -89,64 +139,26 @@ where
 
         if len == cap {
             // Safety: If this runs, then buf will no longer be borrowed from
-            push_inner(&self.grow(&buf, len))
+            push_inner(&self.grow(&buf, len, None))
         } else {
             push_inner(&buf)
         }
     }
 
-    /// Grow will return a buffer that the caller can write to.
-    fn grow(&mut self, buf: &Arc<RawBuf<T>>, len: usize) -> Arc<RawBuf<T>> {
-        let cap = buf.cap;
+    pub fn reserve(&mut self, new_cap: usize) {
+        let buf = self.buf.load();
 
-        // since we set the capacity to usize::MAX when T has size 0,
-        // getting to here necessarily means the Vec is overfull.
-        assert!(std::mem::size_of::<T>() != 0, "capacity overflow");
-
-        let (new_cap, new_layout) = if cap == 0 {
-            (1, Layout::array::<T>(1).unwrap())
-        } else {
-            // This can't overflow because we ensure self.cap <= isize::MAX.
-            let new_cap = 2 * cap;
-
-            // `Layout::array` checks that the number of bytes is <= usize::MAX,
-            // but this is redundant since old_layout.size() <= isize::MAX,
-            // so the `unwrap` should never fail.
-            let new_layout = Layout::array::<T>(new_cap).unwrap();
-            (new_cap, new_layout)
-        };
-
-        // Ensure that the new allocation doesn't exceed `isize::MAX` bytes.
-        assert!(
-            new_layout.size() <= isize::MAX as usize,
-            "Allocation too large"
-        );
-
-        let new_ptr = if cap == 0 {
-            unsafe { alloc::alloc(new_layout) }
-        } else {
-            let old_ptr = buf.ptr.as_ptr().cast::<u8>();
-            // Cannot use realloc here since it may drop the old pointer
-            let new_ptr = unsafe { alloc::alloc(new_layout) };
-            if NonNull::new(new_ptr.cast::<T>()).is_none() {
-                alloc::handle_alloc_error(new_layout)
-            }
-            // This is fine since our elements are Copy
-            let old_layout_len = Layout::array::<T>(len).unwrap();
-            unsafe { std::ptr::copy_nonoverlapping(old_ptr, new_ptr, old_layout_len.size()) };
-            new_ptr
-        };
-
-        // If allocation fails, `new_ptr` will be null, in which case we abort.
-        match NonNull::new(new_ptr.cast::<T>()) {
-            Some(new_ptr) => {
-                debug_assert_ne!(new_ptr, buf.ptr);
-                let ret = Arc::new(RawBuf::new(new_ptr, len, new_cap));
-                self.buf.store(ret.clone());
-                ret
-            }
-            None => alloc::handle_alloc_error(new_layout),
+        if new_cap > buf.cap {
+            let len = buf.len.load(Ordering::Acquire);
+            self.grow(&buf, len, Some(new_cap));
         }
+    }
+
+    /// Grow will return a buffer that the caller can write to.
+    fn grow(&mut self, buf: &RawBuf<T>, len: usize, new_cap: Option<usize>) -> Arc<RawBuf<T>> {
+        let ret = Arc::new(buf.grow(len, new_cap));
+        self.buf.store(ret.clone());
+        ret
     }
 }
 
@@ -187,6 +199,12 @@ impl<T> CowVec<T> {
         (Self { buf: buf.clone() }, CowVecWriter { buf })
     }
 
+    pub fn with_capacity(cap: usize) -> (Self, CowVecWriter<T>) {
+        assert!(std::mem::size_of::<T>() != 0);
+        let buf = Arc::new(ArcSwap::from_pointee(RawBuf::allocate(0, cap)));
+        (Self { buf: buf.clone() }, CowVecWriter { buf })
+    }
+
     /// Constructs a new, empty `CowVec<T>`.
     pub fn empty() -> Self {
         Self::new().0
@@ -216,12 +234,11 @@ impl<T> CowVec<T> {
     ///
     /// This refs/pins the current internal buffer. Users can read
     /// up to `len()` elements at the time of the snapshot.
-    pub fn snapshot(&self) -> CowVecSnapshot<'_, T> {
+    pub fn snapshot(&self) -> CowVecSnapshot<T> {
         let buf = self.buf.load_full();
         CowVecSnapshot {
             len: buf.len.load(Ordering::SeqCst),
             buf,
-            _phantom: PhantomData,
         }
     }
 }
@@ -268,13 +285,12 @@ impl<T: Copy> From<Vec<T>> for CowVec<T> {
     }
 }
 
-pub struct CowVecSnapshot<'a, T> {
+pub struct CowVecSnapshot<T> {
     buf: Arc<RawBuf<T>>,
     len: usize,
-    _phantom: PhantomData<&'a ()>,
 }
 
-impl<T> CowVecSnapshot<'_, T>
+impl<T> CowVecSnapshot<T>
 where
     T: Copy,
 {
@@ -296,7 +312,7 @@ where
     }
 }
 
-impl<T> Deref for CowVecSnapshot<'_, T> {
+impl<T> Deref for CowVecSnapshot<T> {
     type Target = [T];
 
     #[inline(always)]
@@ -324,7 +340,7 @@ mod test {
     }
 
     #[test]
-    fn test_miri_push_and_concurrent_clone() {
+    fn test_miri_push_and_concurrent_access() {
         let (arr, mut writer) = CowVec::new();
         let handle = std::thread::spawn({
             move || {
@@ -347,7 +363,7 @@ mod test {
     }
 
     #[test]
-    fn test_miri_push_and_concurrent_clone_snapshot() {
+    fn test_miri_push_and_concurrent_access_snapshot() {
         let (arr, mut writer) = CowVec::new();
         let handle = std::thread::spawn({
             move || {
@@ -399,5 +415,35 @@ mod test {
             assert_eq!(slice.get(i).copied(), arr.get(i));
             assert_eq!(snap.get(i), arr.get(i));
         }
+    }
+
+    #[test]
+    fn test_miri_with_capacity() {
+        let (arr, mut writer) = CowVec::with_capacity(100);
+        let init_ptr = arr.buf.load().as_ptr();
+        for i in 0..100 {
+            writer.push(i);
+        }
+        let mid_ptr = arr.buf.load().as_ptr();
+        assert_eq!(init_ptr, mid_ptr);
+        writer.push(100);
+        let final_ptr = arr.buf.load().as_ptr();
+        assert_ne!(mid_ptr, final_ptr);
+    }
+
+    
+    #[test]
+    fn test_miri_reserve() {
+        let (arr, mut writer) = CowVec::new();
+        writer.reserve(100);
+        let init_ptr = arr.buf.load().as_ptr();
+        for i in 0..100 {
+            writer.push(i);
+        }
+        let mid_ptr = arr.buf.load().as_ptr();
+        assert_eq!(init_ptr, mid_ptr);
+        writer.push(100);
+        let final_ptr = arr.buf.load().as_ptr();
+        assert_ne!(mid_ptr, final_ptr);
     }
 }

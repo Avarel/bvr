@@ -16,6 +16,10 @@ impl LineMatchRemote {
     pub fn search(mut self, mut iter: ContiguousSegmentIterator, regex: Regex) -> Result<()> {
         while let Some((idx, start, buf)) = iter.next_buf() {
             for res in regex.find_iter(buf) {
+                if !self.buf.has_readers() {
+                    break;
+                }
+
                 let match_start = res.start() as u64 + start;
 
                 let line_number = idx.line_of_data(match_start).unwrap();

@@ -68,10 +68,14 @@ impl LineCompositeRemote {
         let mut queues = Queues::new(filters);
 
         while let Some(line_number) = queues.take_lowest() {
+            if !self.buf.has_readers() {
+                break;
+            }
+
             if let Some(&last) = self.buf.last() {
                 if last == line_number {
                     continue;
-                } 
+                }
                 debug_assert!(line_number > last);
             }
             self.buf.push(line_number);
@@ -84,9 +88,7 @@ impl LineComposite {
     #[inline]
     pub fn new(filters: Vec<LineMatches>) -> Self {
         let (buf, writer) = CowVec::new();
-        std::thread::spawn(move || {
-            LineCompositeRemote { buf: writer }.compute(filters)
-        });
+        std::thread::spawn(move || LineCompositeRemote { buf: writer }.compute(filters));
         Self { buf }
     }
 
