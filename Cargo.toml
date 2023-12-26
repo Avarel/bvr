@@ -1,6 +1,6 @@
 [package]
 name = "bvr"
-description = "Chew through logs."
+description = "A pager designed to help you chew through logs."
 categories = ["command-line-utilities"]
 authors = ["An Tran <antranprm@gmail.com>"]
 version = "0.0.3"

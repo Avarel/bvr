@@ -93,14 +93,24 @@ impl LineCompositeRemote {
 impl LineComposite {
     #[inline]
     pub fn new(filters: Vec<LineMatches>) -> Self {
-        let (buf, writer) = CowVec::new();
-        std::thread::spawn(move || LineCompositeRemote { buf: writer }.compute(filters));
-        Self { buf }
+        match filters.len() {
+            0 => Self::empty(),
+            1 => Self {
+                buf: filters.into_iter().next().unwrap().into_inner(),
+            },
+            _ => {
+                let (buf, writer) = CowVec::new();
+                std::thread::spawn(move || LineCompositeRemote { buf: writer }.compute(filters));
+                Self { buf }
+            }
+        }
     }
 
     #[inline]
     pub fn empty() -> Self {
-        Self::new(Vec::new())
+        Self {
+            buf: CowVec::empty(),
+        }
     }
 
     pub fn len(&self) -> usize {

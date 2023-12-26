@@ -12,6 +12,7 @@ use std::{io::IsTerminal, path::PathBuf};
 #[derive(Parser, Debug)]
 #[command(author, version, about)]
 struct Args {
+    /// Files to open in the pager
     files: Vec<PathBuf>,
 }
 

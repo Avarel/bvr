@@ -126,4 +126,8 @@ impl LineMatches {
     pub fn search(buf: &SegBuffer, regex: Regex) -> Result<Self> {
         Ok(Self::new(buf.segment_iter()?, regex))
     }
+
+    pub(crate) fn into_inner(self) -> CowVec<usize> {
+        self.buf
+    }
 }

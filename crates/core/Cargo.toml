@@ -1,6 +1,6 @@
 [package]
 name = "bvr-core"
-description = "The file engine used for the bvr pager."
+description = "The core components used for the bvr pager."
 authors = ["An Tran <antranprm@gmail.com>"]
 version = "0.0.3"
 edition = "2021"
