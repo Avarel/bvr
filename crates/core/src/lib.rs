@@ -1,9 +1,11 @@
 pub mod buf;
 
-pub mod components;
-pub mod err;
 mod cowvec;
+pub mod err;
+pub mod index;
+pub mod matches;
 
 pub use buf::{segment::SegStr, SegBuffer};
-pub use components::{composite::LineComposite, index::LineIndex, matches::LineMatches};
 pub use err::Result;
+pub use index::LineIndex;
+pub use matches::LineMatches;

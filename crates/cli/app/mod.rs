@@ -17,7 +17,7 @@ use crate::components::{
     viewer::Instance,
 };
 use anyhow::Result;
-use bvr_core::{buf::SegBuffer, components::index::BoxedStream};
+use bvr_core::{buf::SegBuffer, index::BoxedStream};
 use crossterm::{
     event::{
         self, DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture,

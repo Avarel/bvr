@@ -24,7 +24,4 @@ offset is at this line number?".
 
 ## Matches
 The `LineMatches` is used to store matches in iteration order for a particular
-regex upon a buffer.
-
-## Composite
-The `Composite` is used to aggregate multiple `LineMatches` into a single buffer.
+regex upon a buffer. They can be composed into a single `LineMatches`.

@@ -1,3 +1,5 @@
+mod composite;
+
 use crate::{
     buf::ContiguousSegmentIterator,
     cowvec::{CowVec, CowVecWriter},
@@ -102,18 +104,37 @@ impl LineMatches {
     }
 
     #[inline]
-    pub fn complete_from_vec(inner: Vec<usize>) -> Self {
+    pub fn empty() -> Self {
         Self {
-            buf: CowVec::from(inner),
+            buf: CowVec::new().0,
             complete: Arc::new(AtomicBool::new(true)),
         }
     }
 
     #[inline]
-    pub fn empty() -> Self {
-        Self {
-            buf: CowVec::new().0,
-            complete: Arc::new(AtomicBool::new(true)),
+    pub fn compose(filters: Vec<Self>) -> Self {
+        match filters.len() {
+            0 => Self::empty(),
+            1 => Self {
+                buf: filters.into_iter().next().unwrap().into_inner(),
+                complete: Arc::new(AtomicBool::new(true)),
+            },
+            _ => {
+                let (buf, writer) = CowVec::new();
+                let complete = Arc::new(AtomicBool::new(false));
+                std::thread::spawn({
+                    let complete = complete.clone();
+                    move || {
+                        composite::LineCompositeRemote {
+                            buf: writer,
+                            complete,
+                            strategy: composite::CompositeStrategy::Union,
+                        }
+                        .compute(filters)
+                    }
+                });
+                Self { buf, complete }
+            }
         }
     }
 
@@ -129,5 +150,14 @@ impl LineMatches {
 
     pub(crate) fn into_inner(self) -> CowVec<usize> {
         self.buf
+    }
+}
+
+impl From<Vec<usize>> for LineMatches {
+    fn from(vec: Vec<usize>) -> Self {
+        Self {
+            buf: CowVec::from(vec),
+            complete: Arc::new(AtomicBool::new(true)),
+        }
     }
 }

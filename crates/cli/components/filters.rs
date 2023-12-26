@@ -4,7 +4,7 @@ use super::{
 };
 use crate::{colors, direction::Direction};
 use bitflags::bitflags;
-use bvr_core::{LineComposite, LineMatches, SegBuffer};
+use bvr_core::{LineMatches, SegBuffer};
 use ratatui::style::Color;
 use regex::bytes::Regex;
 
@@ -71,7 +71,7 @@ impl Filter {
     fn as_line_matches(&self) -> LineMatches {
         match &self.repr {
             FilterRepr::All => LineMatches::empty(),
-            FilterRepr::Bookmarks(mask) => LineMatches::complete_from_vec(mask.lines.clone()),
+            FilterRepr::Bookmarks(mask) => mask.lines.clone().into(),
             FilterRepr::Search(mask) => mask.clone(),
         }
     }
@@ -116,7 +116,7 @@ impl Bookmarks {
 }
 
 pub struct Filterer {
-    pub(super) composite: LineComposite,
+    pub(super) composite: LineMatches,
     pub viewport: Viewport,
     cursor: CursorState,
     pub(crate) filters: Filters,
@@ -201,7 +201,7 @@ pub struct FilterData<'a> {
 impl Filterer {
     pub fn new() -> Self {
         Self {
-            composite: LineComposite::empty(),
+            composite: LineMatches::empty(),
             viewport: Viewport::new(),
             cursor: CursorState::new(),
             filters: Filters::new(),
@@ -260,7 +260,7 @@ impl Filterer {
 
     pub fn compute_composite(&mut self) {
         if self.filters.all().is_enabled() {
-            self.composite = LineComposite::empty();
+            self.composite = LineMatches::empty();
             return;
         }
         let filters = self
@@ -268,7 +268,7 @@ impl Filterer {
             .iter_active()
             .map(|filter| filter.as_line_matches())
             .collect();
-        self.composite = LineComposite::new(filters);
+        self.composite = LineMatches::compose(filters);
     }
 
     pub fn move_select(&mut self, dir: Direction, select: bool, delta: usize) {

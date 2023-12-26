@@ -4,7 +4,7 @@
 pub mod segment;
 
 use self::segment::{SegBytes, SegStr, Segment};
-use crate::{components::index::BoxedStream, LineIndex, Result};
+use crate::{index::BoxedStream, LineIndex, Result};
 use lru::LruCache;
 use std::{
     fs::File,
