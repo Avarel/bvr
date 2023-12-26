@@ -4,16 +4,17 @@ use super::{
     InputMode, PromptMode,
 };
 use crate::{
+    app::actions::VisualAction,
     colors,
     components::{
-        prompt::PromptApp,
         cursor::{Cursor, SelectionOrigin},
         filters::{FilterData, FilterType},
         mux::{MultiplexerApp, MultiplexerMode},
+        prompt::PromptApp,
         status::StatusApp,
         viewer::{Instance, LineData, LineType},
     },
-    direction::Direction, app::actions::VisualAction,
+    direction::Direction,
 };
 use crossterm::event::MouseEventKind;
 use ratatui::{prelude::*, widgets::*};
@@ -113,7 +114,7 @@ impl Widget for PromptWidget<'_> {
             | Cursor::Selection(i, _, SelectionOrigin::Left) => i,
         };
         *self.cursor = Some((area.x + i as u16 + 1, area.y));
-        
+
         input.render(area, buf);
     }
 }

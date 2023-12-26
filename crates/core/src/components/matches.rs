@@ -1,6 +1,6 @@
 use crate::{
     buf::ContiguousSegmentIterator,
-    cowvec2::{CowVec, CowVecWriter},
+    cowvec::{CowVec, CowVecWriter},
     Result, SegBuffer,
 };
 use regex::bytes::Regex;

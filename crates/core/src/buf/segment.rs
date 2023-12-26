@@ -183,7 +183,6 @@ impl SegBytes {
     }
 }
 
-
 impl std::borrow::Borrow<[u8]> for SegBytes {
     #[inline]
     fn borrow(&self) -> &[u8] {
@@ -206,7 +205,6 @@ impl std::convert::AsRef<[u8]> for SegBytes {
         self.as_bytes()
     }
 }
-
 
 /// Line string that comes from a [Segment].
 ///

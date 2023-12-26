@@ -1,5 +1,7 @@
 use super::{
-    actions::{Action, CommandAction, CommandJump, Delta, FilterAction, NormalAction, VisualAction},
+    actions::{
+        Action, CommandAction, CommandJump, Delta, FilterAction, NormalAction, VisualAction,
+    },
     InputMode, PromptMode,
 };
 use crate::direction::Direction;
@@ -201,9 +203,15 @@ impl Keybinding {
     fn mode_independent_bind(_input_mode: InputMode, event: &mut Event) -> Option<Action> {
         match event {
             Event::Key(key) => match key.code {
-                KeyCode::Char(':') => Some(Action::SwitchMode(InputMode::Command(PromptMode::Command))),
-                KeyCode::Char('+') => Some(Action::SwitchMode(InputMode::Command(PromptMode::NewFilter))),
-                KeyCode::Char('-') => Some(Action::SwitchMode(InputMode::Command(PromptMode::NewLit))),
+                KeyCode::Char(':') => {
+                    Some(Action::SwitchMode(InputMode::Command(PromptMode::Command)))
+                }
+                KeyCode::Char('+') => Some(Action::SwitchMode(InputMode::Command(
+                    PromptMode::NewFilter,
+                ))),
+                KeyCode::Char('-') => {
+                    Some(Action::SwitchMode(InputMode::Command(PromptMode::NewLit)))
+                }
                 KeyCode::Tab => Some(Action::SwitchMode(InputMode::Filter)),
                 KeyCode::Char(c @ ('`' | '~')) => Some(Action::Normal(NormalAction::SwitchActive(
                     Direction::back_if(c == '~'),

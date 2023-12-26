@@ -3,7 +3,7 @@
 
 pub mod segment;
 
-use self::segment::{SegStr, Segment, SegBytes};
+use self::segment::{SegBytes, SegStr, Segment};
 use crate::{components::index::BoxedStream, LineIndex, Result};
 use lru::LruCache;
 use std::{

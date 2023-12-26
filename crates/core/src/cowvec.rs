@@ -65,6 +65,9 @@ impl<T> Drop for RawBuf<T> {
     }
 }
 
+/// An exclusive writer to a `CowVec<T>`.
+///
+/// This is useful for pushing elements to the back of the vector.
 pub struct CowVecWriter<T> {
     buf: Arc<ArcSwap<RawBuf<T>>>,
 }
@@ -74,9 +77,6 @@ where
     T: Copy,
 {
     /// Appends an element to the back of this collection.
-    ///
-    /// If the collection is in a borrowed state, it will copy the data
-    /// underlying the borrowed state and transition to an owned state.
     pub fn push(&mut self, elem: T) {
         let buf = self.buf.load();
         let len = buf.len.load(Ordering::Relaxed);
@@ -160,12 +160,22 @@ impl<T> Deref for CowVecWriter<T> {
 
     #[inline]
     fn deref(&self) -> &Self::Target {
+        // Safety: the writer itself pins the buffer, so it is safe to read
+        //         from it as long as the lifetime prevents the writer from
+        //         growing reallocating the internal buffer.
         let buf = self.buf.load();
         let len = buf.len.load(Ordering::Relaxed);
         unsafe { std::slice::from_raw_parts(buf.as_ptr(), len) }
     }
 }
 
+/// A contiguous, growable, append-only array type, written as `CowVec<T>`.
+///
+/// Cloning this vector will give another read-handle to the same underlying
+/// buffer. This is useful for sharing data between threads.
+///
+/// This vector has **amortized O(1)** `push()` operation and **O(1)** `clone()`
+/// operations.
 #[derive(Clone)]
 pub struct CowVec<T> {
     buf: Arc<ArcSwap<RawBuf<T>>>,
@@ -178,19 +188,22 @@ impl<T> CowVec<T> {
     #[inline]
     pub fn new() -> (Self, CowVecWriter<T>) {
         assert!(std::mem::size_of::<T>() != 0);
-        let buf = Arc::new(ArcSwap::new(Arc::new(RawBuf::empty())));
+        let buf = Arc::new(ArcSwap::from_pointee(RawBuf::empty()));
         (Self { buf: buf.clone() }, CowVecWriter { buf })
     }
 
+    /// Returns the number of elements in the vector, also referred to as its ‘length’.
     pub fn len(&self) -> usize {
         self.read(|slice| slice.len())
     }
 
+    /// Returns true if the vector contains no elements.
     pub fn is_empty(&self) -> bool {
         self.len() == 0
     }
 
-    pub fn read<F, R>(&self, cb: F) -> R
+    #[inline(always)]
+    fn read<F, R>(&self, cb: F) -> R
     where
         F: FnOnce(&[T]) -> R,
     {
@@ -199,9 +212,15 @@ impl<T> CowVec<T> {
         cb(unsafe { std::slice::from_raw_parts(buf.as_ptr(), len) })
     }
 
+    /// Returns a snapshot of the current state of the vector.
+    ///
+    /// This refs/pins the current internal buffer. Users can read
+    /// up to `len()` elements at the time of the snapshot.
     pub fn snapshot(&self) -> CowVecSnapshot<'_, T> {
+        let buf = self.buf.load_full();
         CowVecSnapshot {
-            buf: self.buf.load_full(),
+            len: buf.len.load(Ordering::Relaxed),
+            buf,
             _phantom: PhantomData,
         }
     }
@@ -211,10 +230,12 @@ impl<T> CowVec<T>
 where
     T: Copy,
 {
+    /// Returns the element at the given index, or `None` if out of bounds.
     pub fn get(&self, index: usize) -> Option<T> {
         self.read(|slice| slice.get(index).copied())
     }
 
+    /// Returns the element at the given index.
     pub unsafe fn get_unchecked(&self, index: usize) -> T {
         self.get(index).unwrap_unchecked()
     }
@@ -238,17 +259,18 @@ impl<T: Copy> From<Vec<T>> for CowVec<T> {
         let (ptr, len, cap) = (me.as_mut_ptr(), me.len(), me.capacity());
 
         Self {
-            buf: Arc::new(ArcSwap::new(Arc::new(RawBuf::new(
+            buf: Arc::new(ArcSwap::from_pointee(RawBuf::new(
                 NonNull::new(ptr).unwrap(),
                 len,
                 cap,
-            )))),
+            ))),
         }
     }
 }
 
 pub struct CowVecSnapshot<'a, T> {
     buf: Arc<RawBuf<T>>,
+    len: usize,
     _phantom: PhantomData<&'a ()>,
 }
 
@@ -256,14 +278,19 @@ impl<T> CowVecSnapshot<'_, T>
 where
     T: Copy,
 {
+    /// Returns the element at the given index, or `None` if out of bounds.
     pub fn get(&self, index: usize) -> Option<T> {
         self.deref().get(index).copied()
     }
 
+    /// Returns the element at the given index.
     pub unsafe fn get_unchecked(&self, index: usize) -> T {
         self.get(index).unwrap_unchecked()
     }
 
+    /// Extracts a slice containing the entire vector.
+    ///
+    /// Equivalent to `&s[..]`.
     pub fn as_slice(&self) -> &[T] {
         self
     }
@@ -272,10 +299,11 @@ where
 impl<T> Deref for CowVecSnapshot<'_, T> {
     type Target = [T];
 
-    #[inline]
+    #[inline(always)]
     fn deref(&self) -> &Self::Target {
+        // Safety: the snapshot pins the buffer, so it is safe to read from it
         let buf = &self.buf;
-        let len = buf.len.load(Ordering::Relaxed);
+        let len = self.len;
         unsafe { std::slice::from_raw_parts(buf.as_ptr(), len) }
     }
 }

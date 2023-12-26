@@ -1,8 +1,7 @@
 pub mod buf;
 
 pub mod components;
-// mod cowvec;
-mod cowvec2;
+mod cowvec;
 pub mod err;
 
 pub use buf::{segment::SegStr, SegBuffer};

@@ -60,7 +60,7 @@ pub enum FilterAction {
     ToggleFilter {
         target_view: usize,
         filter_index: usize,
-    }
+    },
 }
 
 pub enum CommandAction {

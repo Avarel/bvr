@@ -1,5 +1,5 @@
 use crate::{
-    cowvec2::{CowVec, CowVecWriter},
+    cowvec::{CowVec, CowVecWriter},
     err::Result,
     LineMatches,
 };

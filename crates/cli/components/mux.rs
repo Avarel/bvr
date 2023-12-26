@@ -1,5 +1,5 @@
-use crate::direction::Direction;
 use super::viewer::Instance;
+use crate::direction::Direction;
 
 #[derive(Clone, Copy)]
 pub enum MultiplexerMode {
