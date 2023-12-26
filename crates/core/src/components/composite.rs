@@ -4,12 +4,12 @@ use crate::{
         CowVec,
     },
     err::Result,
-    InflightMatches,
+    LineMatches,
 };
 use std::sync::Arc;
 
 struct QueueMatch {
-    matches: InflightMatches,
+    matches: LineMatches,
     index: usize,
 }
 
@@ -18,7 +18,7 @@ struct Queues {
 }
 
 impl Queues {
-    fn new(queues: Vec<InflightMatches>) -> Self {
+    fn new(queues: Vec<LineMatches>) -> Self {
         Self {
             queues: queues
                 .into_iter()
@@ -63,10 +63,10 @@ impl Queues {
     }
 }
 
-pub struct InflightCompositeRemote(Arc<InflightVecWriter<usize>>);
+pub struct LineCompositeRemote(Arc<InflightVecWriter<usize>>);
 
-impl InflightCompositeRemote {
-    pub fn compute(self, filters: Vec<InflightMatches>) -> Result<()> {
+impl LineCompositeRemote {
+    pub fn compute(self, filters: Vec<LineMatches>) -> Result<()> {
         let mut queues = Queues::new(filters);
 
         while let Some(line_number) = queues.take_lowest() {
@@ -88,13 +88,13 @@ impl InflightCompositeRemote {
     }
 }
 
-impl InflightComposite {
+impl LineComposite {
     #[inline]
-    pub fn new() -> (Self, InflightCompositeRemote) {
+    pub fn new() -> (Self, LineCompositeRemote) {
         let inner = Arc::new(InflightVecWriter::<usize>::new());
         (
             Self(InflightVec::Incomplete(inner.clone())),
-            InflightCompositeRemote(inner),
+            LineCompositeRemote(inner),
         )
     }
 
@@ -117,4 +117,4 @@ impl InflightComposite {
     }
 }
 
-pub struct InflightComposite(InflightVec<usize>);
+pub struct LineComposite(InflightVec<usize>);

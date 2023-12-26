@@ -9,9 +9,9 @@ use crate::{
 use regex::bytes::Regex;
 use std::sync::Arc;
 
-pub struct InflightMatchRemote(Arc<InflightVecWriter<usize>>);
+pub struct LineMatchRemote(Arc<InflightVecWriter<usize>>);
 
-impl InflightMatchRemote {
+impl LineMatchRemote {
     /// Index a file and load the data into the associated [InflightIndex].
     pub fn search(self, mut iter: ContiguousSegmentIterator, regex: Regex) -> Result<()> {
         while let Some((idx, start, buf)) = iter.next_buf() {
@@ -40,7 +40,7 @@ impl InflightMatchRemote {
     }
 }
 
-impl InflightMatches {
+impl LineMatches {
     #[inline]
     pub fn is_complete(&self) -> bool {
         self.0.is_complete()
@@ -70,15 +70,15 @@ impl InflightMatches {
 }
 
 #[derive(Clone)]
-pub struct InflightMatches(InflightVec<usize>);
+pub struct LineMatches(InflightVec<usize>);
 
-impl InflightMatches {
+impl LineMatches {
     #[inline]
-    pub fn new() -> (Self, InflightMatchRemote) {
+    pub fn new() -> (Self, LineMatchRemote) {
         let inner = Arc::new(InflightVecWriter::<usize>::new());
         (
             Self(InflightVec::Incomplete(inner.clone())),
-            InflightMatchRemote(inner),
+            LineMatchRemote(inner),
         )
     }
 
@@ -104,7 +104,7 @@ impl InflightMatches {
     /// Returns a `Result` containing the `InflightSearch` object
     /// if the internal iterator creation was successful, and an error otherwise.
     pub fn search(buf: &SegBuffer, regex: Regex) -> Result<Self> {
-        let (search, remote) = InflightMatches::new();
+        let (search, remote) = LineMatches::new();
         std::thread::spawn({
             let iter = buf.segment_iter()?;
             move || remote.search(iter, regex)

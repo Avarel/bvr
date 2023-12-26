@@ -4,7 +4,7 @@
 pub mod segment;
 
 use self::segment::{SegStr, Segment, SegBytes};
-use crate::{components::index::BoxedStream, InflightIndex, Result};
+use crate::{components::index::BoxedStream, LineIndex, Result};
 use lru::LruCache;
 use std::{
     fs::File,
@@ -22,7 +22,7 @@ use std::{
 /// It contains the [BufferIndex] and the internal representation of the segments.
 pub struct SegBuffer {
     /// The [BufferIndex] of this buffer.
-    index: InflightIndex,
+    index: LineIndex,
     /// The internal representation of this buffer.
     repr: BufferRepr,
 }
@@ -86,7 +86,7 @@ impl BufferRepr {
 
 impl SegBuffer {
     pub fn read_file(file: File, seg_count: NonZeroUsize) -> Result<Self> {
-        let (index, indexer) = InflightIndex::new();
+        let (index, indexer) = LineIndex::new();
         std::thread::spawn({
             let file = file.try_clone()?;
             move || indexer.index_file(file)
@@ -103,7 +103,7 @@ impl SegBuffer {
     }
 
     pub fn read_stream(stream: BoxedStream) -> Self {
-        let (index, indexer) = InflightIndex::new();
+        let (index, indexer) = LineIndex::new();
         let (sx, rx) = std::sync::mpsc::channel();
         std::thread::spawn(move || indexer.index_stream(stream, sx));
 
@@ -117,7 +117,7 @@ impl SegBuffer {
     }
 
     pub fn read_file_complete(file: File, seg_count: NonZeroUsize) -> Result<Self> {
-        let (index, indexer) = InflightIndex::new();
+        let (index, indexer) = LineIndex::new();
         indexer.index_file(file.try_clone()?)?;
 
         Ok(Self {
@@ -131,7 +131,7 @@ impl SegBuffer {
     }
 
     pub fn read_stream_complete(stream: BoxedStream) -> Result<Self> {
-        let (index, indexer) = InflightIndex::new();
+        let (index, indexer) = LineIndex::new();
         let (sx, rx) = std::sync::mpsc::channel();
         indexer.index_stream(stream, sx)?;
 
@@ -160,7 +160,7 @@ impl SegBuffer {
 
     /// Return the [InflightIndex] of this [SegBuffer].
     #[inline]
-    pub fn index(&self) -> &InflightIndex {
+    pub fn index(&self) -> &LineIndex {
         &self.index
     }
 
@@ -237,7 +237,7 @@ impl SegBuffer {
 }
 
 pub struct ContiguousSegmentIterator {
-    index: InflightIndex,
+    index: LineIndex,
     repr: BufferRepr,
     line_range: Range<usize>,
     // Intermediate buffer for the iterator to borrow from
@@ -249,7 +249,7 @@ pub struct ContiguousSegmentIterator {
 }
 
 impl ContiguousSegmentIterator {
-    fn new(index: InflightIndex, line_range: Range<usize>, repr: BufferRepr) -> Self {
+    fn new(index: LineIndex, line_range: Range<usize>, repr: BufferRepr) -> Self {
         Self {
             line_range,
             index,
@@ -274,7 +274,7 @@ impl ContiguousSegmentIterator {
     /// - `Some((&Idx, u64, &[u8]))`: A tuple containing the index, starting data
     ///                               position, and a slice of the buffer data.
     /// - `None`: If there are no more buffers available.
-    pub fn next_buf(&mut self) -> Option<(&InflightIndex, u64, &[u8])> {
+    pub fn next_buf(&mut self) -> Option<(&LineIndex, u64, &[u8])> {
         if self.line_range.is_empty() {
             return None;
         }

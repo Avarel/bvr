@@ -1,10 +1,10 @@
-use bvr_core::InflightIndex;
+use bvr_core::LineIndex;
 
 fn main() {
     let file = std::fs::File::open("./tests/test_5000000.log").unwrap();
 
     let start = std::time::Instant::now();
-    let index = InflightIndex::new_complete(file).unwrap();
+    let index = LineIndex::new_complete(file).unwrap();
     dbg!(index.line_count());
 
     let elapsed = start.elapsed();

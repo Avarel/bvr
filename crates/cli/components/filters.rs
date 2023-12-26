@@ -4,11 +4,11 @@ use super::{
 };
 use crate::{colors, direction::Direction};
 use bitflags::bitflags;
-use bvr_core::{InflightComposite, InflightMatches, SegBuffer};
+use bvr_core::{LineComposite, LineMatches, SegBuffer};
 use ratatui::style::Color;
 use regex::bytes::Regex;
 
-type SearchResults = bvr_core::InflightMatches;
+type SearchResults = bvr_core::LineMatches;
 
 #[derive(Clone)]
 enum FilterRepr {
@@ -74,10 +74,10 @@ impl Filter {
         }
     }
 
-    fn arc_inflight_matches(&self) -> InflightMatches {
+    fn arc_inflight_matches(&self) -> LineMatches {
         match &self.repr {
-            FilterRepr::All => InflightMatches::empty(),
-            FilterRepr::Bookmarks(mask) => InflightMatches::complete_from_vec(mask.lines.clone()),
+            FilterRepr::All => LineMatches::empty(),
+            FilterRepr::Bookmarks(mask) => LineMatches::complete_from_vec(mask.lines.clone()),
             FilterRepr::Search(mask) => mask.clone(),
         }
     }
@@ -122,7 +122,7 @@ impl Bookmarks {
 }
 
 pub struct Filterer {
-    pub(super) composite: InflightComposite,
+    pub(super) composite: LineComposite,
     pub viewport: Viewport,
     cursor: CursorState,
     pub(crate) filters: Filters,
@@ -229,7 +229,7 @@ pub struct FilterData<'a> {
 impl Filterer {
     pub fn new() -> Self {
         Self {
-            composite: InflightComposite::empty(),
+            composite: LineComposite::empty(),
             viewport: Viewport::new(),
             cursor: CursorState::new(),
             filters: Filters::new(),
@@ -290,10 +290,10 @@ impl Filterer {
 
     pub fn compute_composite(&mut self) {
         if self.filters.all().is_enabled() {
-            self.composite = InflightComposite::empty();
+            self.composite = LineComposite::empty();
             return;
         }
-        let (composite, remote) = InflightComposite::new();
+        let (composite, remote) = LineComposite::new();
         std::thread::spawn({
             let filters = self
                 .filters

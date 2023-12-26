@@ -37,9 +37,9 @@ pub type BoxedStream = Box<dyn std::io::Read + Send>;
 
 /// A remote type that can be used to set off the indexing process of a
 /// file or a stream.
-pub struct InflightIndexRemote(Arc<InflightVecWriter<u64>>);
+pub struct LineIndexRemote(Arc<InflightVecWriter<u64>>);
 
-impl InflightIndexRemote {
+impl LineIndexRemote {
     pub fn index_file(self, file: File) -> Result<()> {
         // Build index
         let (sx, rx) = std::sync::mpsc::sync_channel(4);
@@ -130,15 +130,15 @@ impl InflightIndexRemote {
 }
 
 #[derive(Clone)]
-pub struct InflightIndex(InflightVec<u64>);
+pub struct LineIndex(InflightVec<u64>);
 
-impl InflightIndex {
+impl LineIndex {
     #[inline]
-    pub fn new() -> (Self, InflightIndexRemote) {
+    pub fn new() -> (Self, LineIndexRemote) {
         let inner = Arc::new(InflightVecWriter::<u64>::new());
         (
             Self(InflightVec::Incomplete(inner.clone())),
-            InflightIndexRemote(inner),
+            LineIndexRemote(inner),
         )
     }
 

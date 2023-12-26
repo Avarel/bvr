@@ -2,6 +2,6 @@ pub mod composite;
 pub mod index;
 pub mod matches;
 
-pub use composite::InflightComposite;
-pub use index::InflightIndex;
-pub use matches::InflightMatches;
+pub use composite::LineComposite;
+pub use index::LineIndex;
+pub use matches::LineMatches;
