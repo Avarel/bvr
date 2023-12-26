@@ -71,12 +71,7 @@ impl Instance {
         viewport_height: usize,
         viewport_width: usize,
     ) -> Vec<LineData> {
-        self.buf.try_finalize();
-        self.filterer.filters.try_finalize();
-        self.filterer.composite.try_finalize();
-
         self.viewport.fit_view(viewport_height, viewport_width);
-
         self.viewport.update_end(self.visible_line_count());
 
         let filters = self.filterer.filters.iter_active().collect::<Vec<_>>();

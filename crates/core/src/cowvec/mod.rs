@@ -150,18 +150,6 @@ impl<T> CowVec<T> {
     }
 }
 
-#[macro_export]
-macro_rules! cowvec {
-    () => (
-        $crate::vec::CowVec::new()
-    );
-    ($($x:expr),+ $(,)?) => ({
-        let mut vec = $crate::cowvec::CowVec::new();
-        $(vec.push($x);)+
-        vec
-    });
-}
-
 impl<T: Copy> From<Vec<T>> for CowVec<T> {
     fn from(vec: Vec<T>) -> Self {
         let mut me = std::mem::ManuallyDrop::new(vec);

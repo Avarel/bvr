@@ -1,11 +1,11 @@
 use crate::{
     buf::segment::{Segment, SegmentMut},
-    cowvec::inflight::{InflightVec, InflightVecWriter},
+    cowvec2::{CowVec, CowVecWriter},
     err::{Error, Result},
 };
+use std::fs::File;
 use std::sync::mpsc::{Receiver, Sender};
 use std::thread::JoinHandle;
-use std::{fs::File, sync::Arc};
 
 struct IndexingTask {
     /// This is the sender side of the channel that receives byte indexes of `\n`.
@@ -37,17 +37,19 @@ pub type BoxedStream = Box<dyn std::io::Read + Send>;
 
 /// A remote type that can be used to set off the indexing process of a
 /// file or a stream.
-pub struct LineIndexRemote(Arc<InflightVecWriter<u64>>);
+pub struct LineIndexRemote {
+    buf: CowVecWriter<u64>,
+}
 
 impl LineIndexRemote {
-    pub fn index_file(self, file: File) -> Result<()> {
+    pub fn index_file(mut self, file: File) -> Result<()> {
         // Build index
         let (sx, rx) = std::sync::mpsc::sync_channel(4);
 
         let len = file.metadata()?.len();
         let file = file.try_clone()?;
 
-        self.0.write(|inner| inner.push(0));
+        self.buf.push(0);
 
         // We have up to 3 primary holders:
         // - Someone who needs to read the inflight
@@ -60,11 +62,10 @@ impl LineIndexRemote {
 
         // Indexing worker
         let spawner: JoinHandle<Result<()>> = std::thread::spawn({
-            let r = self.0.clone();
             move || {
                 let mut curr = 0;
 
-                while curr < len && Arc::strong_count(&r) >= 3 {
+                while curr < len {
                     let end = (curr + Segment::MAX_SIZE).min(len);
                     let (task, task_rx) = IndexingTask::new(&file, curr, end)?;
                     sx.send(task_rx).unwrap();
@@ -80,19 +81,24 @@ impl LineIndexRemote {
 
         while let Ok(task_rx) = rx.recv() {
             while let Ok(line_data) = task_rx.recv() {
-                self.0.write(|inner| inner.push(line_data));
+                self.buf.push(line_data);
             }
         }
 
         spawner.join().unwrap().unwrap();
-        self.0.write(|inner| inner.push(len));
+        self.buf.push(len);
+
         Ok(())
     }
 
-    pub fn index_stream(self, mut stream: BoxedStream, outgoing: Sender<Segment>) -> Result<()> {
+    pub fn index_stream(
+        mut self,
+        mut stream: BoxedStream,
+        outgoing: Sender<Segment>,
+    ) -> Result<()> {
         let mut len = 0;
 
-        self.0.write(|inner| inner.push(0));
+        self.buf.push(0);
 
         loop {
             let mut segment = SegmentMut::new(len)?;
@@ -105,12 +111,10 @@ impl LineIndexRemote {
                 }
             }
 
-            self.0.write(|inner| {
-                for i in memchr::memchr_iter(b'\n', &segment) {
-                    let line_data = len + i as u64;
-                    inner.push(line_data + 1);
-                }
-            });
+            for i in memchr::memchr_iter(b'\n', &segment) {
+                let line_data = len + i as u64;
+                self.buf.push(line_data + 1);
+            }
 
             outgoing
                 .send(segment.into_read_only()?)
@@ -123,23 +127,21 @@ impl LineIndexRemote {
             len += buf_len as u64;
         }
 
-        self.0.write(|inner| inner.push(len));
-        self.0.mark_complete();
+        self.buf.push(len);
         Ok(())
     }
 }
 
 #[derive(Clone)]
-pub struct LineIndex(InflightVec<u64>);
+pub struct LineIndex {
+    buf: CowVec<u64>,
+}
 
 impl LineIndex {
     #[inline]
     pub fn new() -> (Self, LineIndexRemote) {
-        let inner = Arc::new(InflightVecWriter::<u64>::new());
-        (
-            Self(InflightVec::Incomplete(inner.clone())),
-            LineIndexRemote(inner),
-        )
+        let (buf, writer) = CowVec::new();
+        (Self { buf }, LineIndexRemote { buf: writer })
     }
 
     pub fn new_complete(file: File) -> Result<Self> {
@@ -149,43 +151,37 @@ impl LineIndex {
     }
 
     pub fn line_count(&self) -> usize {
-        self.0.read(|index| index.len().saturating_sub(1))
+        self.buf.len().saturating_sub(1)
     }
 
     pub fn data_of_line(&self, line_number: usize) -> Option<u64> {
-        self.0.read(|index| index.get(line_number))
+        self.buf.get(line_number)
     }
 
     pub fn line_of_data(&self, key: u64) -> Option<usize> {
-        self.0.read(|index| {
-            // Safety: this code was pulled from Vec::binary_search_by
-            let mut size = index.len() - 1;
-            let mut left = 0;
-            let mut right = size;
-            while left < right {
-                let mid = left + size / 2;
+        // Safety: this code was pulled from Vec::binary_search_by
+        let buf = self.buf.snapshot();
+        let mut size = buf.len() - 1;
+        let mut left = 0;
+        let mut right = size;
+        while left < right {
+            let mid = left + size / 2;
 
-                // mid must be less than size, which is self.line_index.len() - 1
-                let start = unsafe { *index.get_unchecked(mid) };
-                let end = unsafe { *index.get_unchecked(mid + 1) };
+            // mid must be less than size, which is self.line_index.len() - 1
+            let start = unsafe { buf.get_unchecked(mid) };
+            let end = unsafe { buf.get_unchecked(mid + 1) };
 
-                if end <= key {
-                    left = mid + 1;
-                } else if start > key {
-                    right = mid;
-                } else {
-                    return Some(mid);
-                }
-
-                size = right - left;
+            if end <= key {
+                left = mid + 1;
+            } else if start > key {
+                right = mid;
+            } else {
+                return Some(mid);
             }
 
-            None
-        })
-    }
+            size = right - left;
+        }
 
-    #[inline]
-    pub fn try_finalize(&mut self) -> bool {
-        self.0.try_finalize()
+        None
     }
 }

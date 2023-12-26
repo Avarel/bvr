@@ -1,100 +1,110 @@
 use crate::{
     buf::ContiguousSegmentIterator,
-    cowvec::{
-        inflight::{InflightVec, InflightVecWriter},
-        CowVec,
-    },
+    cowvec2::{CowVec, CowVecWriter},
     Result, SegBuffer,
 };
 use regex::bytes::Regex;
-use std::sync::Arc;
+use std::sync::{atomic::AtomicBool, Arc};
 
-pub struct LineMatchRemote(Arc<InflightVecWriter<usize>>);
+pub struct LineMatchRemote {
+    buf: CowVecWriter<usize>,
+    complete: Arc<AtomicBool>,
+}
 
 impl LineMatchRemote {
     /// Index a file and load the data into the associated [InflightIndex].
-    pub fn search(self, mut iter: ContiguousSegmentIterator, regex: Regex) -> Result<()> {
+    pub fn search(mut self, mut iter: ContiguousSegmentIterator, regex: Regex) -> Result<()> {
         while let Some((idx, start, buf)) = iter.next_buf() {
-            if Arc::strong_count(&self.0) <= 1 {
-                break;
-            }
+            for res in regex.find_iter(buf) {
+                let match_start = res.start() as u64 + start;
 
-            self.0.write(|inner| {
-                for res in regex.find_iter(buf) {
-                    let match_start = res.start() as u64 + start;
+                let line_number = idx.line_of_data(match_start).unwrap();
 
-                    let line_number = idx.line_of_data(match_start).unwrap();
-
-                    if inner.last() == Some(&line_number) {
-                        continue;
-                    } else if let Some(&last) = inner.last() {
-                        debug_assert!(line_number > last);
-                    }
-
-                    inner.push(line_number)
+                if self.buf.last() == Some(&line_number) {
+                    continue;
+                } else if let Some(&last) = self.buf.last() {
+                    debug_assert!(line_number > last);
                 }
-            });
+
+                self.buf.push(line_number)
+            }
         }
-        self.0.mark_complete();
+        self.mark_complete();
         Ok(())
+    }
+
+    fn mark_complete(&self) {
+        self.complete
+            .store(true, std::sync::atomic::Ordering::Relaxed);
     }
 }
 
 impl LineMatches {
     #[inline]
     pub fn is_complete(&self) -> bool {
-        self.0.is_complete()
+        self.complete.load(std::sync::atomic::Ordering::Relaxed)
     }
 
     pub fn get(&self, idx: usize) -> Option<usize> {
-        self.0.read(|index| index.get(idx))
+        self.buf.get(idx)
     }
 
     pub fn has_line(&self, line_number: usize) -> bool {
-        self.0.read(|index| {
-            let slice = index.as_slice();
-            if let &[first, .., last] = slice {
+        let slice = self.buf.snapshot();
+        match slice.as_slice() {
+            &[first, .., last] => {
                 if (first..=last).contains(&line_number) {
                     return slice.binary_search(&line_number).is_ok();
                 }
-            } else if let &[item] = slice {
-                return item == line_number;
             }
-            false
-        })
+            &[item] => return item == line_number,
+            _ => (),
+        }
+        false
     }
 
     pub fn len(&self) -> usize {
-        self.0.read(|index| index.len())
+        self.buf.len()
     }
 }
 
 #[derive(Clone)]
-pub struct LineMatches(InflightVec<usize>);
+pub struct LineMatches {
+    buf: CowVec<usize>,
+    complete: Arc<AtomicBool>,
+}
 
 impl LineMatches {
     #[inline]
     pub fn new() -> (Self, LineMatchRemote) {
-        let inner = Arc::new(InflightVecWriter::<usize>::new());
+        let (buf, writer) = CowVec::new();
+        let complete = Arc::new(AtomicBool::new(false));
         (
-            Self(InflightVec::Incomplete(inner.clone())),
-            LineMatchRemote(inner),
+            Self {
+                buf,
+                complete: complete.clone(),
+            },
+            LineMatchRemote {
+                buf: writer,
+                complete,
+            },
         )
     }
 
     #[inline]
     pub fn complete_from_vec(inner: Vec<usize>) -> Self {
-        Self(InflightVec::Complete(CowVec::from(inner)))
-    }
-
-    #[inline]
-    pub fn complete(inner: CowVec<usize>) -> Self {
-        Self(InflightVec::Complete(inner))
+        Self {
+            buf: CowVec::from(inner),
+            complete: Arc::new(AtomicBool::new(true)),
+        }
     }
 
     #[inline]
     pub fn empty() -> Self {
-        Self::complete(CowVec::new())
+        Self {
+            buf: CowVec::new().0,
+            complete: Arc::new(AtomicBool::new(true)),
+        }
     }
 
     /// Searches for a regular expression pattern in a segmented buffer.
@@ -110,10 +120,5 @@ impl LineMatches {
             move || remote.search(iter, regex)
         });
         Ok(search)
-    }
-
-    #[inline]
-    pub fn try_finalize(&mut self) -> bool {
-        self.0.try_finalize()
     }
 }

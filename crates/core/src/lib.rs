@@ -1,7 +1,7 @@
 pub mod buf;
 
 pub mod components;
-pub mod cowvec;
+// mod cowvec;
 mod cowvec2;
 pub mod err;
 

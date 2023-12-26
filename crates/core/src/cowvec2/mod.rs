@@ -1,3 +1,4 @@
+use arc_swap::ArcSwap;
 use std::{
     alloc::{self, Layout},
     marker::PhantomData,
@@ -8,8 +9,6 @@ use std::{
         Arc,
     },
 };
-
-use arc_swap::ArcSwap;
 
 struct RawBuf<T> {
     ptr: NonNull<T>,
@@ -80,7 +79,7 @@ where
     /// underlying the borrowed state and transition to an owned state.
     pub fn push(&mut self, elem: T) {
         let buf = self.buf.load();
-        let len = buf.len.load(Ordering::SeqCst);
+        let len = buf.len.load(Ordering::Relaxed);
         let cap = buf.cap;
         if len == cap {
             // Safety: If this runs, then buf will no longer be borrowed from
@@ -95,14 +94,14 @@ where
 
             // Can't fail, we'll OOM first.
             // There should be no other writers, but lets be safe.
-            buf.len.store(len + 1, Ordering::Release);
+            buf.len.store(len + 1, Ordering::Relaxed);
         }
     }
 
     /// Grow will return a buffer that the caller can write to.
     fn grow(&mut self) -> Arc<RawBuf<T>> {
         let buf = self.buf.load();
-        let len = buf.len.load(Ordering::SeqCst);
+        let len = buf.len.load(Ordering::Relaxed);
         let cap = buf.cap;
 
         // since we set the capacity to usize::MAX when T has size 0,
@@ -156,6 +155,17 @@ where
     }
 }
 
+impl<T> Deref for CowVecWriter<T> {
+    type Target = [T];
+
+    #[inline]
+    fn deref(&self) -> &Self::Target {
+        let buf = self.buf.load();
+        let len = buf.len.load(Ordering::Relaxed);
+        unsafe { std::slice::from_raw_parts(buf.as_ptr(), len) }
+    }
+}
+
 #[derive(Clone)]
 pub struct CowVec<T> {
     buf: Arc<ArcSwap<RawBuf<T>>>,
@@ -185,7 +195,7 @@ impl<T> CowVec<T> {
         F: FnOnce(&[T]) -> R,
     {
         let buf = self.buf.load();
-        let len = buf.len.load(Ordering::SeqCst);
+        let len = buf.len.load(Ordering::Relaxed);
         cb(unsafe { std::slice::from_raw_parts(buf.as_ptr(), len) })
     }
 
@@ -204,9 +214,40 @@ where
     pub fn get(&self, index: usize) -> Option<T> {
         self.read(|slice| slice.get(index).copied())
     }
+
+    pub unsafe fn get_unchecked(&self, index: usize) -> T {
+        self.get(index).unwrap_unchecked()
+    }
 }
 
-struct CowVecSnapshot<'a, T> {
+#[macro_export]
+macro_rules! cowvec {
+    () => (
+        $crate::vec::CowVec::new()
+    );
+    ($($x:expr),+ $(,)?) => ({
+        let mut vec = $crate::cowvec::CowVec::new();
+        $(vec.push($x);)+
+        vec
+    });
+}
+
+impl<T: Copy> From<Vec<T>> for CowVec<T> {
+    fn from(vec: Vec<T>) -> Self {
+        let mut me = std::mem::ManuallyDrop::new(vec);
+        let (ptr, len, cap) = (me.as_mut_ptr(), me.len(), me.capacity());
+
+        Self {
+            buf: Arc::new(ArcSwap::new(Arc::new(RawBuf::new(
+                NonNull::new(ptr).unwrap(),
+                len,
+                cap,
+            )))),
+        }
+    }
+}
+
+pub struct CowVecSnapshot<'a, T> {
     buf: Arc<RawBuf<T>>,
     _phantom: PhantomData<&'a ()>,
 }
@@ -218,6 +259,14 @@ where
     pub fn get(&self, index: usize) -> Option<T> {
         self.deref().get(index).copied()
     }
+
+    pub unsafe fn get_unchecked(&self, index: usize) -> T {
+        self.get(index).unwrap_unchecked()
+    }
+
+    pub fn as_slice(&self) -> &[T] {
+        self
+    }
 }
 
 impl<T> Deref for CowVecSnapshot<'_, T> {
@@ -226,7 +275,7 @@ impl<T> Deref for CowVecSnapshot<'_, T> {
     #[inline]
     fn deref(&self) -> &Self::Target {
         let buf = &self.buf;
-        let len = buf.len.load(Ordering::SeqCst);
+        let len = buf.len.load(Ordering::Relaxed);
         unsafe { std::slice::from_raw_parts(buf.as_ptr(), len) }
     }
 }
@@ -248,6 +297,29 @@ mod test {
 
     #[test]
     fn test_miri_push_and_concurrent_clone() {
+        let (arr, mut writer) = CowVec::new();
+        let handle = std::thread::spawn({
+            move || {
+                for _ in 0..10 {
+                    for i in 0..1000 {
+                        writer.push(i);
+                    }
+                    std::thread::sleep(std::time::Duration::from_millis(100));
+                }
+            }
+        });
+
+        while !handle.is_finished() {
+            for i in 0..arr.len() {
+                assert_eq!(Some(i % 1000), arr.get(i));
+            }
+        }
+
+        handle.join().unwrap();
+    }
+
+    #[test]
+    fn test_miri_push_and_concurrent_clone_snapshot() {
         let (arr, mut writer) = CowVec::new();
         let handle = std::thread::spawn({
             move || {

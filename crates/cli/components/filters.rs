@@ -52,12 +52,6 @@ impl Filter {
         self.enabled = !self.enabled;
     }
 
-    pub fn try_finalize(&mut self) {
-        if let FilterRepr::Search(lines) = &mut self.repr {
-            lines.try_finalize();
-        }
-    }
-
     pub fn has_line(&self, line_number: usize) -> bool {
         match &self.repr {
             FilterRepr::All => true,
@@ -160,12 +154,6 @@ impl Filters {
             .chain(self.searches.iter_mut())
     }
 
-    pub fn try_finalize(&mut self) {
-        for filter in self.iter_mut() {
-            filter.try_finalize();
-        }
-    }
-
     pub fn iter_active(&self) -> impl Iterator<Item = &Filter> {
         self.iter().filter(|filter| filter.is_enabled())
     }
@@ -244,8 +232,6 @@ impl Filterer {
         &mut self,
         viewport_height: usize,
     ) -> impl Iterator<Item = FilterData> {
-        self.filters.try_finalize();
-
         self.viewport.update_end(self.filters.len());
         self.viewport.fit_view(viewport_height, 0);
 

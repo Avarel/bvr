@@ -144,14 +144,6 @@ impl SegBuffer {
         })
     }
 
-    /// Attempt to finalize the inner [InflightIndex].
-    ///
-    /// See [`InflightIndex::try_finalize()`] for more information.
-    #[inline]
-    pub fn try_finalize(&mut self) -> bool {
-        self.index.try_finalize()
-    }
-
     /// Return the line count of this [SegBuffer].
     #[inline]
     pub fn line_count(&self) -> usize {

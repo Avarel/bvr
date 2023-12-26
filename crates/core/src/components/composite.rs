@@ -1,12 +1,8 @@
 use crate::{
-    cowvec::{
-        inflight::{InflightVec, InflightVecWriter},
-        CowVec,
-    },
+    cowvec2::{CowVec, CowVecWriter},
     err::Result,
     LineMatches,
 };
-use std::sync::Arc;
 
 struct QueueMatch {
     matches: LineMatches,
@@ -63,27 +59,22 @@ impl Queues {
     }
 }
 
-pub struct LineCompositeRemote(Arc<InflightVecWriter<usize>>);
+pub struct LineCompositeRemote {
+    buf: CowVecWriter<usize>,
+}
 
 impl LineCompositeRemote {
-    pub fn compute(self, filters: Vec<LineMatches>) -> Result<()> {
+    pub fn compute(mut self, filters: Vec<LineMatches>) -> Result<()> {
         let mut queues = Queues::new(filters);
 
         while let Some(line_number) = queues.take_lowest() {
-            if Arc::strong_count(&self.0) < 2 {
-                break;
+            if self.buf.last() == Some(&line_number) {
+                continue;
+            } else if let Some(&last) = self.buf.last() {
+                debug_assert!(line_number > last);
             }
-            self.0.write(|inner| {
-                if inner.last() == Some(&line_number) {
-                    return;
-                } else if let Some(&last) = inner.last() {
-                    debug_assert!(line_number > last);
-                }
-                inner.push(line_number)
-            });
+            self.buf.push(line_number);
         }
-
-        self.0.mark_complete();
         Ok(())
     }
 }
@@ -91,30 +82,24 @@ impl LineCompositeRemote {
 impl LineComposite {
     #[inline]
     pub fn new() -> (Self, LineCompositeRemote) {
-        let inner = Arc::new(InflightVecWriter::<usize>::new());
-        (
-            Self(InflightVec::Incomplete(inner.clone())),
-            LineCompositeRemote(inner),
-        )
+        let (buf, writer) = CowVec::new();
+        (Self { buf }, LineCompositeRemote { buf: writer })
     }
 
     #[inline]
     pub fn empty() -> Self {
-        Self(InflightVec::Complete(CowVec::new()))
+        Self::new().0
     }
 
     pub fn len(&self) -> usize {
-        self.0.read(|v| v.len())
+        self.buf.len()
     }
 
     pub fn get(&self, index: usize) -> Option<usize> {
-        self.0.read(|v| v.get(index))
-    }
-
-    #[inline]
-    pub fn try_finalize(&mut self) -> bool {
-        self.0.try_finalize()
+        self.buf.get(index)
     }
 }
 
-pub struct LineComposite(InflightVec<usize>);
+pub struct LineComposite {
+    buf: CowVec<usize>,
+}
