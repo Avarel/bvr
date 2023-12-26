@@ -59,7 +59,7 @@ impl Queues {
     }
 }
 
-pub struct LineCompositeRemote {
+struct LineCompositeRemote {
     buf: CowVecWriter<usize>,
 }
 
@@ -68,9 +68,10 @@ impl LineCompositeRemote {
         let mut queues = Queues::new(filters);
 
         while let Some(line_number) = queues.take_lowest() {
-            if self.buf.last() == Some(&line_number) {
-                continue;
-            } else if let Some(&last) = self.buf.last() {
+            if let Some(&last) = self.buf.last() {
+                if last == line_number {
+                    continue;
+                } 
                 debug_assert!(line_number > last);
             }
             self.buf.push(line_number);
@@ -81,14 +82,17 @@ impl LineCompositeRemote {
 
 impl LineComposite {
     #[inline]
-    pub fn new() -> (Self, LineCompositeRemote) {
+    pub fn new(filters: Vec<LineMatches>) -> Self {
         let (buf, writer) = CowVec::new();
-        (Self { buf }, LineCompositeRemote { buf: writer })
+        std::thread::spawn(move || {
+            LineCompositeRemote { buf: writer }.compute(filters)
+        });
+        Self { buf }
     }
 
     #[inline]
     pub fn empty() -> Self {
-        Self::new().0
+        Self::new(Vec::new())
     }
 
     pub fn len(&self) -> usize {

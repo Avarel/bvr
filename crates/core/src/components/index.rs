@@ -37,7 +37,7 @@ pub type BoxedStream = Box<dyn std::io::Read + Send>;
 
 /// A remote type that can be used to set off the indexing process of a
 /// file or a stream.
-pub struct LineIndexRemote {
+struct LineIndexRemote {
     buf: CowVecWriter<u64>,
 }
 
@@ -132,6 +132,8 @@ impl LineIndexRemote {
     }
 }
 
+
+
 #[derive(Clone)]
 pub struct LineIndex {
     buf: CowVec<u64>,
@@ -139,15 +141,31 @@ pub struct LineIndex {
 
 impl LineIndex {
     #[inline]
-    pub fn new() -> (Self, LineIndexRemote) {
+    pub fn read_file(file: File) -> Self {
         let (buf, writer) = CowVec::new();
-        (Self { buf }, LineIndexRemote { buf: writer })
+        std::thread::spawn(move || LineIndexRemote { buf: writer }.index_file(file));
+        Self { buf }
     }
 
-    pub fn new_complete(file: File) -> Result<Self> {
-        let (index, remote) = Self::new();
-        remote.index_file(file)?;
-        Ok(index)
+    #[inline]
+    pub fn read_stream(stream: BoxedStream, outgoing: Sender<Segment>) -> Self {
+        let (buf, writer) = CowVec::new();
+        std::thread::spawn(move || LineIndexRemote { buf: writer }.index_stream(stream, outgoing));
+        Self { buf }
+    }
+
+    #[inline]
+    pub fn read_file_complete(file: File) -> Result<Self> {
+        let (buf, writer) = CowVec::new();
+        LineIndexRemote { buf: writer }.index_file(file)?;
+        Ok(Self { buf })
+    }
+
+    #[inline]
+    pub fn read_stream_complete(stream: BoxedStream, outgoing: Sender<Segment>) -> Result<Self> {
+        let (buf, writer) = CowVec::new();
+        LineIndexRemote { buf: writer }.index_stream(stream, outgoing)?;
+        Ok(Self { buf })
     }
 
     pub fn line_count(&self) -> usize {

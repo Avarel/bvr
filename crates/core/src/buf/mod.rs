@@ -86,11 +86,7 @@ impl BufferRepr {
 
 impl SegBuffer {
     pub fn read_file(file: File, seg_count: NonZeroUsize) -> Result<Self> {
-        let (index, indexer) = LineIndex::new();
-        std::thread::spawn({
-            let file = file.try_clone()?;
-            move || indexer.index_file(file)
-        });
+        let index = LineIndex::read_file(file.try_clone()?);
 
         Ok(Self {
             index,
@@ -103,9 +99,8 @@ impl SegBuffer {
     }
 
     pub fn read_stream(stream: BoxedStream) -> Self {
-        let (index, indexer) = LineIndex::new();
         let (sx, rx) = std::sync::mpsc::channel();
-        std::thread::spawn(move || indexer.index_stream(stream, sx));
+        let index = LineIndex::read_stream(stream, sx);
 
         Self {
             index,
@@ -117,9 +112,7 @@ impl SegBuffer {
     }
 
     pub fn read_file_complete(file: File, seg_count: NonZeroUsize) -> Result<Self> {
-        let (index, indexer) = LineIndex::new();
-        indexer.index_file(file.try_clone()?)?;
-
+        let index = LineIndex::read_file_complete(file.try_clone()?)?;
         Ok(Self {
             index,
             repr: BufferRepr::File {
@@ -131,9 +124,8 @@ impl SegBuffer {
     }
 
     pub fn read_stream_complete(stream: BoxedStream) -> Result<Self> {
-        let (index, indexer) = LineIndex::new();
         let (sx, rx) = std::sync::mpsc::channel();
-        indexer.index_stream(stream, sx)?;
+        let index = LineIndex::read_stream_complete(stream, sx)?;
 
         Ok(Self {
             index,
@@ -229,7 +221,7 @@ impl SegBuffer {
 }
 
 pub struct ContiguousSegmentIterator {
-    index: LineIndex,
+    pub index: LineIndex,
     repr: BufferRepr,
     line_range: Range<usize>,
     // Intermediate buffer for the iterator to borrow from

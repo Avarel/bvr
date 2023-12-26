@@ -6,7 +6,7 @@ use crate::{
 use regex::bytes::Regex;
 use std::sync::{atomic::AtomicBool, Arc};
 
-pub struct LineMatchRemote {
+struct LineMatchRemote {
     buf: CowVecWriter<usize>,
     complete: Arc<AtomicBool>,
 }
@@ -20,9 +20,10 @@ impl LineMatchRemote {
 
                 let line_number = idx.line_of_data(match_start).unwrap();
 
-                if self.buf.last() == Some(&line_number) {
-                    continue;
-                } else if let Some(&last) = self.buf.last() {
+                if let Some(&last) = self.buf.last() {
+                    if last == line_number {
+                        continue;
+                    }
                     debug_assert!(line_number > last);
                 }
 
@@ -76,19 +77,20 @@ pub struct LineMatches {
 
 impl LineMatches {
     #[inline]
-    pub fn new() -> (Self, LineMatchRemote) {
+    pub fn new(iter: ContiguousSegmentIterator, regex: Regex) -> Self {
         let (buf, writer) = CowVec::new();
         let complete = Arc::new(AtomicBool::new(false));
-        (
-            Self {
-                buf,
-                complete: complete.clone(),
-            },
-            LineMatchRemote {
-                buf: writer,
-                complete,
-            },
-        )
+        std::thread::spawn({
+            let complete = complete.clone();
+            move || {
+                LineMatchRemote {
+                    buf: writer,
+                    complete,
+                }
+                .search(iter, regex)
+            }
+        });
+        Self { buf, complete }
     }
 
     #[inline]
@@ -114,11 +116,6 @@ impl LineMatches {
     /// Returns a `Result` containing the `InflightSearch` object
     /// if the internal iterator creation was successful, and an error otherwise.
     pub fn search(buf: &SegBuffer, regex: Regex) -> Result<Self> {
-        let (search, remote) = LineMatches::new();
-        std::thread::spawn({
-            let iter = buf.segment_iter()?;
-            move || remote.search(iter, regex)
-        });
-        Ok(search)
+        Ok(Self::new(buf.segment_iter()?, regex))
     }
 }

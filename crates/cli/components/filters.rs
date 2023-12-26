@@ -68,7 +68,7 @@ impl Filter {
         }
     }
 
-    fn arc_inflight_matches(&self) -> LineMatches {
+    fn as_line_matches(&self) -> LineMatches {
         match &self.repr {
             FilterRepr::All => LineMatches::empty(),
             FilterRepr::Bookmarks(mask) => LineMatches::complete_from_vec(mask.lines.clone()),
@@ -279,18 +279,12 @@ impl Filterer {
             self.composite = LineComposite::empty();
             return;
         }
-        let (composite, remote) = LineComposite::new();
-        std::thread::spawn({
-            let filters = self
-                .filters
-                .iter_active()
-                .map(|filter| filter.arc_inflight_matches())
-                .collect();
-            move || {
-                remote.compute(filters).unwrap();
-            }
-        });
-        self.composite = composite;
+        let filters = self
+            .filters
+            .iter_active()
+            .map(|filter| filter.as_line_matches())
+            .collect();
+        self.composite = LineComposite::new(filters);
     }
 
     pub fn move_select(&mut self, dir: Direction, select: bool, delta: usize) {

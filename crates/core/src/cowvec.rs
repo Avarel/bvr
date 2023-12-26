@@ -81,20 +81,17 @@ where
         let buf = self.buf.load();
         let len = buf.len.load(Ordering::Relaxed);
         let cap = buf.cap;
+
+        let push_inner = move |buf: &RawBuf<T>| {
+            unsafe { std::ptr::write(buf.ptr.as_ptr().add(len), elem) }
+            buf.len.store(len + 1, Ordering::Relaxed);
+        };
+
         if len == cap {
             // Safety: If this runs, then buf will no longer be borrowed from
-            push_inner(&self.grow(), len, elem)
+            push_inner(&self.grow())
         } else {
-            push_inner(&buf, len, elem)
-        }
-
-        #[inline(always)]
-        fn push_inner<T: Copy>(buf: &RawBuf<T>, len: usize, elem: T) {
-            unsafe { std::ptr::write_volatile(buf.ptr.as_ptr().add(len), elem) }
-
-            // Can't fail, we'll OOM first.
-            // There should be no other writers, but lets be safe.
-            buf.len.store(len + 1, Ordering::Relaxed);
+            push_inner(&buf)
         }
     }
 
@@ -182,7 +179,7 @@ pub struct CowVec<T> {
 }
 
 impl<T> CowVec<T> {
-    /// Constructs a new, empty `CowVec<T>`.
+    /// Constructs a new, empty `CowVec<T>` with a write handle.
     ///
     /// The vector will not allocate until elements are pushed onto it.
     #[inline]
@@ -190,6 +187,11 @@ impl<T> CowVec<T> {
         assert!(std::mem::size_of::<T>() != 0);
         let buf = Arc::new(ArcSwap::from_pointee(RawBuf::empty()));
         (Self { buf: buf.clone() }, CowVecWriter { buf })
+    }
+
+    /// Constructs a new, empty `CowVec<T>`.
+    pub fn empty() -> Self {
+        Self::new().0
     }
 
     /// Returns the number of elements in the vector, also referred to as its ‘length’.

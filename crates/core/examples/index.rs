@@ -4,7 +4,7 @@ fn main() {
     let file = std::fs::File::open("./tests/test_5000000.log").unwrap();
 
     let start = std::time::Instant::now();
-    let index = LineIndex::new_complete(file).unwrap();
+    let index = LineIndex::read_file_complete(file).unwrap();
     dbg!(index.line_count());
 
     let elapsed = start.elapsed();

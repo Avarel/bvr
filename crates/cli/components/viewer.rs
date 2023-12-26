@@ -80,11 +80,10 @@ impl Instance {
         for index in self.viewport.line_range() {
             let line_number = if self.filterer.filters.all().is_enabled() {
                 index
+            } else if let Some(line_number) = self.filterer.composite.get(index) {
+                line_number
             } else {
-                self.filterer
-                    .composite
-                    .get(index)
-                    .expect("valid index into composite")
+                break;
             };
 
             let Some(data) = self.buf.get_line(line_number) else {
