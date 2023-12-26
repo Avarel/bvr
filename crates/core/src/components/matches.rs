@@ -41,6 +41,7 @@ impl InflightMatchRemote {
 }
 
 impl InflightMatches {
+    #[inline]
     pub fn is_complete(&self) -> bool {
         self.0.is_complete()
     }
@@ -50,8 +51,17 @@ impl InflightMatches {
     }
 
     pub fn has_line(&self, line_number: usize) -> bool {
-        self.0
-            .read(|index| Self::sorted_binary_search(index.as_slice(), line_number))
+        self.0.read(|index| {
+            let slice = index.as_slice();
+            if let &[first, .., last] = slice {
+                if (first..=last).contains(&line_number) {
+                    return slice.binary_search(&line_number).is_ok();
+                }
+            } else if let &[item] = slice {
+                return item == line_number;
+            }
+            false
+        })
     }
 
     pub fn len(&self) -> usize {
@@ -63,6 +73,7 @@ impl InflightMatches {
 pub struct InflightMatches(InflightVec<usize>);
 
 impl InflightMatches {
+    #[inline]
     pub fn new() -> (Self, InflightMatchRemote) {
         let inner = Arc::new(InflightVecWriter::<usize>::new());
         (
@@ -71,14 +82,17 @@ impl InflightMatches {
         )
     }
 
+    #[inline]
     pub fn complete_from_vec(inner: Vec<usize>) -> Self {
         Self(InflightVec::Complete(CowVec::from(inner)))
     }
 
+    #[inline]
     pub fn complete(inner: CowVec<usize>) -> Self {
         Self(InflightVec::Complete(inner))
     }
 
+    #[inline]
     pub fn empty() -> Self {
         Self::complete(CowVec::new())
     }
@@ -98,18 +112,7 @@ impl InflightMatches {
         Ok(search)
     }
 
-    // TODO: generalize this
-    fn sorted_binary_search(slice: &[usize], line_number: usize) -> bool {
-        if let &[first, .., last] = slice {
-            if (first..=last).contains(&line_number) {
-                return slice.binary_search(&line_number).is_ok();
-            }
-        } else if let &[item] = slice {
-            return item == line_number;
-        }
-        false
-    }
-
+    #[inline]
     pub fn try_finalize(&mut self) -> bool {
         self.0.try_finalize()
     }

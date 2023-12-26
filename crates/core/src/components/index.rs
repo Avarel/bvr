@@ -14,6 +14,7 @@ struct IndexingTask {
 }
 
 impl IndexingTask {
+    #[inline]
     fn new(file: &File, start: u64, end: u64) -> Result<(Self, Receiver<u64>)> {
         let segment = Segment::map_file(start..end, file)?;
         let (sx, rx) = std::sync::mpsc::channel();
@@ -132,12 +133,19 @@ impl InflightIndexRemote {
 pub struct InflightIndex(InflightVec<u64>);
 
 impl InflightIndex {
+    #[inline]
     pub fn new() -> (Self, InflightIndexRemote) {
         let inner = Arc::new(InflightVecWriter::<u64>::new());
         (
             Self(InflightVec::Incomplete(inner.clone())),
             InflightIndexRemote(inner),
         )
+    }
+
+    pub fn new_complete(file: File) -> Result<Self> {
+        let (index, remote) = Self::new();
+        remote.index_file(file)?;
+        Ok(index)
     }
 
     pub fn line_count(&self) -> usize {
@@ -176,6 +184,7 @@ impl InflightIndex {
         })
     }
 
+    #[inline]
     pub fn try_finalize(&mut self) -> bool {
         self.0.try_finalize()
     }

@@ -21,10 +21,12 @@ where
 {
     pub const MAX_SIZE: u64 = 1 << 20;
 
+    #[inline]
     pub fn start(&self) -> u64 {
         self.range.start
     }
 
+    #[inline]
     pub fn translate_inner_data_index(&self, start: u64) -> u64 {
         debug_assert!(self.range.start <= start);
         // TODO: make this better... i don't like that its <=
@@ -34,14 +36,17 @@ where
         start - self.range.start
     }
 
+    #[inline]
     pub fn translate_inner_data_range(&self, start: u64, end: u64) -> Range<u64> {
         self.translate_inner_data_index(start)..self.translate_inner_data_index(end)
     }
 
+    #[inline]
     pub fn id_of_data(start: u64) -> usize {
         (start / Self::MAX_SIZE) as usize
     }
 
+    #[inline]
     pub fn data_range_of_id(id: usize) -> Range<u64> {
         let start = id as u64 * Self::MAX_SIZE;
         start..start + Self::MAX_SIZE
@@ -104,10 +109,12 @@ impl Segment {
         Ok(Self { data, range })
     }
 
+    #[inline]
     pub fn get_line(self: &Arc<Self>, range: Range<u64>) -> SegStr {
         SegStr::from_bytes(self.get_bytes(range))
     }
 
+    #[inline]
     pub fn get_bytes(self: &Arc<Self>, range: Range<u64>) -> SegBytes {
         SegBytes::new_borrow(self.clone(), range)
     }
@@ -158,11 +165,13 @@ impl SegBytes {
     }
 
     /// Constructs a string that owns its data.
+    #[inline]
     pub fn new_owned(s: Vec<u8>) -> Self {
         Self(SegBytesRepr::Owned(s))
     }
 
     /// Returns a byte slice of this [SegBytes]'s components.
+    #[inline]
     pub fn as_bytes(&self) -> &[u8] {
         // Safety: We have already checked in the constructor.
         match &self.0 {
@@ -176,6 +185,7 @@ impl SegBytes {
 
 
 impl std::borrow::Borrow<[u8]> for SegBytes {
+    #[inline]
     fn borrow(&self) -> &[u8] {
         self
     }
@@ -184,12 +194,14 @@ impl std::borrow::Borrow<[u8]> for SegBytes {
 impl std::ops::Deref for SegBytes {
     type Target = [u8];
 
+    #[inline]
     fn deref(&self) -> &Self::Target {
         self.as_bytes()
     }
 }
 
 impl std::convert::AsRef<[u8]> for SegBytes {
+    #[inline]
     fn as_ref(&self) -> &[u8] {
         self.as_bytes()
     }
@@ -243,6 +255,7 @@ impl SegStr {
     }
 
     /// Returns a byte slice of this [SegStr]'s components.
+    #[inline]
     pub fn as_bytes(&self) -> &[u8] {
         // Safety: We have already checked in the constructor.
         match &self.0 {
@@ -254,6 +267,7 @@ impl SegStr {
     }
 
     /// Extract a [str] slice backed by the pinned segment data or owned data.
+    #[inline]
     pub fn as_str(&self) -> &str {
         // Safety: we already did utf-8 checking
         unsafe { std::str::from_utf8_unchecked(self.as_bytes()) }
@@ -261,6 +275,7 @@ impl SegStr {
 }
 
 impl std::borrow::Borrow<str> for SegStr {
+    #[inline]
     fn borrow(&self) -> &str {
         self
     }
@@ -269,12 +284,14 @@ impl std::borrow::Borrow<str> for SegStr {
 impl std::ops::Deref for SegStr {
     type Target = str;
 
+    #[inline]
     fn deref(&self) -> &Self::Target {
         self.as_str()
     }
 }
 
 impl std::convert::AsRef<str> for SegStr {
+    #[inline]
     fn as_ref(&self) -> &str {
         self.as_str()
     }

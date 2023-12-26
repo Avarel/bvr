@@ -15,6 +15,7 @@ impl MouseHandler {
         }
     }
 
+    #[inline]
     pub fn publish_event(&mut self, event: Event) {
         self.event = Some(event);
     }
@@ -38,6 +39,7 @@ impl MouseHandler {
         }
     }
 
+    #[inline]
     pub fn extract(&mut self) -> Option<Action> {
         self.event = None;
         self.action.take()

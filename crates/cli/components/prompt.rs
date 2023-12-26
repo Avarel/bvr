@@ -35,10 +35,12 @@ impl PromptApp {
         }
     }
 
+    #[inline(always)]
     pub fn buf(&self) -> &str {
         &self.buf
     }
 
+    #[inline(always)]
     pub fn cursor(&self) -> &Cursor {
         &self.cursor.state
     }

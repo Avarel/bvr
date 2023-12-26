@@ -31,14 +31,17 @@ impl MultiplexerApp {
         }
     }
 
+    #[inline]
     pub fn len(&self) -> usize {
         self.views.len()
     }
 
+    #[inline]
     pub fn is_empty(&self) -> bool {
         self.views.is_empty()
     }
 
+    #[inline]
     pub fn push_viewer(&mut self, viewer: Instance) {
         self.views.push(viewer);
     }

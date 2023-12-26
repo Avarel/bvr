@@ -17,6 +17,7 @@ pub struct Viewport {
 }
 
 impl Viewport {
+    #[inline]
     pub const fn new() -> Self {
         Self {
             vend: 0,
@@ -28,10 +29,12 @@ impl Viewport {
         }
     }
 
+    #[inline(always)]
     pub fn height(&self) -> usize {
         self.height
     }
 
+    #[inline(always)]
     pub fn width(&self) -> usize {
         self.width
     }
@@ -42,11 +45,12 @@ impl Viewport {
         self.fixup();
     }
 
-    pub(crate) fn bottom(&self) -> usize {
+    #[inline]
+    pub fn bottom(&self) -> usize {
         self.top + self.height
     }
 
-    pub(crate) fn fixup(&mut self) {
+    fn fixup(&mut self) {
         if self.top >= self.vend {
             self.top = self.vend.saturating_sub(1);
         }
@@ -89,6 +93,7 @@ impl Viewport {
         }
     }
 
+    #[inline(always)]
     pub fn follow_output(&mut self) {
         self.follow_output = true;
     }
@@ -98,14 +103,17 @@ impl Viewport {
         self.fixup();
     }
 
+    #[inline]
     pub fn line_range(&self) -> Range<usize> {
         self.top..self.bottom().min(self.vend)
     }
 
+    #[inline(always)]
     pub fn left(&self) -> usize {
         self.left
     }
 
+    #[inline(always)]
     pub(crate) fn top(&self) -> usize {
         self.top
     }

@@ -26,10 +26,12 @@ struct RawBuf<T> {
 }
 
 impl<T> RawBuf<T> {
+    #[inline]
     const fn empty() -> Self {
         Self::new(std::ptr::NonNull::dangling(), 0, 0)
     }
 
+    #[inline]
     const fn new(ptr: NonNull<T>, len: usize, cap: usize) -> Self {
         Self {
             ptr,
@@ -41,6 +43,8 @@ impl<T> RawBuf<T> {
 
 impl<T> Deref for RawBuf<T> {
     type Target = NonNull<T>;
+
+    #[inline]
     fn deref(&self) -> &Self::Target {
         &self.ptr
     }
@@ -100,6 +104,7 @@ impl<T> Debug for CowVec<T> {
 }
 
 impl<T> Default for CowVec<T> {
+    #[inline]
     fn default() -> Self {
         Self::new()
     }
@@ -109,6 +114,7 @@ impl<T> CowVec<T> {
     /// Constructs a new, empty `CowVec<T>`.
     ///
     /// The vector will not allocate until elements are pushed onto it.
+    #[inline]
     pub fn new() -> Self {
         assert!(std::mem::size_of::<T>() != 0);
         Self {
@@ -119,11 +125,13 @@ impl<T> CowVec<T> {
     }
 
     /// Returns true if the vector contains no elements.
+    #[inline]
     pub fn is_empty(&self) -> bool {
         self.len() == 0
     }
 
     /// Returns the number of elements in the vector, also referred to as its ‘length’.
+    #[inline]
     pub fn len(&self) -> usize {
         // No matter what len we load, it will be valid since the length
         // is only incremented after the data is written.
@@ -133,6 +141,10 @@ impl<T> CowVec<T> {
         }
     }
 
+    /// Extracts a slice containing the entire vector.
+    ///
+    /// Equivalent to `&s[..]`.
+    #[inline]
     pub fn as_slice(&self) -> &[T] {
         self
     }
@@ -186,6 +198,7 @@ impl<T: Copy> CowVec<T> {
         }
     }
 
+    /// Returns the element at the given index, or `None` if out of bounds.
     pub fn get(&self, index: usize) -> Option<T> {
         self.as_slice().get(index).copied()
     }
@@ -275,6 +288,7 @@ impl<T: Copy> CowVec<T> {
 }
 
 impl<T: Copy> Clone for CowVec<T> {
+    #[inline]
     fn clone(&self) -> Self {
         let (buf, len) = match &self.repr {
             // Safety: Proven by the previous construction of the CowVec::Borrowed state.
@@ -293,6 +307,7 @@ impl<T: Copy> Clone for CowVec<T> {
 impl<T> Deref for CowVec<T> {
     type Target = [T];
 
+    #[inline]
     fn deref(&self) -> &Self::Target {
         let (ptr, len) = match &self.repr {
             // Safety: Proven by the previous construction of the CowVec::Borrowed state.

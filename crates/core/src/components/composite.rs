@@ -89,6 +89,7 @@ impl InflightCompositeRemote {
 }
 
 impl InflightComposite {
+    #[inline]
     pub fn new() -> (Self, InflightCompositeRemote) {
         let inner = Arc::new(InflightVecWriter::<usize>::new());
         (
@@ -97,6 +98,7 @@ impl InflightComposite {
         )
     }
 
+    #[inline]
     pub fn empty() -> Self {
         Self(InflightVec::Complete(CowVec::new()))
     }
@@ -109,6 +111,7 @@ impl InflightComposite {
         self.0.read(|v| v.get(index))
     }
 
+    #[inline]
     pub fn try_finalize(&mut self) -> bool {
         self.0.try_finalize()
     }
