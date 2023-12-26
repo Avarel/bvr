@@ -89,16 +89,14 @@ where
 
         if len == cap {
             // Safety: If this runs, then buf will no longer be borrowed from
-            push_inner(&self.grow())
+            push_inner(&self.grow(&buf, len))
         } else {
             push_inner(&buf)
         }
     }
 
     /// Grow will return a buffer that the caller can write to.
-    fn grow(&mut self) -> Arc<RawBuf<T>> {
-        let buf = self.buf.load();
-        let len = buf.len.load(Ordering::Relaxed);
+    fn grow(&mut self, buf: &Arc<RawBuf<T>>, len: usize) -> Arc<RawBuf<T>> {
         let cap = buf.cap;
 
         // since we set the capacity to usize::MAX when T has size 0,
