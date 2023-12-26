@@ -79,12 +79,12 @@ where
     /// Appends an element to the back of this collection.
     pub fn push(&mut self, elem: T) {
         let buf = self.buf.load();
-        let len = buf.len.load(Ordering::Relaxed);
+        let len = buf.len.load(Ordering::Acquire);
         let cap = buf.cap;
 
         let push_inner = move |buf: &RawBuf<T>| {
             unsafe { std::ptr::write(buf.ptr.as_ptr().add(len), elem) }
-            buf.len.store(len + 1, Ordering::Relaxed);
+            buf.len.store(len + 1, Ordering::Release);
         };
 
         if len == cap {
@@ -161,7 +161,7 @@ impl<T> Deref for CowVecWriter<T> {
         //         from it as long as the lifetime prevents the writer from
         //         growing reallocating the internal buffer.
         let buf = self.buf.load();
-        let len = buf.len.load(Ordering::Relaxed);
+        let len = buf.len.load(Ordering::SeqCst);
         unsafe { std::slice::from_raw_parts(buf.as_ptr(), len) }
     }
 }
@@ -210,7 +210,7 @@ impl<T> CowVec<T> {
         F: FnOnce(&[T]) -> R,
     {
         let buf = self.buf.load();
-        let len = buf.len.load(Ordering::Relaxed);
+        let len = buf.len.load(Ordering::SeqCst);
         cb(unsafe { std::slice::from_raw_parts(buf.as_ptr(), len) })
     }
 
@@ -221,7 +221,7 @@ impl<T> CowVec<T> {
     pub fn snapshot(&self) -> CowVecSnapshot<'_, T> {
         let buf = self.buf.load_full();
         CowVecSnapshot {
-            len: buf.len.load(Ordering::Relaxed),
+            len: buf.len.load(Ordering::SeqCst),
             buf,
             _phantom: PhantomData,
         }
