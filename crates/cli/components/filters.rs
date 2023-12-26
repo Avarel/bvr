@@ -148,12 +148,6 @@ impl Filters {
             .chain(self.searches.iter())
     }
 
-    pub fn iter_mut(&mut self) -> impl Iterator<Item = &mut Filter> {
-        std::iter::once(&mut self.all)
-            .chain(std::iter::once(&mut self.bookmarks))
-            .chain(self.searches.iter_mut())
-    }
-
     pub fn iter_active(&self) -> impl Iterator<Item = &Filter> {
         self.iter().filter(|filter| filter.is_enabled())
     }
@@ -170,12 +164,6 @@ impl Filters {
         }
     }
 
-    #[allow(dead_code)]
-    pub fn all_mut(&mut self) -> &mut Filter {
-        &mut self.all
-    }
-
-    #[allow(dead_code)]
     pub fn bookmarks(&self) -> &Bookmarks {
         // Safety: by construction
         match &self.bookmarks.repr {
@@ -190,10 +178,6 @@ impl Filters {
             FilterRepr::Bookmarks(bookmarks) => bookmarks,
             _ => unsafe { std::hint::unreachable_unchecked() },
         }
-    }
-
-    pub fn clear(&mut self) {
-        self.searches.clear();
     }
 }
 

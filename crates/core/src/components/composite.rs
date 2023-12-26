@@ -65,6 +65,12 @@ struct LineCompositeRemote {
 
 impl LineCompositeRemote {
     pub fn compute(mut self, filters: Vec<LineMatches>) -> Result<()> {
+        let len = filters.iter().map(|filter| filter.len()).sum::<usize>();
+        // Divide by 2 because there may be a lot of overlap, but hopefully this
+        // nonscientific guess is good enough
+        // In the common case, we only have 1 reallocation so its not too bad
+        self.buf.reserve(len / 2);
+
         let mut queues = Queues::new(filters);
 
         while let Some(line_number) = queues.take_lowest() {
@@ -99,6 +105,10 @@ impl LineComposite {
 
     pub fn len(&self) -> usize {
         self.buf.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.buf.is_empty()
     }
 
     pub fn get(&self, index: usize) -> Option<usize> {

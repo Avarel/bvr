@@ -56,13 +56,13 @@ impl LineMatches {
 
     pub fn has_line(&self, line_number: usize) -> bool {
         let slice = self.buf.snapshot();
-        match slice.as_slice() {
-            &[first, .., last] => {
+        match *slice.as_slice() {
+            [first, .., last] => {
                 if (first..=last).contains(&line_number) {
                     return slice.binary_search(&line_number).is_ok();
                 }
             }
-            &[item] => return item == line_number,
+            [item] => return item == line_number,
             _ => (),
         }
         false
@@ -70,6 +70,10 @@ impl LineMatches {
 
     pub fn len(&self) -> usize {
         self.buf.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.buf.is_empty()
     }
 }
 

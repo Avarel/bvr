@@ -42,6 +42,8 @@ struct LineIndexRemote {
 }
 
 impl LineIndexRemote {
+    const BYTES_PER_LINE_HEURISTIC: u64 = 128;
+
     pub fn index_file(mut self, file: File) -> Result<()> {
         // Build index
         let (sx, rx) = std::sync::mpsc::sync_channel(4);
@@ -49,6 +51,7 @@ impl LineIndexRemote {
         let len = file.metadata()?.len();
         let file = file.try_clone()?;
 
+        self.buf.reserve((len / Self::BYTES_PER_LINE_HEURISTIC) as usize);
         self.buf.push(0);
 
         // Indexing worker

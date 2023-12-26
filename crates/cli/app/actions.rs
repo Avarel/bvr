@@ -2,7 +2,6 @@ use super::InputMode;
 use crate::direction::Direction;
 
 pub enum Action {
-    #[allow(dead_code)]
     Exit,
     SwitchMode(InputMode),
     Command(CommandAction),

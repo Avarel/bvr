@@ -1,7 +1,6 @@
 use arc_swap::ArcSwap;
 use std::{
     alloc::{self, Layout},
-    marker::PhantomData,
     ops::Deref,
     ptr::NonNull,
     sync::{
@@ -32,6 +31,7 @@ impl<T> RawBuf<T> {
     }
 
     /// Allocate a new buffer with the given capacity.
+    #[inline]
     fn allocate(init_len: usize, cap: usize) -> Self {
         if cap == 0 {
             return Self::empty();
@@ -145,12 +145,16 @@ where
         }
     }
 
-    pub fn reserve(&mut self, new_cap: usize) {
+    /// Reserves capacity for at least `additional` more elements to be inserted
+    /// in the given `Cow Vec<T>`. The collection may reserve more space to
+    /// speculatively avoid frequent reallocations. After calling `reserve`,
+    /// capacity will be greater than or equal to `self.len() + additional`.
+    /// Does nothing if capacity is already sufficient.
+    pub fn reserve(&mut self, additional: usize) {
         let buf = self.buf.load();
-
-        if new_cap > buf.cap {
-            let len = buf.len.load(Ordering::Acquire);
-            self.grow(&buf, len, Some(new_cap));
+        let len = buf.len.load(Ordering::Acquire);
+        if len.saturating_add(additional) > buf.cap {
+            self.grow(&buf, len, Some(buf.cap + additional));
         }
     }
 
@@ -199,6 +203,12 @@ impl<T> CowVec<T> {
         (Self { buf: buf.clone() }, CowVecWriter { buf })
     }
 
+    /// Constructs a new, empty `CowVec<T>` with at least the specified capacity.
+    ///
+    /// The vector will be able to hold at least `capacity` elements without
+    /// reallocating. This method is allowed to allocate for more elements than
+    /// `capacity`. If `capacity` is 0, the vector will not allocate.
+    #[allow(dead_code)]
     pub fn with_capacity(cap: usize) -> (Self, CowVecWriter<T>) {
         assert!(std::mem::size_of::<T>() != 0);
         let buf = Arc::new(ArcSwap::from_pointee(RawBuf::allocate(0, cap)));
@@ -206,6 +216,8 @@ impl<T> CowVec<T> {
     }
 
     /// Constructs a new, empty `CowVec<T>`.
+    #[allow(dead_code)]
+    #[inline]
     pub fn empty() -> Self {
         Self::new().0
     }
@@ -253,6 +265,7 @@ where
     }
 
     /// Returns the element at the given index.
+    #[allow(dead_code)]
     pub unsafe fn get_unchecked(&self, index: usize) -> T {
         self.get(index).unwrap_unchecked()
     }
