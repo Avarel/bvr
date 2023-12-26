@@ -30,13 +30,12 @@ a plethora of other features that I couldn't find in any other pager.
 ## Features
 
 ### In-Progress or Planned
-| Feature            | Description                                                 | Progress       |
-| ------------------ | ----------------------------------------------------------- | -------------- |
-| Mouse Support      | Use mouse to interact with the TUI.                         | In Development |
-| Filter Jumping     | Jump to the next or previous line that matches a filter.    | Planned        |
-| Custom Keybindings | Customize the keybindings of the program.                   | Planned        |
-| Word-Wrapping      | Wrap long lines.                                            | Planned        |
-| Export Output      | Export selected data to a file or pipe it to a new command. | Planned        |
+| Feature            | Description                                                 | Progress |
+| ------------------ | ----------------------------------------------------------- | -------- |
+| Filter Jumping     | Jump to the next or previous line that matches a filter.    | Planned  |
+| Custom Keybindings | Customize the keybindings of the program.                   | Planned  |
+| Word-Wrapping      | Wrap long lines.                                            | Planned  |
+| Export Output      | Export selected data to a file or pipe it to a new command. | Planned  |
 
 ### Basic Support
 | Feature              | Description                                                 | Progress |
@@ -45,6 +44,7 @@ a plethora of other features that I couldn't find in any other pager.
 | Status Bar           | View current state of the pager.                            | Basic    |
 | Horizontal Scrolling | Pan the view horizontally.                                  | Basic    |
 | Commands             | Use modal commands to interact with the pager.              | Basic    |
+| Mouse Support        | Use mouse to interact with the TUI.                         | Done     |
 | Regex Filters        | Select and disable additive search filters.                 | Done     |
 | Multiplexing         | View multiple files through tabs or windows.                | Done     |
 | Follow Output        | Constantly scroll down as new data is loaded.               | Done     |
