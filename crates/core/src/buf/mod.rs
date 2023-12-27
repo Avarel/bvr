@@ -4,7 +4,7 @@
 pub mod segment;
 
 use self::segment::{SegBytes, SegStr, Segment};
-use crate::{index::BoxedStream, LineIndex, Result};
+use crate::{index::BoxedStream, LineIndex, Result, LineMatches};
 use lru::LruCache;
 use std::{
     fs::File,
@@ -13,7 +13,7 @@ use std::{
     sync::{
         mpsc::{Receiver, TryRecvError},
         Arc,
-    },
+    }, io::{BufWriter, Write},
 };
 
 /// A segmented buffer that holds data in multiple segments.
@@ -192,6 +192,22 @@ impl SegBuffer {
                 },
             )),
         }
+    }
+
+    pub fn write_file(&mut self, file: File, lines: LineMatches) -> Result<()> {
+        if !lines.is_complete() {
+            return Err(crate::err::Error::InProgress);
+        }
+
+        let mut writer = BufWriter::new(file);
+        let snap = lines.snapshot();
+
+        for &ln in snap.iter() {
+            let line = self.get_bytes(ln).unwrap();
+            writer.write_all(line.as_bytes())?;
+        }
+
+        Ok(())
     }
 }
 

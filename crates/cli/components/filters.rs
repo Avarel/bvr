@@ -156,7 +156,7 @@ impl Bookmarks {
 }
 
 pub struct Filterer {
-    pub(super) composite: LineMatches,
+    pub composite: LineMatches,
     pub viewport: Viewport,
     cursor: CursorState,
     pub(crate) filters: Filters,
@@ -308,7 +308,7 @@ impl Filterer {
             .iter_active()
             .map(|filter| filter.as_line_matches())
             .collect();
-        self.composite = LineMatches::compose(filters);
+        self.composite = LineMatches::compose(filters, false).unwrap();
     }
 
     pub fn move_select(&mut self, dir: Direction, select: bool, delta: ViewDelta) {

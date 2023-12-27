@@ -17,7 +17,7 @@ use crate::components::{
     viewer::Instance,
 };
 use anyhow::Result;
-use bvr_core::{buf::SegBuffer, index::BoxedStream};
+use bvr_core::{buf::SegBuffer, err::Error, index::BoxedStream};
 use crossterm::{
     event::{
         self, DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture,
@@ -27,7 +27,13 @@ use crossterm::{
 };
 use ratatui::{prelude::*, widgets::Widget};
 use regex::bytes::RegexBuilder;
-use std::{borrow::Cow, num::NonZeroUsize, path::Path, time::Duration};
+use std::{
+    borrow::Cow,
+    fs::OpenOptions,
+    num::NonZeroUsize,
+    path::{Path, PathBuf},
+    time::Duration,
+};
 
 pub type Backend<'a> = ratatui::backend::CrosstermBackend<std::io::StdoutLock<'a>>;
 pub type Terminal<'a> = ratatui::Terminal<Backend<'a>>;
@@ -368,19 +374,84 @@ impl App {
         match parts.next() {
             Some("q" | "quit") => return false,
             Some("open") => {
-                let path = parts.collect::<String>();
+                let path = parts.collect::<PathBuf>();
                 if let Err(err) = self.open_file(path.as_ref()) {
-                    self.status
-                        .submit_message(format!("{path}: {err}"), Some(Duration::from_secs(2)));
+                    self.status.submit_message(
+                        format!("{}: {err}", path.display()),
+                        Some(Duration::from_secs(2)),
+                    );
                 }
             }
-            Some("close") => self.mux.close_active_viewer(),
+            Some("close") => {
+                if let Some(_) = self.mux.active_viewer_mut() {
+                    self.mux.close_active_viewer()
+                } else {
+                    self.status.submit_message(
+                        String::from("No active viewer"),
+                        Some(Duration::from_secs(2)),
+                    );
+                }
+            }
             Some("tabs") => self.mux.set_mode(MultiplexerMode::Tabs),
             Some("split" | "panes" | "windows") => self.mux.set_mode(MultiplexerMode::Panes),
             Some("mux") => self.mux.set_mode(self.mux.mode().swap()),
             Some(f @ ("find" | "findl")) => {
                 let pat = parts.collect::<String>();
                 return self.process_search(&pat, f == "findl");
+            }
+            Some("export") => {
+                let path = parts.collect::<PathBuf>();
+                if let Some(viewer) = self.mux.active_viewer_mut() {
+                    if viewer.filterer.filters.all().is_enabled() {
+                        self.status.submit_message(
+                            format!(
+                                "{}: export not allowed while All Lines is enabled",
+                                path.display()
+                            ),
+                            Some(Duration::from_secs(2)),
+                        );
+                        return true;
+                    } else if !viewer.filterer.composite.is_complete() {
+                        self.status.submit_message(
+                            format!(
+                                "{}: export not allowed composite is incomplete",
+                                path.display()
+                            ),
+                            Some(Duration::from_secs(2)),
+                        );
+                        return true;
+                    }
+                    self.status.submit_message(
+                        format!(
+                            "{}: export starting (this may take a while...)",
+                            path.display()
+                        ),
+                        Some(Duration::from_secs(2)),
+                    );
+                    if let Err(err) = OpenOptions::new()
+                        .create_new(true)
+                        .write(true)
+                        .truncate(true)
+                        .open(&path)
+                        .map_err(|err| Error::from(err))
+                        .and_then(|file| viewer.export_file(file))
+                    {
+                        self.status.submit_message(
+                            format!("{}: {err}", path.display()),
+                            Some(Duration::from_secs(2)),
+                        );
+                    } else {
+                        self.status.submit_message(
+                            format!("{}: export complete", path.display()),
+                            Some(Duration::from_secs(2)),
+                        );
+                    }
+                } else {
+                    self.status.submit_message(
+                        String::from("No active viewer"),
+                        Some(Duration::from_secs(2)),
+                    );
+                }
             }
             Some(cmd) => {
                 if let Ok(n) = cmd.parse::<usize>() {

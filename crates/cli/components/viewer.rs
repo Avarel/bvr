@@ -1,14 +1,15 @@
-use crate::{app::ViewDelta, direction::Direction};
-
 use super::{
     cursor::{Cursor, CursorState, SelectionOrigin},
     filters::Filterer,
     viewport::Viewport,
 };
+use crate::{app::ViewDelta, direction::Direction};
 use bitflags::bitflags;
+use bvr_core::Result;
 use bvr_core::{SegBuffer, SegStr};
 use ratatui::style::Color;
 use regex::bytes::Regex;
+use std::fs::File;
 
 pub struct Instance {
     name: String,
@@ -212,5 +213,9 @@ impl Instance {
         self.cursor
             .clamp(self.visible_line_count().saturating_sub(1));
         self.viewport.update_end(self.visible_line_count());
+    }
+
+    pub fn export_file(&mut self, file: File) -> Result<()> {
+        self.buf.write_file(file, self.filterer.composite.clone())
     }
 }

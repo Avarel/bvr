@@ -82,7 +82,7 @@ pub(super) enum CompositeStrategy {
 
 pub(super) struct LineCompositeRemote {
     pub(super) buf: CowVecWriter<usize>,
-    pub(super) complete: Arc<AtomicBool>,
+    pub(super) completed: Arc<AtomicBool>,
     pub(super) strategy: CompositeStrategy,
 }
 
@@ -109,12 +109,13 @@ impl LineCompositeRemote {
             }
             self.buf.push(line_number);
         }
-        self.mark_complete();
         Ok(())
     }
+}
 
-    fn mark_complete(&self) {
-        self.complete
+impl Drop for LineCompositeRemote {
+    fn drop(&mut self) {
+        self.completed
             .store(true, std::sync::atomic::Ordering::Relaxed);
     }
 }
@@ -128,7 +129,7 @@ mod tests {
         let matches1 = LineMatches::from(vec![1, 2, 3, 4, 5]);
         let matches2 = LineMatches::from(vec![1, 3, 5, 7, 9]);
 
-        let composite = LineMatches::compose_complete(vec![matches1, matches2]).unwrap();
+        let composite = LineMatches::compose(vec![matches1, matches2], true).unwrap();
 
         let result = vec![1, 2, 3, 4, 5, 7, 9];
 
@@ -143,7 +144,7 @@ mod tests {
         let matches1 = LineMatches::from(vec![1, 2, 3, 4, 5]);
         let matches2 = LineMatches::from(vec![6, 7, 8, 9, 10]);
 
-        let composite = LineMatches::compose_complete(vec![matches1, matches2]).unwrap();
+        let composite = LineMatches::compose(vec![matches1, matches2], true).unwrap();
 
         let result = vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
 
@@ -158,7 +159,7 @@ mod tests {
         let matches1 = LineMatches::from(vec![1, 2, 3, 4, 5]);
         let matches2 = LineMatches::from(vec![1, 2, 3, 4, 5]);
 
-        let composite = LineMatches::compose_complete(vec![matches1, matches2]).unwrap();
+        let composite = LineMatches::compose(vec![matches1, matches2], true).unwrap();
 
         let result = vec![1, 2, 3, 4, 5];
 

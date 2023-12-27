@@ -38,18 +38,18 @@ a plethora of other features that I couldn't find in any other pager.
 | Word-Wrapping       | Wrap long lines.                                              | Planned  |
 
 ### Basic Support
-| Feature              | Description                                                          | Progress |
-| -------------------- | -------------------------------------------------------------------- | -------- |
-| Export Output        | Export data of active filters to a file or pipe it to a new command. | Done     |
-| Piping Files         | View piped outputs of other programs, ie. `cat file \| bvr`          | Basic    |
-| Status Bar           | View current state of the pager.                                     | Basic    |
-| Commands             | Use modal commands to interact with the pager.                       | Basic    |
-| Horizontal Scrolling | Pan the view horizontally.                                           | Basic    |
-| Mouse Support        | Use mouse to interact with the TUI.                                  | Done     |
-| Regex Filters        | Select and disable additive search filters.                          | Done     |
-| Filter Match Jumping | Jump to the next or previous line that matches a filter.             | Done     |
-| Multiplexing         | View multiple files through tabs or windows.                         | Done     |
-| Follow Output        | Constantly scroll down as new data is loaded.                        | Done     |
+| Feature              | Description                                                 | Progress |
+| -------------------- | ----------------------------------------------------------- | -------- |
+| Piping Files         | View piped outputs of other programs, ie. `cat file \| bvr` | Basic    |
+| Status Bar           | View current state of the pager.                            | Basic    |
+| Commands             | Use modal commands to interact with the pager.              | Basic    |
+| Horizontal Scrolling | Pan the view horizontally.                                  | Basic    |
+| Export Output        | Export data of active filters to a file.                    | Done     |
+| Mouse Support        | Use mouse to interact with the TUI.                         | Done     |
+| Regex Filters        | Select and disable additive search filters.                 | Done     |
+| Filter Match Jumping | Jump to the next or previous line that matches a filter.    | Done     |
+| Multiplexing         | View multiple files through tabs or windows.                | Done     |
+| Follow Output        | Constantly scroll down as new data is loaded.               | Done     |
 
 ## Built-in Keybindings
 * Custom keybindings will be added in the future.
