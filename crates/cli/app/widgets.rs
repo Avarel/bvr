@@ -19,15 +19,10 @@ use crate::{
 use crossterm::event::MouseEventKind;
 use ratatui::{prelude::*, widgets::*};
 
-enum StatusWidgetState<'a> {
-    Normal { line_count: usize, name: &'a str },
-    Message { message: &'a str },
-    None,
-}
-
 pub struct StatusWidget<'a> {
     input_mode: InputMode,
-    state: StatusWidgetState<'a>,
+    viewer: Option<&'a Instance>,
+    message: Option<&'a str>,
 }
 
 impl<'a> Widget for StatusWidget<'a> {
@@ -57,21 +52,43 @@ impl<'a> Widget for StatusWidget<'a> {
         );
         v.push(Span::raw(" "));
 
-        match self.state {
-            StatusWidgetState::Normal { line_count, name } => {
-                v.push(Span::raw(format!("{} lines", line_count)).fg(accent_color));
-                v.push(Span::raw(" │ ").fg(accent_color));
-                v.push(Span::raw(name).fg(accent_color));
+        if let Some(message) = self.message {
+            v.push(Span::raw(message));
+        } else if let Some(viewer) = &self.viewer {
+            let ln_cnt = viewer.file().line_count();
+            let ln_vis = viewer.visible_line_count();
+            v.push(Span::raw(format!("{} lines", ln_cnt)).fg(accent_color));
+            if ln_vis < ln_cnt {
+                v.push(Span::raw(format!(" ({} visible)", ln_vis)).fg(colors::STATUS_BAR_TEXT));
             }
-            StatusWidgetState::Message { message } => v.push(Span::raw(message)),
-            StatusWidgetState::None => {
-                v.push(Span::raw("Open a file with :open [filename]").fg(accent_color))
-            }
+            v.push(Span::raw(" │ ").fg(accent_color));
+            v.push(Span::raw(viewer.name()).fg(accent_color));
         }
 
         Paragraph::new(Line::from(v))
             .style(STATUS_BAR_STYLE)
             .render(area, buf);
+
+        if let Some(viewer) = self.viewer {
+            let bottom = viewer.viewport().bottom();
+            let ln_vis = viewer.visible_line_count();
+            let percentage = if ln_vis == 0 {
+                1.0
+            } else {
+                bottom as f64 / ln_vis as f64
+            }
+            .clamp(0.0, 1.0);
+
+            let row = viewer.viewport().top();
+            let col = viewer.viewport().left();
+
+            Paragraph::new(Line::from(vec![
+                Span::raw(format!(" {}:{} ", row + 1, col + 1)),
+                Span::raw(format!(" {:.0}% ", percentage * 100.0)),
+            ]))
+            .alignment(Alignment::Right)
+            .render(area, buf);
+        }
     }
 }
 
@@ -537,27 +554,11 @@ impl MultiplexerWidget<'_> {
             }
         }
 
-        match self.status.get_message_update() {
-            Some(ref message) => StatusWidget {
-                input_mode: self.mode,
-                state: StatusWidgetState::Message { message },
-            }
-            .render(status_chunk, buf),
-            None => match self.mux.active_viewer_mut() {
-                Some(viewer) => StatusWidget {
-                    input_mode: self.mode,
-                    state: StatusWidgetState::Normal {
-                        line_count: viewer.file().line_count(),
-                        name: viewer.name(),
-                    },
-                }
-                .render(status_chunk, buf),
-                None => StatusWidget {
-                    input_mode: self.mode,
-                    state: StatusWidgetState::None,
-                }
-                .render(status_chunk, buf),
-            },
+        StatusWidget {
+            input_mode: self.mode,
+            viewer: self.mux.active_viewer_mut().map(|v| &*v),
+            message: self.status.get_message_update().as_deref(),
         }
+        .render(status_chunk, buf);
     }
 }
