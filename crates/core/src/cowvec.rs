@@ -61,7 +61,7 @@ where
     T: Copy,
 {
     /// Return a new buffer with the same contents, but with a larger capacity.
-    fn grow(&self, len: usize, new_cap: Option<usize>) -> Self {
+    fn allocate_copy(&self, len: usize, new_cap: Option<usize>) -> Self {
         let new_cap = new_cap.unwrap_or((self.cap * 2).max(1));
         debug_assert!(new_cap >= self.cap);
 
@@ -112,8 +112,6 @@ impl<T> Drop for RawBuf<T> {
 }
 
 /// An exclusive writer to a `CowVec<T>`.
-///
-/// This is useful for pushing elements to the back of the vector.
 pub struct CowVecWriter<T> {
     buf: Arc<ArcSwap<RawBuf<T>>>,
 }
@@ -127,6 +125,8 @@ where
     }
 
     /// Appends an element to the back of this collection.
+    /// 
+    /// This operation is O(1) amortized.
     pub fn push(&mut self, elem: T) {
         let buf = self.buf.load();
         let len = buf.len.load(Ordering::Acquire);
@@ -145,6 +145,40 @@ where
         }
     }
 
+    /// Inserts an element at the given index, shifting all elements after it to the right.
+    /// 
+    /// This operation is O(n) where n is the number of elements to the right of the index.
+    /// It will also always perform an allocation before swapping out the internal buffer.
+    pub fn insert(&mut self, index: usize, elem: T) {
+        // Unlike push, we can observe the buffer changing underneath us
+        // in the case of concurrent readers. So we need to allocate a new
+        // buffer every time.
+
+        let buf = self.buf.load();
+        let len = buf.len.load(Ordering::Acquire);
+
+        assert!(index <= len, "index out of bounds");
+        let mut new_buf = if buf.cap == len {
+            buf.allocate_copy(index, None)
+        } else {
+            buf.allocate_copy(index, Some(buf.cap))
+        };
+
+        unsafe {
+            // Copy second part of old slice into destination
+            std::ptr::copy_nonoverlapping(
+                buf.as_ptr().add(index),
+                new_buf.as_ptr().add(index + 1),
+                len - index,
+            );
+            std::ptr::write(new_buf.as_ptr().add(index), elem);
+        }
+
+        *new_buf.len.get_mut() = len + 1;
+
+        self.buf.store(Arc::new(new_buf))
+    }
+
     /// Reserves capacity for at least `additional` more elements to be inserted
     /// in the given `Cow Vec<T>`. The collection may reserve more space to
     /// speculatively avoid frequent reallocations. After calling `reserve`,
@@ -160,7 +194,7 @@ where
 
     /// Grow will return a buffer that the caller can write to.
     fn grow(&mut self, buf: &RawBuf<T>, len: usize, new_cap: Option<usize>) -> Arc<RawBuf<T>> {
-        let ret = Arc::new(buf.grow(len, new_cap));
+        let ret = Arc::new(buf.allocate_copy(len, new_cap));
         self.buf.store(ret.clone());
         ret
     }
@@ -180,13 +214,16 @@ impl<T> Deref for CowVecWriter<T> {
     }
 }
 
-/// A contiguous, growable, append-only array type, written as `CowVec<T>`.
+/// A contiguous, growable array type, written as `CowVec<T>`.
 ///
 /// Cloning this vector will give another read-handle to the same underlying
 /// buffer. This is useful for sharing data between threads.
 ///
 /// This vector has **amortized O(1)** `push()` operation and **O(1)** `clone()`
-/// operations.
+/// operations. All `CowVec<T>` share the same underlying buffer, so cloning
+/// so changes are reflected across all clones.
+/// 
+/// The `CowVecWriter<T>` type is an exclusive writer to a `CowVec<T>`.
 #[derive(Clone)]
 pub struct CowVec<T> {
     buf: Arc<ArcSwap<RawBuf<T>>>,
@@ -444,7 +481,6 @@ mod test {
         assert_ne!(mid_ptr, final_ptr);
     }
 
-    
     #[test]
     fn test_miri_reserve() {
         let (arr, mut writer) = CowVec::new();
@@ -458,5 +494,42 @@ mod test {
         writer.push(100);
         let final_ptr = arr.buf.load().as_ptr();
         assert_ne!(mid_ptr, final_ptr);
+    }
+
+    #[test]
+    fn test_miri_insert() {
+        let (arr, mut writer) = CowVec::new();
+        for i in (0..100).step_by(10) {
+            writer.push(i);
+        }
+
+        let expected = [0, 10, 20, 30, 40, 50, 60, 70, 80, 90];
+        for (i, expected) in expected.into_iter().enumerate() {
+            assert_eq!(Some(expected), arr.get(i));
+        }
+
+        writer.insert(1, 5);
+        let expected = [0, 5, 10, 20, 30, 40, 50, 60, 70, 80, 90];
+        for (i, expected) in expected.into_iter().enumerate() {
+            assert_eq!(Some(expected), arr.get(i));
+        }
+
+        writer.insert(1, 5);
+        let expected = [0, 5, 5, 10, 20, 30, 40, 50, 60, 70, 80, 90];
+        for (i, expected) in expected.into_iter().enumerate() {
+            assert_eq!(Some(expected), arr.get(i));
+        }
+
+        writer.insert(12, 100);
+        let expected = [0, 5, 5, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100];
+        for (i, expected) in expected.into_iter().enumerate() {
+            assert_eq!(Some(expected), arr.get(i));
+        }
+
+        writer.insert(0, 1);
+        let expected = [1, 0, 5, 5, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100];
+        for (i, expected) in expected.into_iter().enumerate() {
+            assert_eq!(Some(expected), arr.get(i));
+        }
     }
 }
