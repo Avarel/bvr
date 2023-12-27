@@ -32,7 +32,7 @@ impl IndexingTask {
     }
 }
 
-/// Generalized type for streams passed into [InflightIndexRemote].
+/// Generalized type for streams passed into [LineIndex].
 pub type BoxedStream = Box<dyn std::io::Read + Send>;
 
 /// A remote type that can be used to set off the indexing process of a

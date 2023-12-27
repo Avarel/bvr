@@ -2,7 +2,7 @@ use super::{
     cursor::{Cursor, CursorState, SelectionOrigin},
     viewport::Viewport,
 };
-use crate::{colors, direction::Direction};
+use crate::{colors, direction::Direction, app::ViewDelta};
 use bitflags::bitflags;
 use bvr_core::{LineMatches, SegBuffer};
 use ratatui::style::Color;
@@ -75,6 +75,22 @@ impl Filter {
             FilterRepr::Search(mask) => mask.clone(),
         }
     }
+
+    pub fn nearest_forward(&self, line_number: usize) -> Option<usize> {
+        match &self.repr {
+            FilterRepr::All => None,
+            FilterRepr::Bookmarks(mask) => mask.nearest_forward(line_number),
+            FilterRepr::Search(mask) => mask.nearest_forward(line_number),
+        }
+    }
+
+    pub fn nearest_backward(&self, line_number: usize) -> Option<usize> {
+        match &self.repr {
+            FilterRepr::All => None,
+            FilterRepr::Bookmarks(mask) => mask.nearest_backward(line_number),
+            FilterRepr::Search(mask) => mask.nearest_backward(line_number),
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -100,18 +116,42 @@ impl Bookmarks {
 
     pub fn has_line(&self, line_number: usize) -> bool {
         let slice = self.lines.as_slice();
-        if let &[first, .., last] = slice {
-            if (first..=last).contains(&line_number) {
-                return slice.binary_search(&line_number).is_ok();
+        match *slice {
+            [first, .., last] if (first..=last).contains(&line_number) => {
+                slice.binary_search(&line_number).is_ok()
             }
-        } else if let &[item] = slice {
-            return item == line_number;
+            [item] => item == line_number,
+            _ => false,
         }
-        false
     }
 
     fn len(&self) -> usize {
         self.lines.len()
+    }
+
+    pub fn nearest_forward(&self, line_number: usize) -> Option<usize> {
+        let slice = self.lines.as_slice();
+        match *slice {
+            [_, ..] => Some(
+                slice[match slice.binary_search(&line_number) {
+                    Ok(i) => i.saturating_add(1),
+                    Err(i) => i,
+                }.min(slice.len() - 1)],
+            ),
+            [] => None,
+        }
+    }
+
+    pub fn nearest_backward(&self, line_number: usize) -> Option<usize> {
+        let slice = self.lines.as_slice();
+        match *slice {
+            [_, ..] => Some(
+                slice[match slice.binary_search(&line_number) {
+                    Ok(i) | Err(i) => i,
+                }.saturating_sub(1).min(slice.len() - 1)],
+            ),
+            [] => None,
+        }
     }
 }
 
@@ -231,7 +271,7 @@ impl Filterer {
                 name: &filter.name,
                 color: filter.color,
                 len: filter.len(),
-                ty: match self.cursor.state {
+                ty: match self.cursor.state() {
                     Cursor::Singleton(i) => {
                         if index == i {
                             FilterType::Origin
@@ -271,13 +311,20 @@ impl Filterer {
         self.composite = LineMatches::compose(filters);
     }
 
-    pub fn move_select(&mut self, dir: Direction, select: bool, delta: usize) {
+    pub fn move_select(&mut self, dir: Direction, select: bool, delta: ViewDelta) {
+        let delta = match delta {
+            ViewDelta::Number(n) => usize::from(n),
+            ViewDelta::Page => self.viewport.height(),
+            ViewDelta::HalfPage => self.viewport.height().div_ceil(2),
+            ViewDelta::Boundary => usize::MAX,
+            ViewDelta::Match => unimplemented!("there is no result jumping for filters")
+        };
         match dir {
             Direction::Back => self.cursor.back(select, |i| i.saturating_sub(delta)),
             Direction::Next => self.cursor.forward(select, |i| i.saturating_add(delta)),
         }
         self.cursor.clamp(self.filters.len().saturating_sub(1));
-        let i = match self.cursor.state {
+        let i = match self.cursor.state() {
             Cursor::Singleton(i)
             | Cursor::Selection(i, _, SelectionOrigin::Left)
             | Cursor::Selection(_, i, SelectionOrigin::Right) => i,
@@ -286,7 +333,7 @@ impl Filterer {
     }
 
     pub fn toggle_select_filters(&mut self) {
-        match self.cursor.state {
+        match self.cursor.state() {
             Cursor::Singleton(i) => {
                 self.filters.get_mut(i).map(Filter::toggle);
             }
@@ -299,7 +346,7 @@ impl Filterer {
     }
 
     pub fn remove_select_filters(&mut self) {
-        match self.cursor.state {
+        match self.cursor.state() {
             Cursor::Singleton(i) => {
                 if i > 1 {
                     self.filters.searches.remove(i - 2);
@@ -320,11 +367,31 @@ impl Filterer {
         self.filters.searches.push(Filter {
             name: regex.to_string(),
             enabled: true,
-            repr: FilterRepr::Search(SearchResults::search(file, regex).unwrap()),
+            repr: FilterRepr::Search(SearchResults::search(file.segment_iter().unwrap(), regex)),
             color: colors::SEARCH_COLOR_LIST
                 .get(self.filters.searches.len())
                 .copied()
                 .unwrap_or(Color::White),
         });
+    }
+
+    pub fn compute_jump(&self, i: usize, direction: Direction) -> Option<usize> {
+        if !self.filters.all.is_enabled() {
+            return None
+        }
+        match direction {
+            Direction::Back => self
+                .filters
+                .iter_active()
+                .filter_map(|filter| filter.nearest_backward(i))
+                .filter(|&ln| ln < i)
+                .max(),
+            Direction::Next => self
+                .filters
+                .iter_active()
+                .filter_map(|filter| filter.nearest_forward(i))
+                .filter(|&ln| ln > i)
+                .min(),
+        }
     }
 }

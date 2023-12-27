@@ -2,23 +2,23 @@ use super::cursor::{Cursor, CursorState};
 use crate::direction::Direction;
 
 #[derive(Clone, Copy)]
-pub enum PromptJump {
+pub enum PromptDelta {
+    Number(usize),
     Word,
     Boundary,
-    Delta(usize),
 }
 
 #[derive(Clone, Copy)]
 pub struct PromptMovement {
     select: bool,
-    jump: PromptJump,
+    delta: PromptDelta,
 }
 
 impl PromptMovement {
-    pub const DEFAULT: Self = Self::new(false, PromptJump::Delta(1));
+    pub const DEFAULT: Self = Self::new(false, PromptDelta::Number(1));
 
-    pub const fn new(select: bool, jump: PromptJump) -> Self {
-        Self { select, jump }
+    pub const fn new(select: bool, jump: PromptDelta) -> Self {
+        Self { select, delta: jump }
     }
 }
 
@@ -41,14 +41,14 @@ impl PromptApp {
     }
 
     #[inline(always)]
-    pub fn cursor(&self) -> &Cursor {
-        &self.cursor.state
+    pub fn cursor(&self) -> Cursor {
+        self.cursor.state()
     }
 
     pub fn move_cursor(&mut self, direction: Direction, movement: PromptMovement) {
         match direction {
-            Direction::Back => self.cursor.back(movement.select, |i| match movement.jump {
-                PromptJump::Word => {
+            Direction::Back => self.cursor.back(movement.select, |i| match movement.delta {
+                PromptDelta::Word => {
                     if self.buf[..i]
                         .chars()
                         .rev()
@@ -67,8 +67,8 @@ impl PromptApp {
                         self.buf[..i].rfind(' ').map(|p| p + 1).unwrap_or(0)
                     }
                 }
-                PromptJump::Boundary => 0,
-                PromptJump::Delta(delta) => i.saturating_sub(
+                PromptDelta::Boundary => 0,
+                PromptDelta::Number(delta) => i.saturating_sub(
                     self.buf[..i]
                         .chars()
                         .rev()
@@ -78,8 +78,8 @@ impl PromptApp {
                 ),
             }),
             Direction::Next => self.cursor.forward(movement.select, |i| {
-                match movement.jump {
-                    PromptJump::Word => {
+                match movement.delta {
+                    PromptDelta::Word => {
                         if self.buf[i..]
                             .chars()
                             .nth(0)
@@ -100,8 +100,8 @@ impl PromptApp {
                                 .unwrap_or(usize::MAX)
                         }
                     }
-                    PromptJump::Boundary => usize::MAX,
-                    PromptJump::Delta(delta) => i.saturating_add(
+                    PromptDelta::Boundary => usize::MAX,
+                    PromptDelta::Number(delta) => i.saturating_add(
                         self.buf[i..]
                             .chars()
                             .take(delta)
@@ -120,14 +120,14 @@ impl PromptApp {
     }
 
     pub fn enter_str(&mut self, input: &str) {
-        match self.cursor.state {
+        match self.cursor.state() {
             Cursor::Singleton(i) => {
                 self.buf.insert_str(i, input);
                 self.move_cursor(
                     Direction::Next,
                     PromptMovement {
                         select: false,
-                        jump: PromptJump::Delta(input.len()),
+                        delta: PromptDelta::Number(input.len()),
                     },
                 )
             }
@@ -138,7 +138,7 @@ impl PromptApp {
                     Direction::Next,
                     PromptMovement {
                         select: false,
-                        jump: PromptJump::Delta(input.len()),
+                        delta: PromptDelta::Number(input.len()),
                     },
                 )
             }
@@ -146,13 +146,13 @@ impl PromptApp {
     }
 
     pub fn delete(&mut self) -> bool {
-        match self.cursor.state {
+        match self.cursor.state() {
             Cursor::Singleton(curr) => {
                 if curr == 0 {
                     return !self.buf.is_empty();
                 }
                 self.move_cursor(Direction::Back, PromptMovement::DEFAULT);
-                let Cursor::Singleton(prev) = self.cursor.state else {
+                let Cursor::Singleton(prev) = self.cursor.state() else {
                     unreachable!()
                 };
                 self.buf.replace_range(prev..curr, "");

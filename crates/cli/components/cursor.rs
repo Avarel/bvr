@@ -31,7 +31,7 @@ impl Cursor {
 }
 
 pub struct CursorState {
-    pub state: Cursor,
+    state: Cursor,
 }
 
 impl CursorState {
@@ -39,6 +39,16 @@ impl CursorState {
         Self {
             state: Cursor::Singleton(0),
         }
+    }
+
+    #[inline(always)]
+    pub fn state(&self) -> Cursor {
+        self.state
+    }
+
+    #[inline(always)]
+    pub fn place(&mut self, i: usize) {
+        self.state = Cursor::Singleton(i);
     }
 
     pub fn clamp(&mut self, bound: usize) {

@@ -1,7 +1,7 @@
 use super::{
-    actions::{Action, Delta, FilterAction, NormalAction},
+    actions::{Action, FilterAction, NormalAction},
     mouse::MouseHandler,
-    InputMode, PromptMode,
+    InputMode, PromptMode, ViewDelta,
 };
 use crate::{
     app::actions::VisualAction,
@@ -95,7 +95,7 @@ impl Widget for PromptWidget<'_> {
             PromptMode::NewLit => "-",
         };
 
-        let input = Paragraph::new(Line::from(match *self.inner.cursor() {
+        let input = Paragraph::new(Line::from(match self.inner.cursor() {
             Cursor::Singleton(_) => {
                 vec![Span::from(c), Span::from(self.inner.buf())]
             }
@@ -108,10 +108,12 @@ impl Widget for PromptWidget<'_> {
         }))
         .bg(colors::BG);
 
-        let i = match *self.inner.cursor() {
+        let i = match self.inner.cursor() {
             Cursor::Singleton(i)
             | Cursor::Selection(_, i, SelectionOrigin::Right)
-            | Cursor::Selection(i, _, SelectionOrigin::Left) => i,
+            | Cursor::Selection(i, _, SelectionOrigin::Left) => {
+                self.inner.buf()[..i].chars().count()
+            }
         };
         *self.cursor = Some((area.x + i as u16 + 1, area.y));
 
@@ -192,7 +194,7 @@ impl ViewerWidget<'_> {
             MouseEventKind::ScrollUp | MouseEventKind::ScrollDown => {
                 Some(Action::Normal(NormalAction::PanVertical {
                     direction: Direction::back_if(event.kind == MouseEventKind::ScrollUp),
-                    delta: Delta::Number(5),
+                    delta: ViewDelta::Number(5),
                     target_view: Some(self.view_index),
                 }))
             }

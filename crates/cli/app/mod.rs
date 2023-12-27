@@ -4,7 +4,7 @@ mod mouse;
 mod widgets;
 
 use self::{
-    actions::{Action, CommandAction, Delta, NormalAction, VisualAction},
+    actions::{Action, CommandAction, NormalAction, VisualAction},
     keybinding::Keybinding,
     mouse::MouseHandler,
     widgets::{MultiplexerWidget, PromptWidget},
@@ -45,6 +45,14 @@ pub enum PromptMode {
     Command,
     NewFilter,
     NewLit,
+}
+
+pub enum ViewDelta {
+    Number(u16),
+    Page,
+    HalfPage,
+    Boundary,
+    Match,
 }
 
 pub struct App {
@@ -170,10 +178,18 @@ impl App {
 
                     if let Some(viewer) = viewer {
                         let delta = match delta {
-                            Delta::Number(n) => usize::from(n),
-                            Delta::Page => viewer.viewport().height(),
-                            Delta::HalfPage => viewer.viewport().height().div_ceil(2),
-                            Delta::Boundary => usize::MAX,
+                            ViewDelta::Number(n) => usize::from(n),
+                            ViewDelta::Page => viewer.viewport().height(),
+                            ViewDelta::HalfPage => viewer.viewport().height().div_ceil(2),
+                            ViewDelta::Boundary => usize::MAX,
+                            ViewDelta::Match => {
+                                let current = viewer.viewport().top();
+                                if let Some(next) = viewer.filterer.compute_jump(current, direction)
+                                {
+                                    viewer.viewport_mut().top_to(next)
+                                }
+                                return true;
+                            }
                         };
                         viewer.viewport_mut().pan_vertical(direction, delta);
                     }
@@ -191,9 +207,9 @@ impl App {
 
                     if let Some(viewer) = viewer {
                         let delta = match delta {
-                            Delta::Number(n) => usize::from(n),
-                            Delta::Page => viewer.viewport().width(),
-                            Delta::HalfPage => viewer.viewport().width().div_ceil(2),
+                            ViewDelta::Number(n) => usize::from(n),
+                            ViewDelta::Page => viewer.viewport().width(),
+                            ViewDelta::HalfPage => viewer.viewport().width().div_ceil(2),
                             _ => 0,
                         };
                         viewer.viewport_mut().pan_horizontal(direction, delta);
@@ -216,12 +232,6 @@ impl App {
                     delta,
                 } => {
                     if let Some(viewer) = self.mux.active_viewer_mut() {
-                        let delta = match delta {
-                            Delta::Number(n) => usize::from(n),
-                            Delta::Page => viewer.viewport().height(),
-                            Delta::HalfPage => viewer.viewport().height().div_ceil(2),
-                            Delta::Boundary => usize::MAX,
-                        };
                         viewer.move_select(direction, select, delta)
                     }
                 }
@@ -249,13 +259,6 @@ impl App {
                     delta,
                 } => {
                     if let Some(viewer) = self.mux.active_viewer_mut() {
-                        let viewport = &viewer.filterer.viewport;
-                        let delta = match delta {
-                            Delta::Number(n) => usize::from(n),
-                            Delta::Page => viewport.height(),
-                            Delta::HalfPage => viewport.height().div_ceil(2),
-                            Delta::Boundary => usize::MAX,
-                        };
                         viewer.filterer.move_select(direction, select, delta)
                     }
                 }
@@ -295,9 +298,9 @@ impl App {
                     PromptMovement::new(
                         select,
                         match jump {
-                            actions::CommandJump::Word => prompt::PromptJump::Word,
-                            actions::CommandJump::Boundary => prompt::PromptJump::Boundary,
-                            actions::CommandJump::None => prompt::PromptJump::Delta(1),
+                            actions::CommandJump::Word => prompt::PromptDelta::Word,
+                            actions::CommandJump::Boundary => prompt::PromptDelta::Boundary,
+                            actions::CommandJump::None => prompt::PromptDelta::Number(1),
                         },
                     ),
                 ),

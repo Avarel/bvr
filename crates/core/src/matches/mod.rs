@@ -3,7 +3,7 @@ mod composite;
 use crate::{
     buf::ContiguousSegmentIterator,
     cowvec::{CowVec, CowVecWriter},
-    Result, SegBuffer,
+    Result,
 };
 use regex::bytes::Regex;
 use std::sync::{atomic::AtomicBool, Arc};
@@ -14,7 +14,6 @@ struct LineMatchRemote {
 }
 
 impl LineMatchRemote {
-    /// Index a file and load the data into the associated [InflightIndex].
     pub fn search(mut self, mut iter: ContiguousSegmentIterator, regex: Regex) -> Result<()> {
         while let Some((idx, start, buf)) = iter.next_buf() {
             if !self.buf.has_readers() {
@@ -57,15 +56,42 @@ impl LineMatches {
     pub fn has_line(&self, line_number: usize) -> bool {
         let slice = self.buf.snapshot();
         match *slice.as_slice() {
-            [first, .., last] => {
-                if (first..=last).contains(&line_number) {
-                    return slice.binary_search(&line_number).is_ok();
-                }
+            [first, .., last] if (first..=last).contains(&line_number) => {
+                slice.binary_search(&line_number).is_ok()
             }
-            [item] => return item == line_number,
-            _ => (),
+            [item] => item == line_number,
+            _ => false,
         }
-        false
+    }
+
+    pub fn nearest_forward(&self, line_number: usize) -> Option<usize> {
+        let snap = self.buf.snapshot();
+        let slice = snap.as_slice();
+        match *slice {
+            [_, ..] => Some(
+                slice[match slice.binary_search(&line_number) {
+                    Ok(i) => i.saturating_add(1),
+                    Err(i) => i,
+                }
+                .min(slice.len() - 1)],
+            ),
+            [] => None,
+        }
+    }
+
+    pub fn nearest_backward(&self, line_number: usize) -> Option<usize> {
+        let snap = self.buf.snapshot();
+        let slice = snap.as_slice();
+        match *slice {
+            [_, ..] => Some(
+                slice[match slice.binary_search(&line_number) {
+                    Ok(i) | Err(i) => i,
+                }
+                .saturating_sub(1)
+                .min(slice.len() - 1)],
+            ),
+            [] => None,
+        }
     }
 
     pub fn len(&self) -> usize {
@@ -85,7 +111,15 @@ pub struct LineMatches {
 
 impl LineMatches {
     #[inline]
-    pub fn new(iter: ContiguousSegmentIterator, regex: Regex) -> Self {
+    pub fn empty() -> Self {
+        Self {
+            buf: CowVec::empty(),
+            complete: Arc::new(AtomicBool::new(true)),
+        }
+    }
+
+    #[inline]
+    pub fn search(iter: ContiguousSegmentIterator, regex: Regex) -> Self {
         let (buf, writer) = CowVec::new();
         let complete = Arc::new(AtomicBool::new(false));
         std::thread::spawn({
@@ -99,14 +133,6 @@ impl LineMatches {
             }
         });
         Self { buf, complete }
-    }
-
-    #[inline]
-    pub fn empty() -> Self {
-        Self {
-            buf: CowVec::new().0,
-            complete: Arc::new(AtomicBool::new(true)),
-        }
     }
 
     #[inline]
@@ -159,16 +185,6 @@ impl LineMatches {
                 Self { buf, complete }
             }
         })
-    }
-
-    /// Searches for a regular expression pattern in a segmented buffer.
-    ///
-    /// # Returns
-    ///
-    /// Returns a `Result` containing the `InflightSearch` object
-    /// if the internal iterator creation was successful, and an error otherwise.
-    pub fn search(buf: &SegBuffer, regex: Regex) -> Result<Self> {
-        Ok(Self::new(buf.segment_iter()?, regex))
     }
 
     pub(crate) fn into_inner(self) -> CowVec<usize> {

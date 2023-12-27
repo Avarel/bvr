@@ -1,4 +1,4 @@
-use crate::direction::Direction;
+use crate::{app::ViewDelta, direction::Direction};
 
 use super::{
     cursor::{Cursor, CursorState, SelectionOrigin},
@@ -103,7 +103,7 @@ impl Instance {
                 data,
                 start: self.viewport.left(),
                 color,
-                ty: match self.cursor.state {
+                ty: match self.cursor.state() {
                     Cursor::Singleton(i) => {
                         if index == i {
                             LineType::Origin
@@ -149,26 +149,46 @@ impl Instance {
     }
 
     pub fn move_selected_into_view(&mut self) {
-        let current = match self.cursor.state {
+        let current = match self.cursor.state() {
             Cursor::Singleton(i)
             | Cursor::Selection(i, _, SelectionOrigin::Left)
             | Cursor::Selection(_, i, SelectionOrigin::Right) => i,
         };
         if current < self.viewport.top() {
-            self.cursor.state = Cursor::Singleton(self.viewport.top());
+            self.cursor.place(self.viewport.top());
         } else if current >= self.viewport.bottom() {
-            self.cursor.state = Cursor::Singleton(self.viewport.bottom().saturating_sub(1));
+            self.cursor.place(self.viewport.bottom().saturating_sub(1));
         }
     }
 
-    pub fn move_select(&mut self, dir: Direction, select: bool, delta: usize) {
+    pub fn move_select(&mut self, dir: Direction, select: bool, delta: ViewDelta) {
+        let ndelta = match delta {
+            ViewDelta::Number(n) => usize::from(n),
+            ViewDelta::Page => self.viewport.height(),
+            ViewDelta::HalfPage => self.viewport.height().div_ceil(2),
+            ViewDelta::Boundary => usize::MAX,
+            ViewDelta::Match => 0,
+        };
+
         match dir {
-            Direction::Back => self.cursor.back(select, |i| i.saturating_sub(delta)),
-            Direction::Next => self.cursor.forward(select, |i| i.saturating_add(delta)),
+            Direction::Back => self.cursor.back(select, |i| {
+                let delta = match delta {
+                    ViewDelta::Match => return self.filterer.compute_jump(i, dir).unwrap_or(i),
+                    _ => ndelta,
+                };
+                i.saturating_sub(delta)
+            }),
+            Direction::Next => self.cursor.forward(select, |i| {
+                let delta = match delta {
+                    ViewDelta::Match => return self.filterer.compute_jump(i, dir).unwrap_or(i),
+                    _ => ndelta,
+                };
+                i.saturating_add(delta)
+            }),
         }
         self.cursor
             .clamp(self.visible_line_count().saturating_sub(1));
-        let i = match self.cursor.state {
+        let i = match self.cursor.state() {
             Cursor::Singleton(i)
             | Cursor::Selection(i, _, SelectionOrigin::Left)
             | Cursor::Selection(_, i, SelectionOrigin::Right) => i,
@@ -177,13 +197,13 @@ impl Instance {
     }
 
     pub fn toggle_select_bookmarks(&mut self) {
-        match self.cursor.state {
+        match self.cursor.state() {
             Cursor::Singleton(i) => {
                 let line_number = self.line_at_view_index(i);
                 self.filterer.filters.bookmarks_mut().toggle(line_number);
             }
             Cursor::Selection(start, end, _) => {
-                for i in start..=end {
+                for i in (start..=end).rev() {
                     let line_number = self.line_at_view_index(i);
                     self.filterer.filters.bookmarks_mut().toggle(line_number);
                 }

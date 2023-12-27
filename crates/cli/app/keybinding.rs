@@ -1,8 +1,6 @@
 use super::{
-    actions::{
-        Action, CommandAction, CommandJump, Delta, FilterAction, NormalAction, VisualAction,
-    },
-    InputMode, PromptMode,
+    actions::{Action, CommandAction, CommandJump, FilterAction, NormalAction, VisualAction},
+    InputMode, PromptMode, ViewDelta,
 };
 use crate::direction::Direction;
 use crossterm::event::{Event, KeyCode, KeyEventKind, KeyModifiers};
@@ -39,9 +37,9 @@ impl Keybinding {
                         Some(Action::Normal(NormalAction::PanVertical {
                             direction: Direction::back_if(key.code == KeyCode::Up),
                             delta: if key.modifiers.contains(KeyModifiers::SHIFT) {
-                                Delta::HalfPage
+                                ViewDelta::HalfPage
                             } else {
-                                Delta::Number(1)
+                                ViewDelta::Number(1)
                             },
                             target_view: None,
                         }))
@@ -50,35 +48,41 @@ impl Keybinding {
                         Some(Action::Normal(NormalAction::PanHorizontal {
                             direction: Direction::back_if(key.code == KeyCode::Left),
                             delta: if key.modifiers.contains(KeyModifiers::SHIFT) {
-                                Delta::HalfPage
+                                ViewDelta::HalfPage
                             } else {
-                                Delta::Number(1)
+                                ViewDelta::Number(1)
                             },
                             target_view: None,
                         }))
                     }
-                    KeyCode::Home | KeyCode::End | KeyCode::Char('g') => {
+                    KeyCode::Home | KeyCode::Char('g') => {
                         Some(Action::Normal(NormalAction::PanVertical {
-                            direction: Direction::back_if(matches!(
-                                key.code,
-                                KeyCode::Home | KeyCode::Char('g')
-                            )),
-                            delta: Delta::Boundary,
+                            direction: Direction::Back,
+                            delta: ViewDelta::Boundary,
                             target_view: None,
                         }))
                     }
-                    KeyCode::Char('G') => Some(Action::Normal(NormalAction::FollowOutput)),
+                    KeyCode::End | KeyCode::Char('G') => {
+                        Some(Action::Normal(NormalAction::FollowOutput))
+                    }
                     KeyCode::PageUp | KeyCode::PageDown | KeyCode::Char(' ') => {
                         Some(Action::Normal(NormalAction::PanVertical {
                             direction: Direction::back_if(key.code == KeyCode::PageUp),
-                            delta: Delta::Page,
+                            delta: ViewDelta::Page,
                             target_view: None,
                         }))
                     }
                     KeyCode::Char(c @ ('u' | 'd')) => {
                         Some(Action::Normal(NormalAction::PanVertical {
                             direction: Direction::back_if(c == 'u'),
-                            delta: Delta::HalfPage,
+                            delta: ViewDelta::HalfPage,
+                            target_view: None,
+                        }))
+                    }
+                    KeyCode::Char(c @ ('p' | 'n')) => {
+                        Some(Action::Normal(NormalAction::PanVertical {
+                            direction: Direction::back_if(c == 'p'),
+                            delta: ViewDelta::Match,
                             target_view: None,
                         }))
                     }
@@ -91,24 +95,24 @@ impl Keybinding {
                     KeyCode::Up | KeyCode::Down => Some(Action::Filter(FilterAction::Move {
                         direction: Direction::back_if(key.code == KeyCode::Up),
                         select: key.modifiers.contains(KeyModifiers::SHIFT),
-                        delta: Delta::Number(1),
+                        delta: ViewDelta::Number(1),
                     })),
                     KeyCode::Home | KeyCode::End => Some(Action::Filter(FilterAction::Move {
                         direction: Direction::back_if(key.code == KeyCode::Home),
                         select: key.modifiers.contains(KeyModifiers::SHIFT),
-                        delta: Delta::Boundary,
+                        delta: ViewDelta::Boundary,
                     })),
                     KeyCode::PageUp | KeyCode::PageDown => {
                         Some(Action::Filter(FilterAction::Move {
                             direction: Direction::back_if(key.code == KeyCode::PageUp),
                             select: key.modifiers.contains(KeyModifiers::SHIFT),
-                            delta: Delta::Page,
+                            delta: ViewDelta::Page,
                         }))
                     }
                     KeyCode::Char(c @ ('u' | 'd')) => Some(Action::Filter(FilterAction::Move {
                         direction: Direction::back_if(c == 'u'),
                         select: key.modifiers.contains(KeyModifiers::SHIFT),
-                        delta: Delta::HalfPage,
+                        delta: ViewDelta::HalfPage,
                     })),
                     KeyCode::Char(' ') | KeyCode::Enter => {
                         Some(Action::Filter(FilterAction::ToggleSelectedFilter))
@@ -127,21 +131,28 @@ impl Keybinding {
                             .modifiers
                             .intersects(KeyModifiers::ALT | KeyModifiers::CONTROL)
                         {
-                            Delta::HalfPage
+                            ViewDelta::HalfPage
                         } else {
-                            Delta::Number(1)
+                            ViewDelta::Number(1)
                         },
                     })),
+                    KeyCode::Char(c @ ('p' | 'n' | 'P' | 'N')) => {
+                        Some(Action::Visual(VisualAction::Move {
+                            direction: Direction::back_if(c.to_ascii_lowercase() == 'p'),
+                            delta: ViewDelta::Match,
+                            select: key.modifiers.contains(KeyModifiers::SHIFT),
+                        }))
+                    }
                     KeyCode::Home | KeyCode::End => Some(Action::Visual(VisualAction::Move {
                         direction: Direction::back_if(key.code == KeyCode::Home),
                         select: key.modifiers.contains(KeyModifiers::SHIFT),
-                        delta: Delta::Boundary,
+                        delta: ViewDelta::Boundary,
                     })),
                     KeyCode::PageUp | KeyCode::PageDown => {
                         Some(Action::Visual(VisualAction::Move {
                             direction: Direction::back_if(key.code == KeyCode::PageUp),
                             select: key.modifiers.contains(KeyModifiers::SHIFT),
-                            delta: Delta::Page,
+                            delta: ViewDelta::Page,
                         }))
                     }
                     KeyCode::Char(' ') | KeyCode::Enter => {

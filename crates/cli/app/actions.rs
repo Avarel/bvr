@@ -1,4 +1,4 @@
-use super::InputMode;
+use super::{InputMode, ViewDelta};
 use crate::direction::Direction;
 
 pub enum Action {
@@ -10,22 +10,15 @@ pub enum Action {
     Filter(FilterAction),
 }
 
-pub enum Delta {
-    Number(u16),
-    Page,
-    HalfPage,
-    Boundary,
-}
-
 pub enum NormalAction {
     PanVertical {
         direction: Direction,
-        delta: Delta,
+        delta: ViewDelta,
         target_view: Option<usize>,
     },
     PanHorizontal {
         direction: Direction,
-        delta: Delta,
+        delta: ViewDelta,
         target_view: Option<usize>,
     },
     FollowOutput,
@@ -39,7 +32,7 @@ pub enum VisualAction {
     Move {
         direction: Direction,
         select: bool,
-        delta: Delta,
+        delta: ViewDelta,
     },
     ToggleSelectedLine,
     ToggleLine {
@@ -52,7 +45,7 @@ pub enum FilterAction {
     Move {
         direction: Direction,
         select: bool,
-        delta: Delta,
+        delta: ViewDelta,
     },
     ToggleSelectedFilter,
     RemoveSelectedFilter,

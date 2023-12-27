@@ -62,6 +62,10 @@ impl Viewport {
         }
     }
 
+    pub fn top_to(&mut self, index: usize) {
+        self.top = index.min(self.vend.saturating_sub(1));
+    }
+
     pub fn jump_to(&mut self, index: usize) {
         if !(self.top..self.bottom()).contains(&index) {
             // height remains unchanged
@@ -73,6 +77,7 @@ impl Viewport {
                 self.top = index.saturating_sub(self.height).saturating_add(1);
             }
         }
+        self.top = self.top.min(self.vend.saturating_sub(1));
     }
 
     pub fn pan_vertical(&mut self, direction: Direction, delta: usize) {

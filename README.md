@@ -32,20 +32,20 @@ a plethora of other features that I couldn't find in any other pager.
 ### In-Progress or Planned
 | Feature            | Description                                                 | Progress |
 | ------------------ | ----------------------------------------------------------- | -------- |
-| Filter Jumping     | Jump to the next or previous line that matches a filter.    | Planned  |
+| Export Output      | Export selected data to a file or pipe it to a new command. | Planned  |
 | Custom Keybindings | Customize the keybindings of the program.                   | Planned  |
 | Word-Wrapping      | Wrap long lines.                                            | Planned  |
-| Export Output      | Export selected data to a file or pipe it to a new command. | Planned  |
 
 ### Basic Support
 | Feature              | Description                                                 | Progress |
 | -------------------- | ----------------------------------------------------------- | -------- |
 | Piping Files         | View piped outputs of other programs, ie. `cat file \| bvr` | Basic    |
 | Status Bar           | View current state of the pager.                            | Basic    |
-| Horizontal Scrolling | Pan the view horizontally.                                  | Basic    |
 | Commands             | Use modal commands to interact with the pager.              | Basic    |
+| Horizontal Scrolling | Pan the view horizontally.                                  | Basic    |
 | Mouse Support        | Use mouse to interact with the TUI.                         | Done     |
 | Regex Filters        | Select and disable additive search filters.                 | Done     |
+| Filter Match Jumping | Jump to the next or previous line that matches a filter.    | Done     |
 | Multiplexing         | View multiple files through tabs or windows.                | Done     |
 | Follow Output        | Constantly scroll down as new data is loaded.               | Done     |
 
@@ -58,8 +58,9 @@ This is the default mode. You can scroll through files.
 | Keybinding                      | Description                                          |
 | ------------------------------- | ---------------------------------------------------- |
 | `Up` and `Down`                 | Pan the view.                                        |
-| `Home`/`g` and `End`            | Pan the view to the start or end of the file.        |
-| `G`                             | Pan the view to the end of the file (follow output). |
+| `n` `p`                         | Pan to next/previous active match.                   |
+| `Home`/`g`                      | Pan the view to end of the file.                     |
+| `End`/`G`                       | Pan the view to the end of the file (follow output). |
 | `PageUp` and `PageDown`/`Space` | Pan the view by a page.                              |
 | `Shift` + `Up` and `Down`       | Pan the view by a half-page.                         |
 
@@ -79,11 +80,12 @@ In this mode, you can enter commands to interact with the pager.
 ### Visual Mode
 In this mode, you can select lines to bookmark.
 
-| Keybinding                | Description                                      |
-| ------------------------- | ------------------------------------------------ |
-| `Up` and `Down`           | Move the select cursor.                          |
-| `Shift` + `Up` and `Down` | Expand the select cursor into a selection range. |
-| `Space` and `Enter`       | Toggle bookmark at current line.                 |
+| Keybinding                             | Description                                      |
+| -------------------------------------- | ------------------------------------------------ |
+| `Up` and `Down`                        | Move the select cursor.                          |
+| `n` `p`                                | Select next/previous active match.               |
+| `Shift` + `Up` and `Down`, `n` and `p` | Expand the select cursor into a selection range. |
+| `Space` and `Enter`                    | Toggle bookmark at current line.                 |
 
 ### Filter Mode
 In this mode, you can toggle filters from bookmarks or searches to omit or include certain lines in the viewer.
