@@ -9,7 +9,7 @@ use bvr_core::Result;
 use bvr_core::{SegBuffer, SegStr};
 use ratatui::style::Color;
 use regex::bytes::Regex;
-use std::fs::File;
+use std::{collections::BTreeMap, fs::File};
 
 pub struct Instance {
     name: String,
@@ -17,6 +17,7 @@ pub struct Instance {
     viewport: Viewport,
     cursor: CursorState,
     pub filterer: Filterer,
+    // context: BTreeMap<usize, usize>,
 }
 
 bitflags! {
@@ -44,6 +45,7 @@ impl Instance {
             cursor: CursorState::new(),
             viewport: Viewport::new(),
             filterer: Filterer::new(),
+            // context: BTreeMap::new(),
         }
     }
 
@@ -60,12 +62,34 @@ impl Instance {
     }
 
     pub fn visible_line_count(&self) -> usize {
-        if self.filterer.filters.all().is_enabled() {
-            self.buf.line_count()
+        if let Some(composite) = self.filterer.composite.as_ref() {
+            composite.len()
         } else {
-            self.filterer.composite.len()
+            self.buf.line_count()
         }
     }
+
+    fn line_at_view_index(&self, index: usize) -> Option<usize> {
+        if let Some(composite) = self.filterer.composite.as_ref() {
+            composite.get(index)
+        } else {
+            Some(index)
+        }
+    }
+
+    // pub fn translate_context_to_realspace(&self) -> usize {
+    //     let mut top = self.viewport.top();
+
+    //     for (&k, &v) in self.context.iter() {
+    //         if k < top {
+    //             top = top.saturating_sub(v);
+    //         } else {
+    //             break;
+    //         }
+    //     }
+
+    //     top
+    // }
 
     pub fn update_and_view(
         &mut self,
@@ -79,11 +103,7 @@ impl Instance {
 
         let mut lines = Vec::with_capacity(self.viewport.line_range().len());
         for index in self.viewport.line_range() {
-            let line_number = if self.filterer.filters.all().is_enabled() {
-                index
-            } else if let Some(line_number) = self.filterer.composite.get(index) {
-                line_number
-            } else {
+            let Some(line_number) = self.line_at_view_index(index) else {
                 break;
             };
 
@@ -131,14 +151,6 @@ impl Instance {
             });
         }
         lines
-    }
-
-    fn line_at_view_index(&mut self, index: usize) -> usize {
-        if self.filterer.filters.all().is_enabled() {
-            index
-        } else {
-            self.filterer.composite.get(index).unwrap()
-        }
     }
 
     pub fn filter_search(&mut self, regex: Regex) {
@@ -200,12 +212,12 @@ impl Instance {
     pub fn toggle_select_bookmarks(&mut self) {
         match self.cursor.state() {
             Cursor::Singleton(i) => {
-                let line_number = self.line_at_view_index(i);
+                let line_number = self.line_at_view_index(i).unwrap();
                 self.filterer.filters.bookmarks_mut().toggle(line_number);
             }
             Cursor::Selection(start, end, _) => {
                 for i in (start..=end).rev() {
-                    let line_number = self.line_at_view_index(i);
+                    let line_number = self.line_at_view_index(i).unwrap();
                     self.filterer.filters.bookmarks_mut().toggle(line_number);
                 }
             }
@@ -216,6 +228,7 @@ impl Instance {
     }
 
     pub fn export_file(&mut self, file: File) -> Result<()> {
-        self.buf.write_file(file, self.filterer.composite.clone())
+        self.buf
+            .write_file(file, self.filterer.composite.as_ref().unwrap().clone())
     }
 }

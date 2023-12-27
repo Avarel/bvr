@@ -411,7 +411,13 @@ impl App {
                             Some(Duration::from_secs(2)),
                         );
                         return true;
-                    } else if !viewer.filterer.composite.is_complete() {
+                    } else if viewer
+                        .filterer
+                        .composite
+                        .as_ref()
+                        .map(|c| !c.is_complete())
+                        .unwrap_or(false)
+                    {
                         self.status.submit_message(
                             format!(
                                 "{}: export not allowed composite is incomplete",

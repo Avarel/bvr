@@ -156,7 +156,7 @@ impl Bookmarks {
 }
 
 pub struct Filterer {
-    pub composite: LineMatches,
+    pub composite: Option<LineMatches>,
     pub viewport: Viewport,
     cursor: CursorState,
     pub(crate) filters: Filters,
@@ -241,7 +241,7 @@ pub struct FilterData<'a> {
 impl Filterer {
     pub fn new() -> Self {
         Self {
-            composite: LineMatches::empty(),
+            composite: None,
             viewport: Viewport::new(),
             cursor: CursorState::new(),
             filters: Filters::new(),
@@ -300,7 +300,7 @@ impl Filterer {
 
     pub fn compute_composite(&mut self) {
         if self.filters.all().is_enabled() {
-            self.composite = LineMatches::empty();
+            self.composite = None;
             return;
         }
         let filters = self
@@ -308,7 +308,7 @@ impl Filterer {
             .iter_active()
             .map(|filter| filter.as_line_matches())
             .collect();
-        self.composite = LineMatches::compose(filters, false).unwrap();
+        self.composite = LineMatches::compose(filters, false).ok();
     }
 
     pub fn move_select(&mut self, dir: Direction, select: bool, delta: ViewDelta) {
