@@ -6,6 +6,21 @@ struct QueueMatch {
     index: usize,
 }
 
+impl QueueMatch {
+    fn is_ready(&self) -> bool {
+        // We reached the end of this queue but its not complete
+        self.matches.is_complete() || self.index < self.matches.len()
+    }
+
+    fn peek(&self) -> Option<usize> {
+        while !self.is_ready() {
+            // Opportunistically spin while we wait for the queue to be ready
+            std::hint::spin_loop();
+        }
+        self.matches.get(self.index)
+    }
+}
+
 struct Queues {
     queues: Vec<QueueMatch>,
     strategy: CompositeStrategy,
@@ -30,32 +45,25 @@ impl Queues {
             CompositeStrategy::Union => {
                 // Take the lowest line number from all the queues
                 // and progress the queue that yielded the lowest line number
-                'outer: loop {
-                    let mut min = None;
-                    for queue in &mut self.queues {
-                        // We reached the end of this queue but its not complete
-                        // It could yield a lower line number than all of the other queues
-                        if queue.index >= queue.matches.len() && !queue.matches.is_complete() {
-                            continue 'outer;
-                        }
-                        if let Some(ln) = queue.matches.get(queue.index) {
-                            if let Some((_, min_ln)) = min {
-                                if ln < min_ln {
-                                    min = Some((&mut queue.index, ln));
-                                }
-                            } else {
+                let mut min = None;
+                for queue in self.queues.iter_mut() {
+                    if let Some(ln) = queue.peek() {
+                        if let Some((_, min_ln)) = min {
+                            if ln < min_ln {
                                 min = Some((&mut queue.index, ln));
                             }
+                        } else {
+                            min = Some((&mut queue.index, ln));
                         }
                     }
+                }
 
-                    return if let Some((offset, line_number)) = min {
-                        *offset += 1;
-                        Some(line_number)
-                    } else {
-                        assert!(self.queues.iter().all(|queue| queue.matches.is_complete()));
-                        None
-                    };
+                if let Some((offset, line_number)) = min {
+                    *offset += 1;
+                    Some(line_number)
+                } else {
+                    assert!(self.queues.iter().all(|queue| queue.matches.is_complete()));
+                    None
                 }
             }
             CompositeStrategy::Intersection => {
@@ -108,5 +116,55 @@ impl LineCompositeRemote {
     fn mark_complete(&self) {
         self.complete
             .store(true, std::sync::atomic::Ordering::Relaxed);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::LineMatches;
+
+    #[test]
+    fn test_composite_basic() {
+        let matches1 = LineMatches::from(vec![1, 2, 3, 4, 5]);
+        let matches2 = LineMatches::from(vec![1, 3, 5, 7, 9]);
+
+        let composite = LineMatches::compose_complete(vec![matches1, matches2]).unwrap();
+
+        let result = vec![1, 2, 3, 4, 5, 7, 9];
+
+        let inner = composite.into_inner();
+        for i in 0..result.len() {
+            assert_eq!(result.get(i).copied(), inner.get(i));
+        }
+    }
+
+    #[test]
+    fn test_composite_disjoint() {
+        let matches1 = LineMatches::from(vec![1, 2, 3, 4, 5]);
+        let matches2 = LineMatches::from(vec![6, 7, 8, 9, 10]);
+
+        let composite = LineMatches::compose_complete(vec![matches1, matches2]).unwrap();
+
+        let result = vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+
+        let inner = composite.into_inner();
+        for i in 0..result.len() {
+            assert_eq!(result.get(i).copied(), inner.get(i));
+        }
+    }
+
+    #[test]
+    fn test_composite_same() {
+        let matches1 = LineMatches::from(vec![1, 2, 3, 4, 5]);
+        let matches2 = LineMatches::from(vec![1, 2, 3, 4, 5]);
+
+        let composite = LineMatches::compose_complete(vec![matches1, matches2]).unwrap();
+
+        let result = vec![1, 2, 3, 4, 5];
+
+        let inner = composite.into_inner();
+        for i in 0..result.len() {
+            assert_eq!(result.get(i).copied(), inner.get(i));
+        }
     }
 }

@@ -61,7 +61,7 @@ impl LineIndexRemote {
             while curr < len {
                 let end = (curr + Segment::MAX_SIZE).min(len);
                 let (task, task_rx) = IndexingTask::new(&file, curr, end)?;
-                sx.send(task_rx).unwrap();
+                sx.send(task_rx).map_err(|_| Error::Internal)?;
 
                 std::thread::spawn(|| task.compute());
 
@@ -81,7 +81,7 @@ impl LineIndexRemote {
             }
         }
 
-        spawner.join().unwrap().unwrap();
+        spawner.join().map_err(|_| Error::Internal)??;
         self.buf.push(len);
 
         Ok(())

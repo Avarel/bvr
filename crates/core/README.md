@@ -17,11 +17,11 @@ data loaded into memory. They are currently configured to be 1MB in size.
 Data from the segment buffers is accessed through the `SegBytes` and `SegStr`.
 They borrow and pin the segment, preventing it from being unloaded from memory.
 
-## Index
+### Index
 The `LineIndex` is used to map between line numbers and byte offsets. It is primarily
 used to answer questions like "what line is at this byte offset?" and "what byte
 offset is at this line number?".
 
-## Matches
+### Matches
 The `LineMatches` is used to store matches in iteration order for a particular
 regex upon a buffer. They can be composed into a single `LineMatches`.

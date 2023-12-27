@@ -1,4 +1,4 @@
-//! The `buf` module contains the [Buffer] struct, which is the main
+//! The `buf` module contains the [SegBuffer] struct, which is the main
 //! interface for creating and interacting with the segmented buffers.
 
 pub mod segment;
@@ -19,9 +19,9 @@ use std::{
 /// A segmented buffer that holds data in multiple segments.
 ///
 /// The `Buffer` struct represents a buffer that is divided into multiple segments.
-/// It contains the [BufferIndex] and the internal representation of the segments.
+/// It contains the [LineIndex] and the internal representation of the segments.
 pub struct SegBuffer {
-    /// The [BufferIndex] of this buffer.
+    /// The [LineIndex] of this buffer.
     index: LineIndex,
     /// The internal representation of this buffer.
     repr: BufferRepr,
@@ -142,7 +142,7 @@ impl SegBuffer {
         self.index.line_count()
     }
 
-    /// Return the [InflightIndex] of this [SegBuffer].
+    /// Return the [LineIndex] of this [SegBuffer].
     #[inline]
     pub fn index(&self) -> &LineIndex {
         &self.index

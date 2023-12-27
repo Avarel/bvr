@@ -17,13 +17,11 @@ impl LineMatchRemote {
     /// Index a file and load the data into the associated [InflightIndex].
     pub fn search(mut self, mut iter: ContiguousSegmentIterator, regex: Regex) -> Result<()> {
         while let Some((idx, start, buf)) = iter.next_buf() {
+            if !self.buf.has_readers() {
+                break;
+            }
             for res in regex.find_iter(buf) {
-                if !self.buf.has_readers() {
-                    break;
-                }
-
                 let match_start = res.start() as u64 + start;
-
                 let line_number = idx.line_of_data(match_start).unwrap();
 
                 if let Some(&last) = self.buf.last() {
@@ -136,6 +134,31 @@ impl LineMatches {
                 Self { buf, complete }
             }
         }
+    }
+
+    #[cfg(test)]
+    #[inline]
+    pub fn compose_complete(filters: Vec<Self>) -> Result<Self> {
+        use self::composite::CompositeStrategy;
+
+        Ok(match filters.len() {
+            0 => Self::empty(),
+            1 => Self {
+                buf: filters.into_iter().next().unwrap().into_inner(),
+                complete: Arc::new(AtomicBool::new(true)),
+            },
+            _ => {
+                let (buf, writer) = CowVec::new();
+                let complete = Arc::new(AtomicBool::new(false));
+                composite::LineCompositeRemote {
+                    buf: writer,
+                    complete: complete.clone(),
+                    strategy: CompositeStrategy::Union,
+                }
+                .compute(filters)?;
+                Self { buf, complete }
+            }
+        })
     }
 
     /// Searches for a regular expression pattern in a segmented buffer.
