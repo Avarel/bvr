@@ -74,8 +74,7 @@ impl App {
         }
     }
 
-    pub fn open_file(&mut self, path: impl AsRef<Path>) -> Result<()> {
-        let path = path.as_ref();
+    pub fn open_file(&mut self, path: &Path) -> Result<()> {
         let file = std::fs::File::open(path)?;
         let name = path
             .file_name()
@@ -83,14 +82,13 @@ impl App {
             .unwrap_or_else(|| String::from("Unnamed File"));
         self.push_instance(
             name,
-            SegBuffer::read_file(file, NonZeroUsize::new(25).unwrap())?,
+            SegBuffer::read_file(file, NonZeroUsize::new(25).unwrap(), false)?,
         );
         Ok(())
     }
 
-    pub fn open_stream(&mut self, stream: BoxedStream) -> Result<()> {
-        let name = String::from("Stream");
-        self.push_instance(name, SegBuffer::read_stream(stream));
+    pub fn open_stream(&mut self, name: String, stream: BoxedStream) -> Result<()> {
+        self.push_instance(name, SegBuffer::read_stream(stream, false)?);
         Ok(())
     }
 
@@ -371,7 +369,7 @@ impl App {
             Some("q" | "quit") => return false,
             Some("open") => {
                 let path = parts.collect::<String>();
-                if let Err(err) = self.open_file(&path) {
+                if let Err(err) = self.open_file(path.as_ref()) {
                     self.status
                         .submit_message(format!("{path}: {err}"), Some(Duration::from_secs(2)));
                 }

@@ -85,8 +85,8 @@ impl BufferRepr {
 }
 
 impl SegBuffer {
-    pub fn read_file(file: File, seg_count: NonZeroUsize) -> Result<Self> {
-        let index = LineIndex::read_file(file.try_clone()?);
+    pub fn read_file(file: File, seg_count: NonZeroUsize, complete: bool) -> Result<Self> {
+        let index = LineIndex::read_file(file.try_clone()?, complete)?;
 
         Ok(Self {
             index,
@@ -98,34 +98,9 @@ impl SegBuffer {
         })
     }
 
-    pub fn read_stream(stream: BoxedStream) -> Self {
+    pub fn read_stream(stream: BoxedStream, complete: bool) -> Result<Self> {
         let (sx, rx) = std::sync::mpsc::channel();
-        let index = LineIndex::read_stream(stream, sx);
-
-        Self {
-            index,
-            repr: BufferRepr::Stream {
-                pending_segs: Some(rx),
-                segments: Vec::new(),
-            },
-        }
-    }
-
-    pub fn read_file_complete(file: File, seg_count: NonZeroUsize) -> Result<Self> {
-        let index = LineIndex::read_file_complete(file.try_clone()?)?;
-        Ok(Self {
-            index,
-            repr: BufferRepr::File {
-                len: file.metadata()?.len(),
-                file,
-                segments: LruCache::new(seg_count),
-            },
-        })
-    }
-
-    pub fn read_stream_complete(stream: BoxedStream) -> Result<Self> {
-        let (sx, rx) = std::sync::mpsc::channel();
-        let index = LineIndex::read_stream_complete(stream, sx)?;
+        let index = LineIndex::read_stream(stream, sx, complete)?;
 
         Ok(Self {
             index,
@@ -350,8 +325,8 @@ mod test {
     fn file_stream_consistency_base(file: File, line_count: usize) -> Result<()> {
         let stream = BufReader::new(file.try_clone()?);
 
-        let mut file_index = SegBuffer::read_file_complete(file, NonZeroUsize::new(25).unwrap())?;
-        let mut stream_index = SegBuffer::read_stream_complete(Box::new(stream))?;
+        let mut file_index = SegBuffer::read_file(file, NonZeroUsize::new(25).unwrap(), true)?;
+        let mut stream_index = SegBuffer::read_stream(Box::new(stream), true)?;
 
         assert_eq!(file_index.line_count(), stream_index.line_count());
         assert_eq!(file_index.line_count(), line_count);
@@ -387,7 +362,7 @@ mod test {
         let file_len = file.metadata()?.len();
         let mut reader = BufReader::new(file.try_clone()?);
 
-        let file_buffer = SegBuffer::read_file_complete(file, NonZeroUsize::new(25).unwrap())?;
+        let file_buffer = SegBuffer::read_file(file, NonZeroUsize::new(25).unwrap(), true)?;
         let mut buffers = file_buffer.segment_iter()?;
 
         let mut total_bytes = 0;

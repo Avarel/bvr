@@ -135,30 +135,26 @@ pub struct LineIndex {
 
 impl LineIndex {
     #[inline]
-    pub fn read_file(file: File) -> Self {
+    pub fn read_file(file: File, complete: bool) -> Result<Self> {
         let (buf, writer) = CowVec::new();
-        std::thread::spawn(move || LineIndexRemote { buf: writer }.index_file(file));
-        Self { buf }
-    }
-
-    #[inline]
-    pub fn read_stream(stream: BoxedStream, outgoing: Sender<Segment>) -> Self {
-        let (buf, writer) = CowVec::new();
-        std::thread::spawn(move || LineIndexRemote { buf: writer }.index_stream(stream, outgoing));
-        Self { buf }
-    }
-
-    #[inline]
-    pub fn read_file_complete(file: File) -> Result<Self> {
-        let (buf, writer) = CowVec::new();
-        LineIndexRemote { buf: writer }.index_file(file)?;
+        let task = move || LineIndexRemote { buf: writer }.index_file(file);
+        if complete {
+            task()?;
+        } else {
+            std::thread::spawn(task);
+        }
         Ok(Self { buf })
     }
 
     #[inline]
-    pub fn read_stream_complete(stream: BoxedStream, outgoing: Sender<Segment>) -> Result<Self> {
+    pub fn read_stream(stream: BoxedStream, outgoing: Sender<Segment>, complete: bool) -> Result<Self> {
         let (buf, writer) = CowVec::new();
-        LineIndexRemote { buf: writer }.index_stream(stream, outgoing)?;
+        let task = move || LineIndexRemote { buf: writer }.index_stream(stream, outgoing);
+        if complete {
+            task()?;
+        } else {
+            std::thread::spawn(task);
+        }
         Ok(Self { buf })
     }
 
