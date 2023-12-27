@@ -19,7 +19,9 @@ impl LineMatchRemote {
             if !self.buf.has_readers() {
                 break;
             }
-            for res in regex.find_iter(buf) {
+
+            let mut buf_start = 0;
+            while let Some(res) = regex.find_at(buf, buf_start as usize) {
                 let match_start = res.start() as u64 + start;
                 let line_number = idx.line_of_data(match_start).unwrap();
 
@@ -30,7 +32,9 @@ impl LineMatchRemote {
                     debug_assert!(line_number > last);
                 }
 
-                self.buf.push(line_number)
+                self.buf.push(line_number);
+                
+                buf_start = idx.data_of_line(line_number + 1).unwrap() - start;
             }
         }
         Ok(())
@@ -44,7 +48,89 @@ impl Drop for LineMatchRemote {
     }
 }
 
+#[derive(Clone)]
+pub struct LineMatches {
+    buf: CowVec<usize>,
+    completed: Arc<AtomicBool>,
+    // Optimization field for composite filters
+    // Minimum length of all filters combined
+    min_len: usize,
+}
+
 impl LineMatches {
+    #[inline]
+    pub fn empty() -> Self {
+        Self {
+            buf: CowVec::empty(),
+            completed: Arc::new(AtomicBool::new(true)),
+            min_len: 0,
+        }
+    }
+
+    #[inline]
+    pub fn search(iter: ContiguousSegmentIterator, regex: Regex) -> Self {
+        let (buf, writer) = CowVec::new();
+        let complete = Arc::new(AtomicBool::new(false));
+        std::thread::spawn({
+            let complete = complete.clone();
+            move || {
+                LineMatchRemote {
+                    buf: writer,
+                    completed: complete,
+                }
+                .search(iter, regex)
+            }
+        });
+        Self {
+            buf,
+            completed: complete,
+            min_len: 0,
+        }
+    }
+
+    #[inline]
+    pub fn compose(filters: Vec<Self>, complete: bool) -> Result<Self> {
+        match filters.len() {
+            0 => Ok(Self::empty()),
+            1 => Ok(Self {
+                buf: filters.into_iter().next().unwrap().into_inner(),
+                completed: Arc::new(AtomicBool::new(true)),
+                min_len: 0,
+            }),
+            _ => {
+                // TODO: edit for strategy
+                let min_len = filters.iter().map(|f| f.len()).max().unwrap();
+                let (buf, writer) = CowVec::new();
+                let completed = Arc::new(AtomicBool::new(false));
+                let task = {
+                    let completed = completed.clone();
+                    move || {
+                        composite::LineCompositeRemote {
+                            buf: writer,
+                            completed,
+                            strategy: composite::CompositeStrategy::Union,
+                        }
+                        .compute(filters)
+                    }
+                };
+                if complete {
+                    task()?;
+                } else {
+                    std::thread::spawn(task);
+                }
+                Ok(Self {
+                    buf,
+                    completed,
+                    min_len,
+                })
+            }
+        }
+    }
+
+    pub(crate) fn into_inner(self) -> CowVec<usize> {
+        self.buf
+    }
+
     #[inline]
     pub fn is_complete(&self) -> bool {
         self.completed.load(std::sync::atomic::Ordering::Relaxed)
@@ -96,7 +182,7 @@ impl LineMatches {
     }
 
     pub fn len(&self) -> usize {
-        self.buf.len()
+        self.min_len.max(self.buf.len())
     }
 
     pub fn is_empty(&self) -> bool {
@@ -108,81 +194,10 @@ impl LineMatches {
     }
 }
 
-#[derive(Clone)]
-pub struct LineMatches {
-    buf: CowVec<usize>,
-    completed: Arc<AtomicBool>,
-}
-
-impl LineMatches {
-    #[inline]
-    pub fn empty() -> Self {
-        Self {
-            buf: CowVec::empty(),
-            completed: Arc::new(AtomicBool::new(true)),
-        }
-    }
-
-    #[inline]
-    pub fn search(iter: ContiguousSegmentIterator, regex: Regex) -> Self {
-        let (buf, writer) = CowVec::new();
-        let complete = Arc::new(AtomicBool::new(false));
-        std::thread::spawn({
-            let complete = complete.clone();
-            move || {
-                LineMatchRemote {
-                    buf: writer,
-                    completed: complete,
-                }
-                .search(iter, regex)
-            }
-        });
-        Self {
-            buf,
-            completed: complete,
-        }
-    }
-
-    #[inline]
-    pub fn compose(filters: Vec<Self>, complete: bool) -> Result<Self> {
-        match filters.len() {
-            0 => Ok(Self::empty()),
-            1 => Ok(Self {
-                buf: filters.into_iter().next().unwrap().into_inner(),
-                completed: Arc::new(AtomicBool::new(true)),
-            }),
-            _ => {
-                let (buf, writer) = CowVec::new();
-                let completed = Arc::new(AtomicBool::new(false));
-                let task = {
-                    let completed = completed.clone();
-                    move || {
-                        composite::LineCompositeRemote {
-                            buf: writer,
-                            completed,
-                            strategy: composite::CompositeStrategy::Union,
-                        }
-                        .compute(filters)
-                    }
-                };
-                if complete {
-                    task()?;
-                } else {
-                    std::thread::spawn(task);
-                }
-                Ok(Self { buf, completed })
-            }
-        }
-    }
-
-    pub(crate) fn into_inner(self) -> CowVec<usize> {
-        self.buf
-    }
-}
-
 impl From<Vec<usize>> for LineMatches {
     fn from(vec: Vec<usize>) -> Self {
         Self {
+            min_len: vec.len(),
             buf: CowVec::from(vec),
             completed: Arc::new(AtomicBool::new(true)),
         }
