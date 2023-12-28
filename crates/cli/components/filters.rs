@@ -376,8 +376,12 @@ impl Filterer {
     }
 
     pub fn compute_jump(&self, i: usize, direction: Direction) -> Option<usize> {
-        if !self.filters.all.is_enabled() {
-            return None
+        if self.composite.is_some() {
+            // The composite is literally all matches
+            return match direction {
+                Direction::Back => Some(i.saturating_sub(1)),
+                Direction::Next => Some(i.saturating_add(1))
+            }
         }
         match direction {
             Direction::Back => self

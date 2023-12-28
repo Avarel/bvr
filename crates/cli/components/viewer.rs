@@ -9,7 +9,7 @@ use bvr_core::Result;
 use bvr_core::{SegBuffer, SegStr};
 use ratatui::style::Color;
 use regex::bytes::Regex;
-use std::{collections::BTreeMap, fs::File};
+use std::fs::File;
 
 pub struct Instance {
     name: String,
@@ -17,7 +17,6 @@ pub struct Instance {
     viewport: Viewport,
     cursor: CursorState,
     pub filterer: Filterer,
-    // context: BTreeMap<usize, usize>,
 }
 
 bitflags! {
@@ -45,7 +44,6 @@ impl Instance {
             cursor: CursorState::new(),
             viewport: Viewport::new(),
             filterer: Filterer::new(),
-            // context: BTreeMap::new(),
         }
     }
 
@@ -72,24 +70,24 @@ impl Instance {
     fn line_at_view_index(&self, index: usize) -> Option<usize> {
         if let Some(composite) = self.filterer.composite.as_ref() {
             composite.get(index)
-        } else {
+        } else if index < self.buf.line_count() {
             Some(index)
+        } else {
+            None
         }
     }
 
-    // pub fn translate_context_to_realspace(&self) -> usize {
-    //     let mut top = self.viewport.top();
-
-    //     for (&k, &v) in self.context.iter() {
-    //         if k < top {
-    //             top = top.saturating_sub(v);
-    //         } else {
-    //             break;
-    //         }
-    //     }
-
-    //     top
-    // }
+    pub fn nearest_index(&self, line_number: usize) -> Option<usize> {
+        if let Some(composite) = self.filterer.composite.as_ref() {
+            composite
+                .nearest_backward(line_number)
+                .and_then(|ln| composite.find(ln))
+        } else if line_number < self.buf.line_count() {
+            Some(line_number.saturating_sub(1))
+        } else {
+            None
+        }
+    }
 
     pub fn update_and_view(
         &mut self,

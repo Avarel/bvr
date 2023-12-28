@@ -6,7 +6,7 @@ use std::{
     sync::{
         atomic::{AtomicUsize, Ordering},
         Arc,
-    },
+    }
 };
 
 struct RawBuf<T> {
@@ -149,6 +149,7 @@ where
     /// 
     /// This operation is O(n) where n is the number of elements to the right of the index.
     /// It will also always perform an allocation before swapping out the internal buffer.
+    #[allow(dead_code)]
     pub fn insert(&mut self, index: usize, elem: T) {
         // Unlike push, we can observe the buffer changing underneath us
         // in the case of concurrent readers. So we need to allocate a new
@@ -253,7 +254,6 @@ impl<T> CowVec<T> {
     }
 
     /// Constructs a new, empty `CowVec<T>`.
-    #[allow(dead_code)]
     #[inline]
     pub fn empty() -> Self {
         Self::new().0

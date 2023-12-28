@@ -140,15 +140,19 @@ impl LineMatches {
         self.buf.get(idx)
     }
 
-    pub fn has_line(&self, line_number: usize) -> bool {
+    pub fn find(&self, line_number: usize) -> Option<usize> {
         let slice = self.buf.snapshot();
         match *slice.as_slice() {
             [first, .., last] if (first..=last).contains(&line_number) => {
-                slice.binary_search(&line_number).is_ok()
+                slice.binary_search(&line_number).ok()
             }
-            [item] => item == line_number,
-            _ => false,
+            [item] if item == line_number => Some(0),
+            _ => None,
         }
+    }
+
+    pub fn has_line(&self, line_number: usize) -> bool {
+        self.find(line_number).is_some()
     }
 
     pub fn nearest_forward(&self, line_number: usize) -> Option<usize> {

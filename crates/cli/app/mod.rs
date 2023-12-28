@@ -253,6 +253,9 @@ impl App {
                         return true;
                     };
                     viewer.filterer.filters.bookmarks_mut().toggle(line_number);
+                    // TODO: future optimization opportunity, do not need to recompute composite
+                    // if the line number is part of a search filter and bookmark is not the only
+                    // filter that satisfies the line number
                     viewer.filterer.compute_composite();
                 }
             },
@@ -460,9 +463,11 @@ impl App {
                 }
             }
             Some(cmd) => {
-                if let Ok(n) = cmd.parse::<usize>() {
+                if let Ok(line_number) = cmd.parse::<usize>() {
                     if let Some(viewer) = self.mux.active_viewer_mut() {
-                        viewer.viewport_mut().jump_to(n.saturating_sub(1));
+                        if let Some(idx) = viewer.nearest_index(line_number) {
+                            viewer.viewport_mut().jump_to(idx);
+                        }
                     }
                 } else {
                     self.status.submit_message(
