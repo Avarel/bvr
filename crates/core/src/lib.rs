@@ -1,8 +1,6 @@
 pub mod buf;
 
-#[allow(dead_code)]
-pub(crate) mod collections;
-mod cowvec;
+pub mod collections;
 
 pub mod err;
 pub mod index;

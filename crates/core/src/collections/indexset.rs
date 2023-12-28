@@ -189,7 +189,10 @@ impl<T: Copy + Ord> BTreeSet<T> {
         (node_idx, position_within_node)
     }
 
-    fn locate_ith(&self, idx: usize) -> (usize, usize) {
+    fn locate_ith(&self, idx: usize) -> Option<(usize, usize)> {
+        if idx >= self.len() {
+            return None;
+        }
         let mut node_index = self.index.index_of(idx);
         let mut offset = 0;
 
@@ -205,7 +208,7 @@ impl<T: Copy + Ord> BTreeSet<T> {
             }
         }
 
-        (node_index, position_within_node)
+        Some((node_index, position_within_node))
     }
     /// Returns a reference to the element in the i-th position of the set, if any.
     ///
@@ -224,7 +227,7 @@ impl<T: Copy + Ord> BTreeSet<T> {
     /// assert_eq!(set.get_index(4), None);
     /// ```
     pub fn get_index(&self, idx: usize) -> Option<T> {
-        let (node_idx, position_within_node) = self.locate_ith(idx);
+        let (node_idx, position_within_node) = self.locate_ith(idx)?;
         if let Some(candidate_node) = self.inner.get(node_idx) {
             return candidate_node.get(position_within_node);
         }
@@ -232,13 +235,27 @@ impl<T: Copy + Ord> BTreeSet<T> {
         None
     }
     fn get_mut_index(&mut self, index: usize) -> Option<&mut T> {
-        let (node_idx, position_within_node) = self.locate_ith(index);
+        let (node_idx, position_within_node) = self.locate_ith(index)?;
         if let Some(_) = self.inner.get(node_idx) {
             return self.inner[node_idx].inner.get_mut(position_within_node);
         }
 
         None
     }
+
+    pub fn find(&self, value: T) -> Result<usize, usize> {
+        let (node_idx, position_within_node) = self.locate_value(value);
+        if let Some(candidate_node) = self.inner.get(node_idx) {
+            if let Some(candidate_value) = candidate_node.get(position_within_node) {
+                if value == candidate_value {
+                    return Ok(self.index.prefix_sum(node_idx, 0) + position_within_node);
+                }
+            }
+        }
+
+        Err(self.index.prefix_sum(node_idx, 0) + position_within_node)
+    }
+
     /// Returns a reference to the element in the set, if any, that is equal to
     /// the value.
     ///
@@ -267,10 +284,6 @@ impl<T: Copy + Ord> BTreeSet<T> {
     /// Returns a reference to the first element in the set, if any, that is not less than the
     /// input.
     ///
-    /// The value may be any borrowed form of the set's element type,
-    /// but the ordering on the borrowed form *must* match the
-    /// ordering on the element type.
-    ///
     /// # Examples
     ///
     /// ```
@@ -289,6 +302,34 @@ impl<T: Copy + Ord> BTreeSet<T> {
 
         None
     }
+
+    /// Returns a reference to the first element in the set, if any, that is strictly less than the
+    /// input.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use bvr_core::collections::indexset::BTreeSet;
+    ///
+    /// let set = BTreeSet::from_iter([1, 2, 3, 5]);
+    /// assert_eq!(set.upper_bound_exclusive(1), None);
+    /// assert_eq!(set.upper_bound_exclusive(2), Some(1));
+    /// assert_eq!(set.upper_bound_exclusive(4), Some(3));
+    /// ```
+    pub fn upper_bound_exclusive(&self, value: T) -> Option<T> {
+        let (node_idx, position_within_node) = self.locate_value(value);
+        if position_within_node != 0 {
+            if let Some(candidate_node) = self.inner.get(node_idx) {
+                return candidate_node.get(position_within_node - 1);
+            }
+        } else if node_idx != 0 {
+            if let Some(candidate_node) = self.inner.get(node_idx - 1) {
+                return candidate_node.inner.last().copied();
+            }
+        }
+        None
+    }
+
     /// Returns the number of elements in the set.
     ///
     /// # Examples
@@ -554,7 +595,7 @@ impl<T: Copy + Ord> BTreeSet<T> {
     /// assert!(set.is_empty());
     /// ```
     pub fn pop_index(&mut self, idx: usize) -> T {
-        let (node_idx, position_within_node) = self.locate_ith(idx);
+        let (node_idx, position_within_node) = self.locate_ith(idx).expect("valid index");
 
         self.delete_at(node_idx, position_within_node)
     }
@@ -714,6 +755,38 @@ impl<T: Copy + Ord> BTreeSet<T> {
 
         offset + position_within_node
     }
+
+    /// Gets an iterator that visits the elements in the `BTreeSet` in ascending
+    /// order.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use bvr_core::collections::indexset::BTreeSet;
+    ///
+    /// let set = BTreeSet::from_iter([1, 2, 3]);
+    /// let mut set_iter = set.iter();
+    /// assert_eq!(set_iter.next(), Some(1));
+    /// assert_eq!(set_iter.next(), Some(2));
+    /// assert_eq!(set_iter.next(), Some(3));
+    /// assert_eq!(set_iter.next(), None);
+    /// ```
+    ///
+    /// Values returned by the iterator are returned in ascending order:
+    ///
+    /// ```
+    /// use bvr_core::collections::indexset::BTreeSet;
+    ///
+    /// let set = BTreeSet::from_iter([3, 1, 2]);
+    /// let mut set_iter = set.iter();
+    /// assert_eq!(set_iter.next(), Some(1));
+    /// assert_eq!(set_iter.next(), Some(2));
+    /// assert_eq!(set_iter.next(), Some(3));
+    /// assert_eq!(set_iter.next(), None);
+    /// ```
+    pub fn iter(&self) -> Iter<T> {
+        return Iter::new(self);
+    }
 }
 
 impl<T> FromIterator<T> for BTreeSet<T>
@@ -755,6 +828,94 @@ where
             index: FenwickTree::from_iter(vec![0]),
             len: 0,
         }
+    }
+}
+
+/// An iterator over the items of a `BTreeSet`.
+///
+/// This `struct` is created by the [`iter`] method on [`BTreeSet`].
+/// See its documentation for more.
+///
+/// [`iter`]: BTreeSet::iter
+pub struct Iter<'a, T>
+where
+    T: Copy + Ord,
+{
+    btree: &'a BTreeSet<T>,
+    current_front_node_idx: usize,
+    current_front_idx: usize,
+    current_back_node_idx: usize,
+    current_back_idx: usize,
+    current_front_iterator: im::vector::Iter<'a, T>,
+    current_back_iterator: im::vector::Iter<'a, T>,
+}
+
+impl<'a, T> Iter<'a, T>
+where
+    T: Copy + Ord,
+{
+    pub fn new(btree: &'a BTreeSet<T>) -> Self {
+        return Self {
+            btree,
+            current_front_node_idx: 0,
+            current_front_idx: 0,
+            current_back_node_idx: btree.inner.len() - 1,
+            current_back_idx: btree.len(),
+            current_front_iterator: btree.inner[0].inner.iter(),
+            current_back_iterator: btree.inner[btree.inner.len() - 1].inner.iter(),
+        };
+    }
+}
+
+impl<'a, T> Iterator for Iter<'a, T>
+where
+    T: Copy + Ord,
+{
+    type Item = T;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.current_front_idx == self.current_back_idx {
+            return None
+        }
+        return if let Some(&value) = self.current_front_iterator.next() {
+            self.current_front_idx += 1;
+            Some(value)
+        } else {
+            if self.current_front_node_idx == self.btree.inner.len() - 1 {
+                return None
+            }
+            self.current_front_node_idx += 1;
+            self.current_front_iterator =
+                self.btree.inner[self.current_front_node_idx].inner.iter();
+            if let Some(&value) = self.current_front_iterator.next() {
+                return Some(value);
+            }
+
+            None
+        };
+    }
+}
+
+impl<'a, T> DoubleEndedIterator for Iter<'a, T>
+where
+    T: Copy + Ord,
+{
+    fn next_back(&mut self) -> Option<Self::Item> {
+        if self.current_front_idx == self.current_back_idx {
+            return None
+        }
+        return if let Some(&value) = self.current_back_iterator.next_back() {
+            self.current_back_idx -= 1;
+            Some(value)
+        } else {
+            if self.current_back_node_idx == 0 {
+                return None
+            };
+            self.current_back_node_idx -= 1;
+            self.current_back_iterator = self.btree.inner[self.current_back_node_idx].inner.iter();
+
+            self.next_back()
+        };
     }
 }
 

@@ -1,6 +1,6 @@
 use crate::{
     buf::segment::{Segment, SegmentMut},
-    cowvec::{CowVec, CowVecWriter},
+    collections::cowvec::{CowVec, CowVecWriter},
     err::{Error, Result},
 };
 use std::fs::File;
