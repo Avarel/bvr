@@ -16,5 +16,4 @@ regex = "1.10"
 arc-swap = "1.6"
 
 [dev-dependencies]
-tempfile = "3.8"
 anyhow = "1.0"
