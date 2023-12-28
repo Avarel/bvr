@@ -203,7 +203,7 @@ impl SegBuffer {
         let mut writer = BufWriter::new(file);
         let snap = lines.snapshot();
 
-        for ln in snap.iter() {
+        for ln in snap.iter().copied() {
             let line = self.get_bytes(ln).unwrap();
             writer.write_all(line.as_bytes())?;
         }

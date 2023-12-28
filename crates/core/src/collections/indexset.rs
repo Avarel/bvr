@@ -1,3 +1,6 @@
+// Persistent B-tree index set implementation, specialized for Copy types.
+// Based on `indexset` crate.
+
 const DEFAULT_INNER_SIZE: usize = 1 << 10;
 const CUTOFF_RATIO: usize = 2;
 const DEFAULT_CUTOFF: usize = DEFAULT_INNER_SIZE / CUTOFF_RATIO;
@@ -230,14 +233,6 @@ impl<T: Copy + Ord> BTreeSet<T> {
         let (node_idx, position_within_node) = self.locate_ith(idx)?;
         if let Some(candidate_node) = self.inner.get(node_idx) {
             return candidate_node.get(position_within_node);
-        }
-
-        None
-    }
-    fn get_mut_index(&mut self, index: usize) -> Option<&mut T> {
-        let (node_idx, position_within_node) = self.locate_ith(index)?;
-        if let Some(_) = self.inner.get(node_idx) {
-            return self.inner[node_idx].inner.get_mut(position_within_node);
         }
 
         None

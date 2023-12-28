@@ -73,10 +73,6 @@ impl LineIndexRemote {
         });
 
         while let Ok(task_rx) = rx.recv() {
-            if !self.buf.has_readers() {
-                break;
-            }
-
             while let Ok(line_data) = task_rx.recv() {
                 self.buf.push(line_data);
             }

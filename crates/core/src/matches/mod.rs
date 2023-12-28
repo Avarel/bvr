@@ -2,7 +2,7 @@ pub mod composite;
 
 use crate::{
     buf::ContiguousSegmentIterator,
-    cowvec::{CowVec, CowVecSnapshot, CowVecWriter},
+    collections::{CowVec, CowVecSnapshot, CowVecWriter},
     Result,
 };
 use regex::bytes::Regex;
@@ -18,7 +18,7 @@ struct LineMatchRemote {
 impl LineMatchRemote {
     pub fn search(mut self, mut iter: ContiguousSegmentIterator, regex: Regex) -> Result<()> {
         while let Some((idx, start, buf)) = iter.next_buf() {
-            if !self.buf.has_readers() {
+            if !self.has_readers() {
                 break;
             }
 
@@ -40,6 +40,10 @@ impl LineMatchRemote {
             }
         }
         Ok(())
+    }
+
+    pub fn has_readers(&self) -> bool {
+        Arc::strong_count(&self.completed) > 1
     }
 }
 
