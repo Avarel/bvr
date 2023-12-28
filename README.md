@@ -30,12 +30,12 @@ a plethora of other features that I couldn't find in any other pager.
 ## Features
 
 ### In-Progress or Planned
-| Feature             | Description                                                   | Progress |
-| ------------------- | ------------------------------------------------------------- | -------- |
-| Filter Intersection | Compose filters by their intersection instead of their union. | Planned  |
-| Filter Presets      | Add preset filters upon startup.                              | Planned  |
-| Custom Keybindings  | Customize the keybindings of the program.                     | Planned  |
-| Word-Wrapping       | Wrap long lines.                                              | Planned  |
+| Feature             | Description                                                   | Progress    |
+| ------------------- | ------------------------------------------------------------- | ----------- |
+| Filter Intersection | Compose filters by their intersection instead of their union. | In-Progress |
+| Filter Presets      | Add preset filters upon startup.                              | Planned     |
+| Custom Keybindings  | Customize the keybindings of the program.                     | Planned     |
+| Word-Wrapping       | Wrap long lines.                                              | Planned     |
 
 ### Basic Support
 | Feature              | Description                                                 | Progress |

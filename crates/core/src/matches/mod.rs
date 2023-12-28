@@ -1,4 +1,4 @@
-mod composite;
+pub mod composite;
 
 use crate::{
     buf::ContiguousSegmentIterator,
@@ -7,6 +7,8 @@ use crate::{
 };
 use regex::bytes::Regex;
 use std::sync::{atomic::AtomicBool, Arc};
+
+pub use composite::CompositeStrategy;
 
 struct LineMatchRemote {
     buf: CowVecWriter<usize>,
@@ -89,7 +91,7 @@ impl LineMatches {
     }
 
     #[inline]
-    pub fn compose(filters: Vec<Self>, complete: bool) -> Result<Self> {
+    pub fn compose(filters: Vec<Self>, complete: bool, strategy: CompositeStrategy) -> Result<Self> {
         match filters.len() {
             0 => Ok(Self::empty()),
             1 => Ok(Self {
@@ -98,8 +100,10 @@ impl LineMatches {
                 min_len: 0,
             }),
             _ => {
-                // TODO: edit for strategy
-                let min_len = filters.iter().map(|f| f.len()).max().unwrap();
+                let min_len = match strategy {
+                    CompositeStrategy::Intersection => 0,
+                    CompositeStrategy::Union => filters.iter().map(|f| f.len()).max().unwrap(),
+                };
                 let (buf, writer) = CowVec::new();
                 let completed = Arc::new(AtomicBool::new(false));
                 let task = {
@@ -108,9 +112,9 @@ impl LineMatches {
                         composite::LineCompositeRemote {
                             buf: writer,
                             completed,
-                            strategy: composite::CompositeStrategy::Union,
+                            strategy,
                         }
-                        .compute(filters)
+                        .compose(filters)
                     }
                 };
                 if complete {

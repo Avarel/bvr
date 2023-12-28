@@ -2,7 +2,7 @@ use super::{
     cursor::{Cursor, CursorState, SelectionOrigin},
     viewport::Viewport,
 };
-use crate::{colors, direction::Direction, app::ViewDelta};
+use crate::{app::ViewDelta, colors, direction::Direction};
 use bitflags::bitflags;
 use bvr_core::{LineMatches, SegBuffer};
 use ratatui::style::Color;
@@ -136,7 +136,8 @@ impl Bookmarks {
                 slice[match slice.binary_search(&line_number) {
                     Ok(i) => i.saturating_add(1),
                     Err(i) => i,
-                }.min(slice.len() - 1)],
+                }
+                .min(slice.len() - 1)],
             ),
             [] => None,
         }
@@ -148,7 +149,9 @@ impl Bookmarks {
             [_, ..] => Some(
                 slice[match slice.binary_search(&line_number) {
                     Ok(i) | Err(i) => i,
-                }.saturating_sub(1).min(slice.len() - 1)],
+                }
+                .saturating_sub(1)
+                .min(slice.len() - 1)],
             ),
             [] => None,
         }
@@ -308,7 +311,8 @@ impl Filterer {
             .iter_active()
             .map(|filter| filter.as_line_matches())
             .collect();
-        self.composite = LineMatches::compose(filters, false).ok();
+        self.composite =
+            LineMatches::compose(filters, false, bvr_core::matches::CompositeStrategy::Union).ok();
     }
 
     pub fn move_select(&mut self, dir: Direction, select: bool, delta: ViewDelta) {
@@ -317,7 +321,7 @@ impl Filterer {
             ViewDelta::Page => self.viewport.height(),
             ViewDelta::HalfPage => self.viewport.height().div_ceil(2),
             ViewDelta::Boundary => usize::MAX,
-            ViewDelta::Match => unimplemented!("there is no result jumping for filters")
+            ViewDelta::Match => unimplemented!("there is no result jumping for filters"),
         };
         match dir {
             Direction::Back => self.cursor.back(select, |i| i.saturating_sub(delta)),
@@ -380,8 +384,8 @@ impl Filterer {
             // The composite is literally all matches
             return match direction {
                 Direction::Back => Some(i.saturating_sub(1)),
-                Direction::Next => Some(i.saturating_add(1))
-            }
+                Direction::Next => Some(i.saturating_add(1)),
+            };
         }
         match direction {
             Direction::Back => self

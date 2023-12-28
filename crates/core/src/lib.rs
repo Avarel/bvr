@@ -1,6 +1,7 @@
 pub mod buf;
 
 mod cowvec;
+
 pub mod err;
 pub mod index;
 pub mod matches;
