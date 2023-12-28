@@ -17,7 +17,7 @@ use crate::components::{
     viewer::Instance,
 };
 use anyhow::Result;
-use bvr_core::{buf::SegBuffer, err::Error, index::BoxedStream};
+use bvr_core::{buf::SegBuffer, err::Error, index::BoxedStream, matches::CompositeStrategy};
 use crossterm::{
     event::{
         self, DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture,
@@ -375,8 +375,8 @@ impl App {
         let mut parts = command.split_whitespace();
 
         match parts.next() {
-            Some("q" | "quit") => return false,
-            Some("open") => {
+            Some("quit" | "q") => return false,
+            Some("open" | "o") => {
                 let path = parts.collect::<PathBuf>();
                 if let Err(err) = self.open_file(path.as_ref()) {
                     self.status.submit_message(
@@ -385,7 +385,7 @@ impl App {
                     );
                 }
             }
-            Some("close") => {
+            Some("close" | "c") => {
                 if self.mux.active_viewer_mut().is_some() {
                     self.mux.close_active_viewer()
                 } else {
@@ -395,13 +395,58 @@ impl App {
                     );
                 }
             }
-            Some("tabs") => self.mux.set_mode(MultiplexerMode::Tabs),
-            Some("split" | "panes" | "windows") => self.mux.set_mode(MultiplexerMode::Panes),
-            Some("mux") => self.mux.set_mode(self.mux.mode().swap()),
-            Some(f @ ("find" | "findl")) => {
-                let pat = parts.collect::<String>();
-                return self.process_search(&pat, f == "findl");
-            }
+            Some("mux" | "m") => match parts.next() {
+                Some("tabs" | "t" | "none") => self.mux.set_mode(MultiplexerMode::Tabs),
+                Some("split" | "s" | "win") => self.mux.set_mode(MultiplexerMode::Panes),
+                Some(style) => {
+                    self.status.submit_message(
+                        format!("mux {style}: invalid style, one of `tabs`, `split`"),
+                        Some(Duration::from_secs(2)),
+                    );
+                }
+                None => self.mux.set_mode(self.mux.mode().swap()),
+            },
+            Some("filter" | "find" | "f") => match parts.next() {
+                Some("regex" | "r") => {
+                    let pat = parts.collect::<String>();
+                    return self.process_search(&pat, false);
+                }
+                Some("literal" | "lit" | "l") => {
+                    let pat = parts.collect::<String>();
+                    return self.process_search(&pat, true);
+                }
+                Some("clear" | "c") => {
+                    if let Some(viewer) = self.mux.active_viewer_mut() {
+                        viewer.filterer.filters.clear();
+                    }
+                }
+                Some("union" | "u" | "||" | "|") => {
+                    if let Some(viewer) = self.mux.active_viewer_mut() {
+                        viewer.filterer.set_strategy(CompositeStrategy::Union);
+                        viewer.filterer.compute_composite();
+                    }
+                }
+                Some("intersect" | "i" | "&&" | "&") => {
+                    if let Some(viewer) = self.mux.active_viewer_mut() {
+                        viewer
+                            .filterer
+                            .set_strategy(CompositeStrategy::Intersection);
+                        viewer.filterer.compute_composite();
+                    }
+                }
+                Some(cmd) => {
+                    self.status.submit_message(
+                        format!("filter {cmd}: invalid subcommand"),
+                        Some(Duration::from_secs(2)),
+                    );
+                }
+                None => {
+                    self.status.submit_message(
+                            format!("filter: requires subcommand, one of `r[egex]`, `l[it]`, `clear`, `union`, `intersect`"),
+                            Some(Duration::from_secs(2)),
+                        );
+                }
+            },
             Some("export") => {
                 let path = parts.collect::<PathBuf>();
                 if let Some(viewer) = self.mux.active_viewer_mut() {

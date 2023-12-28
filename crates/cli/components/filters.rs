@@ -156,6 +156,10 @@ impl Bookmarks {
             [] => None,
         }
     }
+
+    fn clear(&mut self) {
+        self.lines.clear()
+    }
 }
 
 pub struct Filterer {
@@ -163,6 +167,7 @@ pub struct Filterer {
     pub viewport: Viewport,
     cursor: CursorState,
     pub(crate) filters: Filters,
+    strategy: bvr_core::matches::CompositeStrategy,
 }
 
 #[derive(Clone)]
@@ -222,6 +227,11 @@ impl Filters {
             _ => unsafe { std::hint::unreachable_unchecked() },
         }
     }
+
+    pub fn clear(&mut self) {
+        self.bookmarks_mut().clear();
+        self.searches.clear();
+    }
 }
 
 bitflags! {
@@ -248,7 +258,12 @@ impl Filterer {
             viewport: Viewport::new(),
             cursor: CursorState::new(),
             filters: Filters::new(),
+            strategy: bvr_core::matches::CompositeStrategy::Union,
         }
+    }
+
+    pub fn set_strategy(&mut self, strategy: bvr_core::matches::CompositeStrategy) {
+        self.strategy = strategy;
     }
 
     pub fn filters_mut(&mut self) -> &mut Filters {
@@ -311,8 +326,7 @@ impl Filterer {
             .iter_active()
             .map(|filter| filter.as_line_matches())
             .collect();
-        self.composite =
-            LineMatches::compose(filters, false, bvr_core::matches::CompositeStrategy::Union).ok();
+        self.composite = LineMatches::compose(filters, false, self.strategy).ok();
     }
 
     pub fn move_select(&mut self, dir: Direction, select: bool, delta: ViewDelta) {
