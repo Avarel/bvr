@@ -6,7 +6,7 @@ use std::{
     sync::{
         atomic::{AtomicUsize, Ordering},
         Arc,
-    }
+    },
 };
 
 struct RawBuf<T> {
@@ -125,7 +125,7 @@ where
     }
 
     /// Appends an element to the back of this collection.
-    /// 
+    ///
     /// This operation is O(1) amortized.
     pub fn push(&mut self, elem: T) {
         let buf = self.buf.load();
@@ -146,7 +146,7 @@ where
     }
 
     /// Inserts an element at the given index, shifting all elements after it to the right.
-    /// 
+    ///
     /// This operation is O(n) where n is the number of elements to the right of the index.
     /// It will also always perform an allocation before swapping out the internal buffer.
     #[allow(dead_code)]
@@ -223,7 +223,7 @@ impl<T> Deref for CowVecWriter<T> {
 /// This vector has **amortized O(1)** `push()` operation and **O(1)** `clone()`
 /// operations. All `CowVec<T>` share the same underlying buffer, so cloning
 /// so changes are reflected across all clones.
-/// 
+///
 /// The `CowVecWriter<T>` type is an exclusive writer to a `CowVec<T>`.
 #[derive(Clone)]
 pub struct CowVec<T> {

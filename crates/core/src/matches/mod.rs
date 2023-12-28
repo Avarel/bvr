@@ -35,7 +35,7 @@ impl LineMatchRemote {
                 }
 
                 self.buf.push(line_number);
-                
+
                 buf_start = idx.data_of_line(line_number + 1).unwrap() - start;
             }
         }
@@ -91,7 +91,11 @@ impl LineMatches {
     }
 
     #[inline]
-    pub fn compose(filters: Vec<Self>, complete: bool, strategy: CompositeStrategy) -> Result<Self> {
+    pub fn compose(
+        filters: Vec<Self>,
+        complete: bool,
+        strategy: CompositeStrategy,
+    ) -> Result<Self> {
         match filters.len() {
             0 => Ok(Self::empty()),
             1 => Ok(Self {

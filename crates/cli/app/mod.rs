@@ -386,7 +386,7 @@ impl App {
                 }
             }
             Some("close") => {
-                if let Some(_) = self.mux.active_viewer_mut() {
+                if self.mux.active_viewer_mut().is_some() {
                     self.mux.close_active_viewer()
                 } else {
                     self.status.submit_message(
@@ -442,7 +442,7 @@ impl App {
                         .write(true)
                         .truncate(true)
                         .open(&path)
-                        .map_err(|err| Error::from(err))
+                        .map_err(Error::from)
                         .and_then(|file| viewer.export_file(file))
                     {
                         self.status.submit_message(

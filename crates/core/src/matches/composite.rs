@@ -145,8 +145,8 @@ impl Drop for LineCompositeRemote {
 
 #[cfg(test)]
 mod tests {
-    use crate::LineMatches;
     use super::CompositeStrategy;
+    use crate::LineMatches;
 
     #[test]
     fn test_composite_union_basic() {
@@ -260,20 +260,13 @@ mod tests {
 
         let composite = LineMatches::compose(
             vec![
-                matches1,
-                matches2,
-                matches3,
-                matches4,
-                matches5,
-                matches6,
-                matches7,
-                matches8,
-                matches9,
-                matches10,
+                matches1, matches2, matches3, matches4, matches5, matches6, matches7, matches8,
+                matches9, matches10,
             ],
             true,
             CompositeStrategy::Union,
-        ).unwrap();
+        )
+        .unwrap();
 
         let result = vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
 
@@ -298,16 +291,8 @@ mod tests {
 
         let composite = LineMatches::compose(
             vec![
-                matches1,
-                matches2,
-                matches3,
-                matches4,
-                matches5,
-                matches6,
-                matches7,
-                matches8,
-                matches9,
-                matches10,
+                matches1, matches2, matches3, matches4, matches5, matches6, matches7, matches8,
+                matches9, matches10,
             ],
             true,
             CompositeStrategy::Union,
@@ -448,16 +433,8 @@ mod tests {
 
         let composite = LineMatches::compose(
             vec![
-                matches1,
-                matches2,
-                matches3,
-                matches4,
-                matches5,
-                matches6,
-                matches7,
-                matches8,
-                matches9,
-                matches10,
+                matches1, matches2, matches3, matches4, matches5, matches6, matches7, matches8,
+                matches9, matches10,
             ],
             true,
             CompositeStrategy::Intersection,
@@ -483,16 +460,8 @@ mod tests {
 
         let composite = LineMatches::compose(
             vec![
-                matches1,
-                matches2,
-                matches3,
-                matches4,
-                matches5,
-                matches6,
-                matches7,
-                matches8,
-                matches9,
-                matches10,
+                matches1, matches2, matches3, matches4, matches5, matches6, matches7, matches8,
+                matches9, matches10,
             ],
             true,
             CompositeStrategy::Intersection,
@@ -513,21 +482,14 @@ mod tests {
         let matches6 = LineMatches::from(vec![2, 10, 20, 26, 27, 28, 29, 30, 40, 50, 51, 52, 53]);
         let matches7 = LineMatches::from(vec![10, 20, 30, 31, 32, 33, 34, 35, 40, 50, 51, 52, 53]);
         let matches8 = LineMatches::from(vec![10, 20, 25, 30, 36, 37, 38, 39, 40, 45, 50]);
-        let matches9 = LineMatches::from(vec![4, 10, 20, 30, 40, 41, 42, 43, 44, 45, 50, 51, 52, 53]);
+        let matches9 =
+            LineMatches::from(vec![4, 10, 20, 30, 40, 41, 42, 43, 44, 45, 50, 51, 52, 53]);
         let matches10 = LineMatches::from(vec![1, 10, 20, 30, 40, 46, 47, 48, 49, 50]);
 
         let composite = LineMatches::compose(
             vec![
-                matches1,
-                matches2,
-                matches3,
-                matches4,
-                matches5,
-                matches6,
-                matches7,
-                matches8,
-                matches9,
-                matches10,
+                matches1, matches2, matches3, matches4, matches5, matches6, matches7, matches8,
+                matches9, matches10,
             ],
             true,
             CompositeStrategy::Intersection,

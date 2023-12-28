@@ -4,16 +4,17 @@
 pub mod segment;
 
 use self::segment::{SegBytes, SegStr, Segment};
-use crate::{index::BoxedStream, LineIndex, Result, LineMatches};
+use crate::{index::BoxedStream, LineIndex, LineMatches, Result};
 use lru::LruCache;
 use std::{
     fs::File,
+    io::{BufWriter, Write},
     num::NonZeroUsize,
     ops::Range,
     sync::{
         mpsc::{Receiver, TryRecvError},
         Arc,
-    }, io::{BufWriter, Write},
+    },
 };
 
 /// A segmented buffer that holds data in multiple segments.

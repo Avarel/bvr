@@ -51,7 +51,8 @@ impl LineIndexRemote {
         let len = file.metadata()?.len();
         let file = file.try_clone()?;
 
-        self.buf.reserve((len / Self::BYTES_PER_LINE_HEURISTIC) as usize);
+        self.buf
+            .reserve((len / Self::BYTES_PER_LINE_HEURISTIC) as usize);
         self.buf.push(0);
 
         // Indexing worker
@@ -147,7 +148,11 @@ impl LineIndex {
     }
 
     #[inline]
-    pub fn read_stream(stream: BoxedStream, outgoing: Sender<Segment>, complete: bool) -> Result<Self> {
+    pub fn read_stream(
+        stream: BoxedStream,
+        outgoing: Sender<Segment>,
+        complete: bool,
+    ) -> Result<Self> {
         let (buf, writer) = CowVec::new();
         let task = move || LineIndexRemote { buf: writer }.index_stream(stream, outgoing);
         if complete {

@@ -17,8 +17,8 @@ pub struct PromptMovement {
 impl PromptMovement {
     pub const DEFAULT: Self = Self::new(false, PromptDelta::Number(1));
 
-    pub const fn new(select: bool, jump: PromptDelta) -> Self {
-        Self { select, delta: jump }
+    pub const fn new(select: bool, delta: PromptDelta) -> Self {
+        Self { select, delta }
     }
 }
 
