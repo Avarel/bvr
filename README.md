@@ -30,26 +30,28 @@ a plethora of other features that I couldn't find in any other pager.
 ## Features
 
 ### In-Progress or Planned
-| Feature             | Description                                                   | Progress    |
-| ------------------- | ------------------------------------------------------------- | ----------- |
-| Filter Intersection | Compose filters by their intersection instead of their union. | In-Progress |
-| Filter Presets      | Add preset filters upon startup.                              | Planned     |
-| Custom Keybindings  | Customize the keybindings of the program.                     | Planned     |
-| Word-Wrapping       | Wrap long lines.                                              | Planned     |
+| Feature            | Description                                         | Progress  |
+| ------------------ | --------------------------------------------------- | --------- |
+| Command History    | Use arrow keys to navigate through command history. | Planned   |
+| Command Completion | Use tabs to complete commands.                      | Planned   |
+| Filter Presets     | Add preset filters upon startup.                    | After MVP |
+| Custom Keybindings | Customize the keybindings of the program.           | After MVP |
+| Word-Wrapping      | Wrap long lines.                                    | After MVP |
 
 ### Basic Support
-| Feature              | Description                                                 | Progress |
-| -------------------- | ----------------------------------------------------------- | -------- |
-| Piping Files         | View piped outputs of other programs, ie. `cat file \| bvr` | Basic    |
-| Status Bar           | View current state of the pager.                            | Basic    |
-| Commands             | Use modal commands to interact with the pager.              | Basic    |
-| Horizontal Scrolling | Pan the view horizontally.                                  | Basic    |
-| Export Output        | Export data of active filters to a file.                    | Done     |
-| Mouse Support        | Use mouse to interact with the TUI.                         | Done     |
-| Regex Filters        | Select and disable additive search filters.                 | Done     |
-| Filter Match Jumping | Jump to the next or previous line that matches a filter.    | Done     |
-| Multiplexing         | View multiple files through tabs or windows.                | Done     |
-| Follow Output        | Constantly scroll down as new data is loaded.               | Done     |
+| Feature              | Description                                                   | Progress |
+| -------------------- | ------------------------------------------------------------- | -------- |
+| Piping Files         | View piped outputs of other programs, ie. `cat file \| bvr`   | Basic    |
+| Status Bar           | View current state of the pager.                              | Basic    |
+| Commands             | Use modal commands to interact with the pager.                | Basic    |
+| Horizontal Scrolling | Pan the view horizontally.                                    | Basic    |
+| Export Output        | Export data of active filters to a file.                      | Done     |
+| Mouse Support        | Use mouse to interact with the TUI.                           | Done     |
+| Filter (Regex)       | Select and disable additive search filters.                   | Done     |
+| Filter Intersection  | Compose filters by their intersection instead of their union. | Done     |
+| Filter Match Jumping | Jump to the next or previous line that matches a filter.      | Done     |
+| Multiplexing         | View multiple files through tabs or windows.                  | Done     |
+| Follow Output        | Constantly scroll down as new data is loaded.                 | Done     |
 
 ## Built-in Keybindings
 * Custom keybindings will be added in the future.
