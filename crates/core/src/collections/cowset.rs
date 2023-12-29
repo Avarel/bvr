@@ -2,21 +2,20 @@ use super::BTreeSet;
 use arc_swap::ArcSwap;
 use std::sync::Arc;
 
-#[derive(Clone)]
-pub struct CowIndexedSet<T>
+pub struct SharedIndexedSet<T>
 where
     T: Copy + Ord,
 {
-    inner: Arc<ArcSwap<BTreeSet<T>>>,
+    inner: ArcSwap<BTreeSet<T>>,
 }
 
-impl<T> CowIndexedSet<T>
+impl<T> SharedIndexedSet<T>
 where
     T: Copy + Ord,
 {
     pub fn new() -> Self {
         Self {
-            inner: Arc::new(ArcSwap::new(Arc::new(BTreeSet::new()))),
+            inner: ArcSwap::new(Arc::new(BTreeSet::new())),
         }
     }
 
@@ -57,13 +56,13 @@ where
     }
 }
 
-impl<T> From<Vec<T>> for CowIndexedSet<T>
+impl<T> From<Vec<T>> for SharedIndexedSet<T>
 where
     T: Copy + Ord,
 {
     fn from(value: Vec<T>) -> Self {
         Self {
-            inner: Arc::new(ArcSwap::new(Arc::new(value.into_iter().collect()))),
+            inner: ArcSwap::new(Arc::new(value.into_iter().collect())),
         }
     }
 }

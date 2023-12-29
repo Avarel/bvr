@@ -5,5 +5,5 @@ pub mod cowvec;
 pub mod cowset;
 
 pub use indexset::BTreeSet;
-pub use cowset::CowIndexedSet;
+pub use cowset::SharedIndexedSet;
 pub use cowvec::{CowVec, CowVecWriter, CowVecSnapshot};

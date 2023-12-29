@@ -163,8 +163,8 @@ impl<T: Copy + Ord> BTreeSet<T> {
         self.index = FenwickTree::from_iter(vec![0]);
         self.len = 0;
     }
-    fn locate_node(&self, value: T) -> usize
-    {
+
+    fn locate_node(&self, value: T) -> usize {
         let mut node_idx = partition_point(&self.inner, |node| {
             if let Some(max) = node.max {
                 return max < value;
@@ -213,11 +213,8 @@ impl<T: Copy + Ord> BTreeSet<T> {
 
         Some((node_index, position_within_node))
     }
+
     /// Returns a reference to the element in the i-th position of the set, if any.
-    ///
-    /// The value may be any borrowed form of the set's element type,
-    /// but the ordering on the borrowed form *must* match the
-    /// ordering on the element type.
     ///
     /// # Examples
     ///
@@ -254,10 +251,6 @@ impl<T: Copy + Ord> BTreeSet<T> {
     /// Returns a reference to the element in the set, if any, that is equal to
     /// the value.
     ///
-    /// The value may be any borrowed form of the set's element type,
-    /// but the ordering on the borrowed form *must* match the
-    /// ordering on the element type.
-    ///
     /// # Examples
     ///
     /// ```
@@ -267,8 +260,7 @@ impl<T: Copy + Ord> BTreeSet<T> {
     /// assert_eq!(set.get(2), Some(2));
     /// assert_eq!(set.get(4), None);
     /// ```
-    pub fn get(&self, value: T) -> Option<T>
-    {
+    pub fn get(&self, value: T) -> Option<T> {
         let (node_idx, position_within_node) = self.locate_value(value);
         if let Some(candidate_node) = self.inner.get(node_idx) {
             return candidate_node.get(position_within_node);
@@ -288,8 +280,7 @@ impl<T: Copy + Ord> BTreeSet<T> {
     /// assert_eq!(set.lower_bound(2), Some(2));
     /// assert_eq!(set.lower_bound(4), Some(5));
     /// ```
-    pub fn lower_bound(&self, value: T) -> Option<T>
-    {
+    pub fn lower_bound(&self, value: T) -> Option<T> {
         let (node_idx, position_within_node) = self.locate_value(value);
         if let Some(candidate_node) = self.inner.get(node_idx) {
             return candidate_node.get(position_within_node);
@@ -394,6 +385,9 @@ impl<T: Copy + Ord> BTreeSet<T> {
         }
     }
 
+    /// Adds a value to the set.
+    ///
+    /// Returns a copy of the set with the value present.
     pub fn insert_update(&self, value: T) -> Self {
         let mut next = self.clone();
         next.insert(value);
@@ -401,10 +395,6 @@ impl<T: Copy + Ord> BTreeSet<T> {
     }
 
     /// Returns `true` if the set contains an element equal to the value.
-    ///
-    /// The value may be any borrowed form of the set's element type,
-    /// but the ordering on the borrowed form *must* match the
-    /// ordering on the element type.
     ///
     /// # Examples
     ///
@@ -415,8 +405,7 @@ impl<T: Copy + Ord> BTreeSet<T> {
     /// assert_eq!(set.contains(1), true);
     /// assert_eq!(set.contains(4), false);
     /// ```
-    pub fn contains(&self, value: T) -> bool
-    {
+    pub fn contains(&self, value: T) -> bool {
         let (node_idx, position_within_node) = self.locate_value(value);
         if let Some(candidate_node) = self.inner.get(node_idx) {
             if let Some(candidate_value) = candidate_node.get(position_within_node) {
@@ -452,8 +441,8 @@ impl<T: Copy + Ord> BTreeSet<T> {
 
         removal
     }
-    fn delete(&mut self, value: T) -> (Option<T>, bool)
-    {
+
+    fn delete(&mut self, value: T) -> (Option<T>, bool) {
         let mut removed = false;
         let mut removal = None;
         let (node_idx, position_within_node) = self.locate_value(value);
@@ -472,9 +461,23 @@ impl<T: Copy + Ord> BTreeSet<T> {
     /// If the set contains an element equal to the value, removes it from the
     /// set and drops it. Returns whether such an element was present.
     ///
-    /// The value may be any borrowed form of the set's element type,
-    /// but the ordering on the borrowed form *must* match the
-    /// ordering on the element type.
+    /// # Examples
+    ///
+    /// ```
+    /// use bvr_core::collections::indexset::BTreeSet;
+    ///
+    /// let mut set = BTreeSet::new();
+    ///
+    /// set.insert(2);
+    /// assert_eq!(set.remove(2), true);
+    /// assert_eq!(set.remove(2), false);
+    /// ```
+    pub fn remove(&mut self, value: T) -> bool {
+        self.delete(value).1
+    }
+
+    /// If the set contains an element equal to the value, removes it from the
+    /// set and drops it. Returns a copy of the set with the element removed.
     ///
     /// # Examples
     ///
@@ -487,11 +490,6 @@ impl<T: Copy + Ord> BTreeSet<T> {
     /// assert_eq!(set.remove(2), true);
     /// assert_eq!(set.remove(2), false);
     /// ```
-    pub fn remove(&mut self, value: T) -> bool
-    {
-        self.delete(value).1
-    }
-
     pub fn remove_update(&self, value: T) -> Self {
         let mut next = self.clone();
         next.remove(value);
@@ -668,8 +666,7 @@ impl<T: Copy + Ord> BTreeSet<T> {
     /// assert!(b.contains(17));
     /// assert!(b.contains(41));
     /// ```
-    pub fn split_off(&mut self, value: T) -> Self
-    {
+    pub fn split_off(&mut self, value: T) -> Self {
         let (node_idx, position_within_node) = self.locate_value(value);
         let first_node = self.inner[node_idx].split_off(position_within_node);
         let mut remaining_nodes = im::Vector::new();
@@ -727,10 +724,6 @@ impl<T: Copy + Ord> BTreeSet<T> {
 
     /// Returns the position in which the given element would fall in the already-existing sorted
     /// order.
-    ///
-    /// The value may be any borrowed form of the set's element type,
-    /// but the ordering on the borrowed form *must* match the
-    /// ordering on the element type.
     ///
     /// # Examples
     ///
@@ -870,14 +863,14 @@ where
 
     fn next(&mut self) -> Option<Self::Item> {
         if self.current_front_idx == self.current_back_idx {
-            return None
+            return None;
         }
         return if let Some(&value) = self.current_front_iterator.next() {
             self.current_front_idx += 1;
             Some(value)
         } else {
             if self.current_front_node_idx == self.btree.inner.len() - 1 {
-                return None
+                return None;
             }
             self.current_front_node_idx += 1;
             self.current_front_iterator =
@@ -897,14 +890,14 @@ where
 {
     fn next_back(&mut self) -> Option<Self::Item> {
         if self.current_front_idx == self.current_back_idx {
-            return None
+            return None;
         }
         return if let Some(&value) = self.current_back_iterator.next_back() {
             self.current_back_idx -= 1;
             Some(value)
         } else {
             if self.current_back_node_idx == 0 {
-                return None
+                return None;
             };
             self.current_back_node_idx -= 1;
             self.current_back_iterator = self.btree.inner[self.current_back_node_idx].inner.iter();
@@ -1052,11 +1045,11 @@ mod tests {
     fn test_remove() {
         let input = 0..(DEFAULT_INNER_SIZE + 1);
 
-        let btree: BTreeSet<usize> = input.clone()
+        let btree: BTreeSet<usize> = input
+            .clone()
             .fold(BTreeSet::new(), |acc, curr| acc.insert_update(curr.clone()));
 
-        let new_tree = input
-            .fold(btree, |acc, item| acc.remove_update(item));
+        let new_tree = input.fold(btree, |acc, item| acc.remove_update(item));
 
         assert_eq!(new_tree.len(), 0);
     }
@@ -1066,8 +1059,8 @@ mod tests {
         let input = (0..(DEFAULT_INNER_SIZE + 1)).into_iter().rev();
         let expected_output: Vec<usize> = (0..(DEFAULT_INNER_SIZE + 1)).collect();
 
-        let btree: BTreeSet<usize> = input
-            .fold(BTreeSet::new(), |acc, curr| acc.insert_update(curr.clone()));
+        let btree: BTreeSet<usize> =
+            input.fold(BTreeSet::new(), |acc, curr| acc.insert_update(curr.clone()));
 
         expected_output.into_iter().for_each(|item| {
             assert_eq!(btree.get_index(item).unwrap(), item);
