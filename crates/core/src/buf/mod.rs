@@ -7,6 +7,7 @@ use self::segment::{SegBytes, SegStr, Segment};
 use crate::{index::BoxedStream, LineIndex, LineMatches, Result};
 use lru::LruCache;
 use std::{
+    cell::RefCell,
     fs::File,
     io::{BufWriter, Write},
     num::NonZeroUsize,
@@ -28,6 +29,11 @@ pub struct SegBuffer {
     repr: BufferRepr,
 }
 
+struct StreamInner {
+    pending_segs: Option<Receiver<Segment>>,
+    segments: Vec<Arc<Segment>>,
+}
+
 /// Internal representation of the segmented buffer, which allows for working
 /// with both files and streams of data. All segments are assumed to have
 /// the same size with the exception of the last segment.
@@ -36,17 +42,14 @@ enum BufferRepr {
     File {
         file: File,
         len: u64,
-        segments: LruCache<usize, Arc<Segment>>,
+        segments: RefCell<LruCache<usize, Arc<Segment>>>,
     },
     /// Data is all present in memory in multiple anonymous mmaps.
-    Stream {
-        pending_segs: Option<Receiver<Segment>>,
-        segments: Vec<Arc<Segment>>,
-    },
+    Stream(RefCell<StreamInner>),
 }
 
 impl BufferRepr {
-    fn fetch(&mut self, seg_id: usize) -> Option<Arc<Segment>> {
+    fn fetch(&self, seg_id: usize) -> Option<Arc<Segment>> {
         match self {
             BufferRepr::File {
                 file,
@@ -57,16 +60,18 @@ impl BufferRepr {
                 let range = range.start..range.end.min(*len);
                 Some(
                     segments
+                        .borrow_mut()
                         .get_or_insert(seg_id, || {
                             Arc::new(Segment::map_file(range, file).expect("mmap was successful"))
                         })
                         .clone(),
                 )
             }
-            BufferRepr::Stream {
-                pending_segs,
-                segments,
-            } => {
+            BufferRepr::Stream(inner) => {
+                let StreamInner {
+                    pending_segs,
+                    segments,
+                } = &mut *inner.borrow_mut();
                 if let Some(rx) = pending_segs {
                     loop {
                         match rx.try_recv() {
@@ -94,7 +99,7 @@ impl SegBuffer {
             repr: BufferRepr::File {
                 len: file.metadata()?.len(),
                 file,
-                segments: LruCache::new(seg_count),
+                segments: RefCell::new(LruCache::new(seg_count)),
             },
         })
     }
@@ -105,10 +110,10 @@ impl SegBuffer {
 
         Ok(Self {
             index,
-            repr: BufferRepr::Stream {
+            repr: BufferRepr::Stream(RefCell::new(StreamInner {
                 pending_segs: Some(rx),
                 segments: Vec::new(),
-            },
+            })),
         })
     }
 
@@ -124,7 +129,7 @@ impl SegBuffer {
         &self.index
     }
 
-    pub fn get_bytes(&mut self, line_number: usize) -> Option<SegBytes> {
+    pub fn get_bytes(&self, line_number: usize) -> Option<SegBytes> {
         assert!(line_number <= self.line_count());
 
         let data_start = self.index.data_of_line(line_number)?;
@@ -169,7 +174,7 @@ impl SegBuffer {
     /// # Returns
     ///
     /// The line of text as a [SegStr] object.
-    pub fn get_line(&mut self, line_number: usize) -> Option<SegStr> {
+    pub fn get_line(&self, line_number: usize) -> Option<SegStr> {
         Some(SegStr::from_bytes(self.get_bytes(line_number)?))
     }
 
@@ -181,16 +186,16 @@ impl SegBuffer {
                 BufferRepr::File {
                     file: file.try_clone()?,
                     len: *len,
-                    segments: LruCache::new(NonZeroUsize::new(2).unwrap()),
+                    segments: RefCell::new(LruCache::new(NonZeroUsize::new(2).unwrap())),
                 },
             )),
-            BufferRepr::Stream { segments, .. } => Ok(ContiguousSegmentIterator::new(
+            BufferRepr::Stream(inner) => Ok(ContiguousSegmentIterator::new(
                 self.index.clone(),
                 0..self.index.line_count(),
-                BufferRepr::Stream {
+                BufferRepr::Stream(RefCell::new(StreamInner {
                     pending_segs: None,
-                    segments: segments.clone(),
-                },
+                    segments: inner.borrow().segments.clone(),
+                })),
             )),
         }
     }
@@ -342,8 +347,8 @@ mod test {
     fn file_stream_consistency_base(file: File, line_count: usize) -> Result<()> {
         let stream = BufReader::new(file.try_clone()?);
 
-        let mut file_index = SegBuffer::read_file(file, NonZeroUsize::new(25).unwrap(), true)?;
-        let mut stream_index = SegBuffer::read_stream(Box::new(stream), true)?;
+        let file_index = SegBuffer::read_file(file, NonZeroUsize::new(25).unwrap(), true)?;
+        let stream_index = SegBuffer::read_stream(Box::new(stream), true)?;
 
         assert_eq!(file_index.line_count(), stream_index.line_count());
         assert_eq!(file_index.line_count(), line_count);

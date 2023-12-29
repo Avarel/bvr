@@ -212,9 +212,11 @@ impl std::convert::AsRef<[u8]> for SegBytes {
 /// all of its referents is dropped.
 ///
 /// This structure avoids cloning unnecessarily.
+#[derive(Clone)]
 pub struct SegStr(SegStrRepr);
 
 /// Internal representation of [SegStr].
+#[derive(Clone)]
 enum SegStrRepr {
     Borrowed {
         // This field refs the segment so its data does not get munmap'd and remains valid.
