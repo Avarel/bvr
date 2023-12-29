@@ -239,7 +239,9 @@ bitflags! {
         const None = 0;
         const Enabled = 1 << 0;
         const Origin = 1 << 1;
-        const Within = 1 << 2;
+        const OriginStart = 1 << 2;
+        const OriginEnd = 1 << 3;
+        const Within = 1 << 4;
     }
 }
 
@@ -297,13 +299,13 @@ impl Filterer {
                             FilterType::None
                         }
                     }
-                    Cursor::Selection(start, end, origin) => {
+                    Cursor::Selection(start, end, _) => {
                         if !(start..=end).contains(&index) {
                             FilterType::None
-                        } else if index == start && matches!(origin, SelectionOrigin::Left)
-                            || index == end && matches!(origin, SelectionOrigin::Right)
-                        {
-                            FilterType::Origin
+                        } else if index == start {
+                            FilterType::Origin | FilterType::OriginStart
+                        } else if index == end {
+                            FilterType::Origin | FilterType::OriginEnd
                         } else {
                             FilterType::Within
                         }

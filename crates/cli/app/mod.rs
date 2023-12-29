@@ -67,6 +67,7 @@ pub struct App {
     status: StatusApp,
     prompt: PromptApp,
     keybinds: Keybinding,
+    gutter: bool,
 }
 
 impl App {
@@ -77,6 +78,7 @@ impl App {
             mux: MultiplexerApp::new(),
             status: StatusApp::new(),
             keybinds: Keybinding::Hardcoded,
+            gutter: true,
         }
     }
 
@@ -395,6 +397,9 @@ impl App {
                     );
                 }
             }
+            Some("gutter" | "g") => {
+                self.gutter = !self.gutter;
+            }
             Some("mux" | "m") => match parts.next() {
                 Some("tabs" | "t" | "none") => self.mux.set_mode(MultiplexerMode::Tabs),
                 Some("split" | "s" | "win") => self.mux.set_mode(MultiplexerMode::Panes),
@@ -534,6 +539,7 @@ impl App {
             mux: &mut self.mux,
             status: &mut self.status,
             mode: self.mode,
+            gutter: self.gutter,
         }
         .render(mux_chunk, f.buffer_mut(), handler);
 

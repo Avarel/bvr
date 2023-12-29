@@ -217,10 +217,10 @@ impl Keybinding {
                 KeyCode::Char(':') => {
                     Some(Action::SwitchMode(InputMode::Command(PromptMode::Command)))
                 }
-                KeyCode::Char('+') => Some(Action::SwitchMode(InputMode::Command(
+                KeyCode::Char('/') => Some(Action::SwitchMode(InputMode::Command(
                     PromptMode::NewFilter,
                 ))),
-                KeyCode::Char('-') => {
+                KeyCode::Char('?') => {
                     Some(Action::SwitchMode(InputMode::Command(PromptMode::NewLit)))
                 }
                 KeyCode::Tab => Some(Action::SwitchMode(InputMode::Filter)),
@@ -234,7 +234,6 @@ impl Keybinding {
                         target_view: c as usize - '1' as usize,
                     }))
                 }
-                KeyCode::Char('q') => Some(Action::Exit),
                 KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                     Some(Action::Exit)
                 }

@@ -23,8 +23,10 @@ bitflags! {
     pub struct LineType: u8 {
         const None = 0;
         const Origin = 1 << 0;
-        const Within = 1 << 1;
-        const Bookmarked = 1 << 2;
+        const OriginStart = 1 << 1;
+        const OriginEnd = 1 << 2;
+        const Within = 1 << 3;
+        const Bookmarked = 1 << 4;
     }
 }
 
@@ -130,13 +132,13 @@ impl Instance {
                             LineType::None
                         }
                     }
-                    Cursor::Selection(start, end, origin) => {
+                    Cursor::Selection(start, end, _) => {
                         if !(start..=end).contains(&index) {
                             LineType::None
-                        } else if index == start && matches!(origin, SelectionOrigin::Left)
-                            || index == end && matches!(origin, SelectionOrigin::Right)
-                        {
-                            LineType::Origin
+                        } else if index == start {
+                            LineType::Origin | LineType::OriginStart
+                        } else if index == end {
+                            LineType::Origin | LineType::OriginEnd
                         } else {
                             LineType::Within
                         }

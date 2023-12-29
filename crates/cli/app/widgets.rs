@@ -108,8 +108,8 @@ impl Widget for PromptWidget<'_> {
 
         let c = match mode {
             PromptMode::Command => ":",
-            PromptMode::NewFilter => "+",
-            PromptMode::NewLit => "-",
+            PromptMode::NewFilter => "/",
+            PromptMode::NewLit => "?",
         };
 
         let input = Paragraph::new(Line::from(match self.inner.cursor() {
@@ -259,16 +259,25 @@ struct FilterLineWidget<'a> {
 }
 
 impl FilterLineWidget<'_> {
+    fn gutter_selection(line: &FilterData) -> &'static str {
+        if line.ty.contains(FilterType::Origin) {
+            if line.ty.contains(FilterType::OriginStart) {
+                " ┌"
+            } else if line.ty.contains(FilterType::OriginEnd) {
+                " └"
+            } else {
+                " ▶"
+            }
+        } else if line.ty.contains(FilterType::Within) {
+            " │"
+        } else {
+            "  "
+        }
+    }
+
     fn render(self, area: Rect, buf: &mut Buffer, handle: &mut MouseHandler) {
         let mut v = vec![
-            Span::from(if self.inner.ty.contains(FilterType::Origin) {
-                " ▶"
-            } else if self.inner.ty.contains(FilterType::Within) {
-                " │"
-            } else {
-                "  "
-            })
-            .fg(colors::FILTER_ACCENT),
+            Span::from(Self::gutter_selection(self.inner)).fg(colors::FILTER_ACCENT),
             Span::from(if self.inner.ty.contains(FilterType::Enabled) {
                 " ● "
             } else {
@@ -302,6 +311,22 @@ struct ViewerLineWidget<'a> {
 }
 
 impl ViewerLineWidget<'_> {
+    fn gutter_selection(line: &LineData) -> &'static str {
+        if line.ty.contains(LineType::Origin) {
+            if line.ty.contains(LineType::OriginStart) {
+                "┌ "
+            } else if line.ty.contains(LineType::OriginEnd) {
+                "└"
+            } else {
+                "▶"
+            }
+        } else if line.ty.contains(LineType::Within) {
+            "│"
+        } else {
+            ""
+        }
+    }
+
     fn render(self, area: Rect, buf: &mut Buffer, handle: &mut MouseHandler) {
         const SPECIAL_SIZE: u16 = 3;
 
@@ -330,15 +355,9 @@ impl ViewerLineWidget<'_> {
 
                 ln.render(gutter_chunk, buf);
 
-                Paragraph::new(if line.ty.contains(LineType::Origin) {
-                    "▶"
-                } else if line.ty.contains(LineType::Within) {
-                    "│"
-                } else {
-                    ""
-                })
-                .fg(colors::SELECT_ACCENT)
-                .render(type_chunk, buf);
+                Paragraph::new(Self::gutter_selection(line))
+                    .fg(colors::SELECT_ACCENT)
+                    .render(type_chunk, buf);
 
                 let mut chars = line.data.chars();
                 for _ in 0..line.start {
@@ -354,25 +373,14 @@ impl ViewerLineWidget<'_> {
 
                 ln.render(gutter_chunk, buf);
             }
-        } else if let Some(_line) = &self.line {
-            unimplemented!()
-            // match line.selected {
-            //     SelectType::Origin => {
-            //         let ln = Paragraph::new("○").fg(colors::SELECT_ACCENT);
-            //         ln.render(type_chunk, buf);
-            //     }
-            //     SelectType::Within => {
-            //         let ln = Paragraph::new("│").fg(colors::SELECT_ACCENT);
-            //         ln.render(type_chunk, buf);
-            //     }
-            //     _ => {
+        } else if let Some(line) = &self.line {
+            Paragraph::new(Self::gutter_selection(line))
+                .fg(colors::SELECT_ACCENT)
+                .render(type_chunk, buf);
 
-            //     }
-            // }
+            let data = Paragraph::new(line.data.as_str()).fg(line.color);
 
-            // let data = Paragraph::new(line.data.as_str()).fg(line.color);
-
-            // data.render(data_chunk, buf);
+            data.render(data_chunk, buf);
         }
 
         if let Some(line) = self.line {
@@ -427,7 +435,8 @@ impl TabWidget<'_> {
 pub struct MultiplexerWidget<'a> {
     pub mux: &'a mut MultiplexerApp,
     pub status: &'a mut StatusApp,
-    pub(super) mode: InputMode,
+    pub mode: InputMode,
+    pub gutter: bool,
 }
 
 impl MultiplexerWidget<'_> {
@@ -503,7 +512,7 @@ impl MultiplexerWidget<'_> {
                         ViewerWidget {
                             view_index: i,
                             viewer,
-                            gutter: true,
+                            gutter: self.gutter,
                         }
                         .render(
                             fixup_chunk(i != 0, viewer_chunk),
@@ -546,7 +555,7 @@ impl MultiplexerWidget<'_> {
                     ViewerWidget {
                         view_index: active,
                         viewer,
-                        gutter: true,
+                        gutter: self.gutter,
                     }
                     .render(viewer_chunk, buf, handler);
                     EdgeBg(true).render(viewer_chunk, buf)
