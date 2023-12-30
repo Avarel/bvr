@@ -9,10 +9,10 @@ use crate::{
     components::{
         cursor::{Cursor, SelectionOrigin},
         filters::{FilterData, FilterType},
+        instance::{Instance, LineData, LineType},
         mux::{MultiplexerApp, MultiplexerMode},
         prompt::PromptApp,
         status::StatusApp,
-        instance::{Instance, LineData, LineType},
     },
     direction::Direction,
 };
@@ -151,7 +151,8 @@ impl FilterViewerWidget<'_> {
         let mut y = area.y;
         for filter in self
             .viewer
-            .filterer
+            .view
+            .compositor
             .update_and_filter_view(area.height as usize)
         {
             FilterLineWidget {
@@ -307,7 +308,7 @@ struct ViewerLineWidget<'a> {
     view_index: usize,
     itoa_buf: &'a mut itoa::Buffer,
     gutter_size: Option<u16>,
-    line: Option<LineData>,
+    line: Option<LineData<'a>>,
 }
 
 impl ViewerLineWidget<'_> {
@@ -378,7 +379,7 @@ impl ViewerLineWidget<'_> {
                 .fg(colors::SELECT_ACCENT)
                 .render(type_chunk, buf);
 
-            let data = Paragraph::new(line.data.as_str()).fg(line.color);
+            let data = Paragraph::new(line.data).fg(line.color);
 
             data.render(data_chunk, buf);
         }

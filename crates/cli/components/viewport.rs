@@ -1,10 +1,7 @@
-use std::ops::Range;
-
 use crate::direction::Direction;
 
+#[derive(Clone, Copy)]
 pub struct Viewport {
-    // End of the view
-    vend: usize,
     /// Top of the view
     top: usize,
     /// Left of the view
@@ -12,20 +9,16 @@ pub struct Viewport {
     /// Visible height
     height: usize,
     width: usize,
-    /// True if the view should follow the output
-    follow_output: bool,
 }
 
 impl Viewport {
     #[inline]
     pub const fn new() -> Self {
         Self {
-            vend: 0,
             top: 0,
             left: 0,
             height: 0,
             width: 0,
-            follow_output: false,
         }
     }
 
@@ -42,7 +35,6 @@ impl Viewport {
     pub fn fit_view(&mut self, height: usize, width: usize) {
         self.height = height;
         self.width = width;
-        self.fixup();
     }
 
     #[inline]
@@ -50,20 +42,17 @@ impl Viewport {
         self.top + self.height
     }
 
-    fn fixup(&mut self) {
-        if self.top >= self.vend {
-            self.top = self.vend.saturating_sub(1);
+    pub fn clamp(&mut self, end_index: usize) {
+        if self.top >= end_index {
+            self.top = end_index.saturating_sub(1);
         }
-        if self.height > self.vend {
-            self.height = self.vend;
-        }
-        if self.follow_output {
-            self.top = self.vend.saturating_sub(self.height);
+        if self.height > end_index {
+            self.height = end_index;
         }
     }
 
     pub fn top_to(&mut self, index: usize) {
-        self.top = index.min(self.vend.saturating_sub(1));
+        self.top = index;
     }
 
     pub fn jump_to(&mut self, index: usize) {
@@ -77,17 +66,12 @@ impl Viewport {
                 self.top = index.saturating_sub(self.height).saturating_add(1);
             }
         }
-        self.top = self.top.min(self.vend.saturating_sub(1));
     }
 
     pub fn pan_vertical(&mut self, direction: Direction, delta: usize) {
-        self.follow_output = false;
         self.top = match direction {
             Direction::Back => self.top.saturating_sub(delta),
-            Direction::Next => self
-                .top
-                .saturating_add(delta)
-                .min(self.vend.saturating_sub(1)),
+            Direction::Next => self.top.saturating_add(delta),
         }
     }
 
@@ -96,21 +80,6 @@ impl Viewport {
             Direction::Back => self.left.saturating_sub(delta),
             Direction::Next => self.left.saturating_add(delta),
         }
-    }
-
-    #[inline(always)]
-    pub fn follow_output(&mut self) {
-        self.follow_output = true;
-    }
-
-    pub fn update_end(&mut self, max_height: usize) {
-        self.vend = max_height;
-        self.fixup();
-    }
-
-    #[inline]
-    pub fn line_range(&self) -> Range<usize> {
-        self.top..self.bottom().min(self.vend)
     }
 
     #[inline(always)]

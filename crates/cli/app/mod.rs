@@ -11,10 +11,10 @@ use self::{
 };
 use crate::components::{
     filters::Filter,
+    instance::Instance,
     mux::{MultiplexerApp, MultiplexerMode},
     prompt::{self, PromptApp, PromptMovement},
     status::StatusApp,
-    instance::Instance,
 };
 use anyhow::Result;
 use bvr_core::{buf::SegBuffer, err::Error, index::BoxedStream, matches::CompositeStrategy};
@@ -190,14 +190,14 @@ impl App {
                             ViewDelta::Boundary => usize::MAX,
                             ViewDelta::Match => {
                                 let current = viewer.viewport().top();
-                                if let Some(next) = viewer.filterer.compute_jump(current, direction)
-                                {
+                                if let Some(next) = viewer.compute_jump(current, direction) {
                                     viewer.viewport_mut().top_to(next)
                                 }
                                 return true;
                             }
                         };
                         viewer.viewport_mut().pan_vertical(direction, delta);
+                        viewer.set_follow_output(false);
                     }
                 }
                 NormalAction::PanHorizontal {
@@ -219,11 +219,12 @@ impl App {
                             _ => 0,
                         };
                         viewer.viewport_mut().pan_horizontal(direction, delta);
+                        viewer.set_follow_output(false);
                     }
                 }
                 NormalAction::FollowOutput => {
                     if let Some(viewer) = self.mux.active_viewer_mut() {
-                        viewer.viewport_mut().follow_output();
+                        viewer.set_follow_output(true);
                     }
                 }
                 NormalAction::SwitchActiveIndex { target_view } => {
@@ -244,7 +245,6 @@ impl App {
                 VisualAction::ToggleSelectedLine => {
                     if let Some(viewer) = self.mux.active_viewer_mut() {
                         viewer.toggle_select_bookmarks();
-                        viewer.filterer.compute_composite();
                     }
                 }
                 VisualAction::ToggleLine {
@@ -254,11 +254,16 @@ impl App {
                     let Some(viewer) = self.mux.viewers_mut().get_mut(target_view) else {
                         return true;
                     };
-                    viewer.filterer.filters_mut().bookmarks_mut().toggle(line_number);
+                    viewer
+                        .view
+                        .compositor
+                        .filters_mut()
+                        .bookmarks_mut()
+                        .toggle(line_number);
                     // TODO: future optimization opportunity, do not need to recompute composite
                     // if the line number is part of a search filter and bookmark is not the only
                     // filter that satisfies the line number
-                    viewer.filterer.compute_composite();
+                    viewer.view.invalidate_cache();
                 }
             },
             Action::Filter(action) => match action {
@@ -268,19 +273,17 @@ impl App {
                     delta,
                 } => {
                     if let Some(viewer) = self.mux.active_viewer_mut() {
-                        viewer.filterer.move_select(direction, select, delta)
+                        viewer.view.compositor.move_select(direction, select, delta)
                     }
                 }
                 actions::FilterAction::ToggleSelectedFilter => {
                     if let Some(viewer) = self.mux.active_viewer_mut() {
-                        viewer.filterer.toggle_select_filters();
-                        viewer.filterer.compute_composite();
+                        viewer.toggle_select_filters();
                     }
                 }
                 actions::FilterAction::RemoveSelectedFilter => {
                     if let Some(viewer) = self.mux.active_viewer_mut() {
-                        viewer.filterer.remove_select_filters();
-                        viewer.filterer.compute_composite();
+                        viewer.remove_select_filter();
                     }
                 }
                 actions::FilterAction::ToggleFilter {
@@ -289,11 +292,12 @@ impl App {
                 } => {
                     if let Some(viewer) = self.mux.viewers_mut().get_mut(target_view) {
                         viewer
-                            .filterer
+                            .view
+                            .compositor
                             .filters_mut()
                             .get_mut(filter_index)
                             .map(Filter::toggle);
-                        viewer.filterer.compute_composite();
+                        viewer.view.invalidate_cache();
                     }
                 }
             },
@@ -367,7 +371,6 @@ impl App {
 
         if let Some(viewer) = self.mux.active_viewer_mut() {
             viewer.filter_search(regex);
-            viewer.filterer.compute_composite();
         }
 
         true
@@ -422,21 +425,22 @@ impl App {
                 }
                 Some("clear" | "c") => {
                     if let Some(viewer) = self.mux.active_viewer_mut() {
-                        viewer.filterer.filters_mut().clear();
+                        viewer.view.compositor.filters_mut().clear();
                     }
                 }
                 Some("union" | "u" | "||" | "|") => {
                     if let Some(viewer) = self.mux.active_viewer_mut() {
-                        viewer.filterer.set_strategy(CompositeStrategy::Union);
-                        viewer.filterer.compute_composite();
+                        viewer.view.compositor.set_strategy(CompositeStrategy::Union);
+                        viewer.view.invalidate_cache();
                     }
                 }
                 Some("intersect" | "i" | "&&" | "&") => {
                     if let Some(viewer) = self.mux.active_viewer_mut() {
                         viewer
-                            .filterer
+                            .view
+                            .compositor
                             .set_strategy(CompositeStrategy::Intersection);
-                        viewer.filterer.compute_composite();
+                        viewer.view.invalidate_cache();
                     }
                 }
                 Some(cmd) => {
@@ -447,15 +451,15 @@ impl App {
                 }
                 None => {
                     self.status.submit_message(
-                            format!("filter: requires subcommand, one of `r[egex]`, `l[it]`, `clear`, `union`, `intersect`"),
-                            Some(Duration::from_secs(2)),
-                        );
+                        format!("filter: requires subcommand, one of `r[egex]`, `l[it]`, `clear`, `union`, `intersect`"),
+                        Some(Duration::from_secs(2)),
+                    );
                 }
             },
             Some("export") => {
                 let path = parts.collect::<PathBuf>();
                 if let Some(viewer) = self.mux.active_viewer_mut() {
-                    let Some(composite) = viewer.filterer.composite() else {
+                    let Some(composite) = viewer.view.composite() else {
                         self.status.submit_message(
                             format!(
                                 "{}: export not allowed while All Lines is enabled",
@@ -465,9 +469,8 @@ impl App {
                         );
                         return true;
                     };
-                    
-                    if !composite.is_complete()
-                    {
+
+                    if !composite.is_complete() {
                         self.status.submit_message(
                             format!(
                                 "{}: export not allowed composite is incomplete",

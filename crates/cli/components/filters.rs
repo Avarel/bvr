@@ -4,7 +4,7 @@ use super::{
 };
 use crate::{app::ViewDelta, colors, direction::Direction};
 use bitflags::bitflags;
-use bvr_core::{LineMatches, SegBuffer, matches::CompositeStrategy};
+use bvr_core::{matches::CompositeStrategy, LineMatches, SegBuffer};
 use ratatui::style::Color;
 use regex::bytes::Regex;
 
@@ -72,7 +72,7 @@ impl Filter {
         }
     }
 
-    fn as_line_matches(&self) -> LineMatches {
+    pub fn as_line_matches(&self) -> LineMatches {
         match &self.repr {
             FilterRepr::All => LineMatches::empty(),
             FilterRepr::Bookmarks(mask) => mask.lines.clone().into(),
@@ -93,6 +93,14 @@ impl Filter {
             FilterRepr::All => None,
             FilterRepr::Bookmarks(mask) => mask.nearest_backward(line_number),
             FilterRepr::Search(mask) => mask.nearest_backward(line_number),
+        }
+    }
+
+    pub fn is_complete(&self) -> bool {
+        match &self.repr {
+            FilterRepr::All => true,
+            FilterRepr::Bookmarks(_) => true,
+            FilterRepr::Search(lines) => lines.is_complete(),
         }
     }
 }
@@ -245,18 +253,16 @@ pub struct FilterData<'a> {
     pub ty: FilterType,
 }
 
-pub struct FilterApp {
-    composite: Option<LineMatches>,
+pub struct Compositor {
     strategy: CompositeStrategy,
     viewport: Viewport,
     cursor: CursorState,
     filters: Filters,
 }
 
-impl FilterApp {
+impl Compositor {
     pub fn new() -> Self {
         Self {
-            composite: None,
             viewport: Viewport::new(),
             cursor: CursorState::new(),
             filters: Filters::new(),
@@ -268,8 +274,8 @@ impl FilterApp {
         self.strategy = strategy;
     }
 
-    pub fn is_masking(&self) -> bool {
-        self.composite.is_some()
+    pub fn needs_composite(&self) -> bool {
+        !self.filters.all.is_enabled()
     }
 
     pub fn filters_mut(&mut self) -> &mut Filters {
@@ -284,16 +290,14 @@ impl FilterApp {
         &mut self,
         viewport_height: usize,
     ) -> impl Iterator<Item = FilterData> {
-        self.viewport.update_end(self.filters.len());
         self.viewport.fit_view(viewport_height, 0);
-
-        let range = self.viewport.line_range();
+        self.viewport.clamp(self.filters.len());
 
         self.filters
             .iter()
             .enumerate()
-            .skip(range.start)
-            .take(range.len())
+            .skip(self.viewport.top())
+            .take(self.viewport.height())
             .map(|(index, filter)| FilterData {
                 index,
                 name: &filter.name,
@@ -326,21 +330,13 @@ impl FilterApp {
             })
     }
 
-    pub fn composite(&self) -> Option<&LineMatches> {
-        self.composite.as_ref()
-    }
-
-    pub fn compute_composite(&mut self) {
-        if !self.is_masking() {
-            self.composite = None;
-            return;
-        }
+    pub fn create_composite(&self) -> LineMatches {
         let filters = self
             .filters
             .iter_active()
             .map(|filter| filter.as_line_matches())
             .collect();
-        self.composite = LineMatches::compose(filters, false, self.strategy).ok();
+        LineMatches::compose(filters, false, self.strategy).unwrap()
     }
 
     pub fn move_select(&mut self, dir: Direction, select: bool, delta: ViewDelta) {
@@ -392,7 +388,6 @@ impl FilterApp {
             }
         }
         self.cursor.clamp(self.filters.len().saturating_sub(1));
-        self.viewport.update_end(self.filters.len());
     }
 
     pub fn filter_search(&mut self, file: &SegBuffer, regex: Regex) {
@@ -405,29 +400,5 @@ impl FilterApp {
                 .copied()
                 .unwrap_or(Color::White),
         });
-    }
-
-    pub fn compute_jump(&self, i: usize, direction: Direction) -> Option<usize> {
-        if self.is_masking() {
-            // The composite is literally all matches
-            return match direction {
-                Direction::Back => Some(i.saturating_sub(1)),
-                Direction::Next => Some(i.saturating_add(1)),
-            };
-        }
-        match direction {
-            Direction::Back => self
-                .filters
-                .iter_active()
-                .filter_map(|filter| filter.nearest_backward(i))
-                .filter(|&ln| ln < i)
-                .max(),
-            Direction::Next => self
-                .filters
-                .iter_active()
-                .filter_map(|filter| filter.nearest_forward(i))
-                .filter(|&ln| ln > i)
-                .min(),
-        }
     }
 }
