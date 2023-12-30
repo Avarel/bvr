@@ -14,7 +14,7 @@ use crate::components::{
     mux::{MultiplexerApp, MultiplexerMode},
     prompt::{self, PromptApp, PromptMovement},
     status::StatusApp,
-    viewer::Instance,
+    instance::Instance,
 };
 use anyhow::Result;
 use bvr_core::{buf::SegBuffer, err::Error, index::BoxedStream, matches::CompositeStrategy};

@@ -12,7 +12,7 @@ use crate::{
         mux::{MultiplexerApp, MultiplexerMode},
         prompt::PromptApp,
         status::StatusApp,
-        viewer::{Instance, LineData, LineType},
+        instance::{Instance, LineData, LineType},
     },
     direction::Direction,
 };

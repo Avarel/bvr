@@ -1,4 +1,4 @@
-use super::viewer::Instance;
+use super::instance::Instance;
 use crate::direction::Direction;
 
 #[derive(Clone, Copy)]
