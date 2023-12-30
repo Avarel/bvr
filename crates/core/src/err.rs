@@ -13,6 +13,9 @@ pub enum Error {
 
     #[error("operation not supported when input is in-progress")]
     InProgress,
+
+    #[error("operation not implemented")]
+    Unimplemented,
 }
 
 /// A specialized [Result] type for this crate's operations.

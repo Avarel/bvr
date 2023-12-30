@@ -296,3 +296,9 @@ impl std::convert::AsRef<str> for SegStr {
         self.as_str()
     }
 }
+
+impl std::fmt::Debug for SegStr {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        std::fmt::Debug::fmt(self.as_str(), f)
+    }
+}

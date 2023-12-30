@@ -200,19 +200,30 @@ impl SegBuffer {
         }
     }
 
-    pub fn write_file(&mut self, file: File, lines: LineMatches) -> Result<()> {
-        if !lines.is_complete() {
-            return Err(crate::err::Error::InProgress);
+    pub fn write_file(&mut self, output: File, lines: Option<LineMatches>) -> Result<()> {
+        if let Some(lines) = lines {
+            if !lines.is_complete() {
+                return Err(crate::err::Error::InProgress);
+            }
+
+            let mut writer = BufWriter::new(output);
+            let snap = lines.snapshot();
+
+            for &ln in snap.iter() {
+                let line = self.get_bytes(ln).unwrap();
+                writer.write_all(line.as_bytes())?;
+            }
+        } else {
+            match &mut self.repr {
+                BufferRepr::File { ref file, .. } => {
+                    let mut output = output;
+                    std::io::copy(&mut file.try_clone()?, &mut output)?;
+                }
+                BufferRepr::Stream(_) => {
+                    return Err(crate::err::Error::Unimplemented);
+                }
+            }
         }
-
-        let mut writer = BufWriter::new(file);
-        let snap = lines.snapshot();
-
-        for &ln in snap.iter() {
-            let line = self.get_bytes(ln).unwrap();
-            writer.write_all(line.as_bytes())?;
-        }
-
         Ok(())
     }
 }
