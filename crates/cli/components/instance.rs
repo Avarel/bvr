@@ -1,6 +1,6 @@
 use super::{
     cursor::{Cursor, CursorState, SelectionOrigin},
-    filters::Filterer,
+    filters::FilterApp,
     viewport::Viewport,
 };
 use crate::{app::ViewDelta, direction::Direction};
@@ -11,13 +11,6 @@ use ratatui::style::Color;
 use regex::bytes::Regex;
 use std::fs::File;
 
-pub struct Instance {
-    name: String,
-    buf: SegBuffer,
-    viewport: Viewport,
-    cursor: CursorState,
-    pub filterer: Filterer,
-}
 
 bitflags! {
     pub struct LineType: u8 {
@@ -38,6 +31,14 @@ pub struct LineData {
     pub ty: LineType,
 }
 
+pub struct Instance {
+    name: String,
+    buf: SegBuffer,
+    viewport: Viewport,
+    cursor: CursorState,
+    pub filterer: FilterApp,
+}
+
 impl Instance {
     pub fn new(name: String, buf: SegBuffer) -> Self {
         Self {
@@ -45,7 +46,7 @@ impl Instance {
             buf,
             cursor: CursorState::new(),
             viewport: Viewport::new(),
-            filterer: Filterer::new(),
+            filterer: FilterApp::new(),
         }
     }
 

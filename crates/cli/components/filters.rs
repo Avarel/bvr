@@ -4,7 +4,7 @@ use super::{
 };
 use crate::{app::ViewDelta, colors, direction::Direction};
 use bitflags::bitflags;
-use bvr_core::{LineMatches, SegBuffer};
+use bvr_core::{LineMatches, SegBuffer, matches::CompositeStrategy};
 use ratatui::style::Color;
 use regex::bytes::Regex;
 
@@ -166,14 +166,6 @@ impl Bookmarks {
     }
 }
 
-pub struct Filterer {
-    composite: Option<LineMatches>,
-    viewport: Viewport,
-    cursor: CursorState,
-    filters: Filters,
-    strategy: bvr_core::matches::CompositeStrategy,
-}
-
 #[derive(Clone)]
 pub struct Filters {
     all: Filter,
@@ -253,18 +245,26 @@ pub struct FilterData<'a> {
     pub ty: FilterType,
 }
 
-impl Filterer {
+pub struct FilterApp {
+    composite: Option<LineMatches>,
+    strategy: CompositeStrategy,
+    viewport: Viewport,
+    cursor: CursorState,
+    filters: Filters,
+}
+
+impl FilterApp {
     pub fn new() -> Self {
         Self {
             composite: None,
             viewport: Viewport::new(),
             cursor: CursorState::new(),
             filters: Filters::new(),
-            strategy: bvr_core::matches::CompositeStrategy::Union,
+            strategy: CompositeStrategy::Union,
         }
     }
 
-    pub fn set_strategy(&mut self, strategy: bvr_core::matches::CompositeStrategy) {
+    pub fn set_strategy(&mut self, strategy: CompositeStrategy) {
         self.strategy = strategy;
     }
 
