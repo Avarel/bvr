@@ -254,7 +254,7 @@ impl App {
                     let Some(viewer) = self.mux.viewers_mut().get_mut(target_view) else {
                         return true;
                     };
-                    viewer.filterer.filters.bookmarks_mut().toggle(line_number);
+                    viewer.filterer.filters_mut().bookmarks_mut().toggle(line_number);
                     // TODO: future optimization opportunity, do not need to recompute composite
                     // if the line number is part of a search filter and bookmark is not the only
                     // filter that satisfies the line number
@@ -422,7 +422,7 @@ impl App {
                 }
                 Some("clear" | "c") => {
                     if let Some(viewer) = self.mux.active_viewer_mut() {
-                        viewer.filterer.filters.clear();
+                        viewer.filterer.filters_mut().clear();
                     }
                 }
                 Some("union" | "u" | "||" | "|") => {
@@ -455,7 +455,7 @@ impl App {
             Some("export") => {
                 let path = parts.collect::<PathBuf>();
                 if let Some(viewer) = self.mux.active_viewer_mut() {
-                    if viewer.filterer.filters.all().is_enabled() {
+                    let Some(composite) = viewer.filterer.composite() else {
                         self.status.submit_message(
                             format!(
                                 "{}: export not allowed while All Lines is enabled",
@@ -464,12 +464,9 @@ impl App {
                             Some(Duration::from_secs(2)),
                         );
                         return true;
-                    } else if viewer
-                        .filterer
-                        .composite
-                        .as_ref()
-                        .map(|c| !c.is_complete())
-                        .unwrap_or(false)
+                    };
+                    
+                    if !composite.is_complete()
                     {
                         self.status.submit_message(
                             format!(

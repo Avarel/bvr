@@ -62,7 +62,7 @@ impl Instance {
     }
 
     pub fn visible_line_count(&self) -> usize {
-        if let Some(composite) = self.filterer.composite.as_ref() {
+        if let Some(composite) = self.filterer.composite() {
             composite.len()
         } else {
             self.buf.line_count()
@@ -70,7 +70,7 @@ impl Instance {
     }
 
     fn line_at_view_index(&self, index: usize) -> Option<usize> {
-        if let Some(composite) = self.filterer.composite.as_ref() {
+        if let Some(composite) = self.filterer.composite() {
             composite.get(index)
         } else if index < self.buf.line_count() {
             Some(index)
@@ -80,7 +80,7 @@ impl Instance {
     }
 
     pub fn nearest_index(&self, line_number: usize) -> Option<usize> {
-        if let Some(composite) = self.filterer.composite.as_ref() {
+        if let Some(composite) = self.filterer.composite() {
             composite
                 .nearest_backward(line_number)
                 .and_then(|ln| composite.find(ln))
@@ -99,7 +99,7 @@ impl Instance {
         self.viewport.fit_view(viewport_height, viewport_width);
         self.viewport.update_end(self.visible_line_count());
 
-        let filters = self.filterer.filters.iter_active().collect::<Vec<_>>();
+        let filters = self.filterer.filters().iter_active().collect::<Vec<_>>();
 
         let mut lines = Vec::with_capacity(self.viewport.line_range().len());
         for index in self.viewport.line_range() {
@@ -114,10 +114,10 @@ impl Instance {
                 .iter()
                 .rev()
                 .find(|filter| filter.has_line(line_number))
-                .map(|filter| filter.color)
+                .map(|filter| filter.color())
                 .unwrap_or(Color::White);
 
-            let bookmarked = self.filterer.filters.bookmarks().has_line(line_number);
+            let bookmarked = self.filterer.filters().bookmarks().has_line(line_number);
 
             lines.push(LineData {
                 line_number,
@@ -213,12 +213,12 @@ impl Instance {
         match self.cursor.state() {
             Cursor::Singleton(i) => {
                 let line_number = self.line_at_view_index(i).unwrap();
-                self.filterer.filters.bookmarks_mut().toggle(line_number);
+                self.filterer.filters_mut().bookmarks_mut().toggle(line_number);
             }
             Cursor::Selection(start, end, _) => {
                 for i in (start..=end).rev() {
                     let line_number = self.line_at_view_index(i).unwrap();
-                    self.filterer.filters.bookmarks_mut().toggle(line_number);
+                    self.filterer.filters_mut().bookmarks_mut().toggle(line_number);
                 }
             }
         }
@@ -229,6 +229,6 @@ impl Instance {
 
     pub fn export_file(&mut self, file: File) -> Result<()> {
         self.buf
-            .write_file(file, self.filterer.composite.as_ref().unwrap().clone())
+            .write_file(file, self.filterer.composite().unwrap().clone())
     }
 }

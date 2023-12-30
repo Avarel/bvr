@@ -21,7 +21,7 @@ enum FilterRepr {
 pub struct Filter {
     name: String,
     enabled: bool,
-    pub(super) color: Color,
+    color: Color,
     repr: FilterRepr,
 }
 
@@ -42,6 +42,10 @@ impl Filter {
             color: colors::SELECT_ACCENT,
             repr: FilterRepr::Bookmarks(Bookmarks::new()),
         }
+    }
+
+    pub fn color(&self) -> Color {
+        self.color
     }
 
     pub fn is_enabled(&self) -> bool {
@@ -163,10 +167,10 @@ impl Bookmarks {
 }
 
 pub struct Filterer {
-    pub composite: Option<LineMatches>,
-    pub viewport: Viewport,
+    composite: Option<LineMatches>,
+    viewport: Viewport,
     cursor: CursorState,
-    pub(crate) filters: Filters,
+    filters: Filters,
     strategy: bvr_core::matches::CompositeStrategy,
 }
 
@@ -198,10 +202,6 @@ impl Filters {
 
     pub fn iter_active(&self) -> impl Iterator<Item = &Filter> {
         self.iter().filter(|filter| filter.is_enabled())
-    }
-
-    pub fn all(&self) -> &Filter {
-        &self.all
     }
 
     pub fn get_mut(&mut self, index: usize) -> Option<&mut Filter> {
@@ -268,8 +268,16 @@ impl Filterer {
         self.strategy = strategy;
     }
 
+    pub fn is_masking(&self) -> bool {
+        self.composite.is_some()
+    }
+
     pub fn filters_mut(&mut self) -> &mut Filters {
         &mut self.filters
+    }
+
+    pub fn filters(&self) -> &Filters {
+        &self.filters
     }
 
     pub fn update_and_filter_view(
@@ -318,8 +326,12 @@ impl Filterer {
             })
     }
 
+    pub fn composite(&self) -> Option<&LineMatches> {
+        self.composite.as_ref()
+    }
+
     pub fn compute_composite(&mut self) {
-        if self.filters.all().is_enabled() {
+        if !self.is_masking() {
             self.composite = None;
             return;
         }
@@ -396,7 +408,7 @@ impl Filterer {
     }
 
     pub fn compute_jump(&self, i: usize, direction: Direction) -> Option<usize> {
-        if self.composite.is_some() {
+        if self.is_masking() {
             // The composite is literally all matches
             return match direction {
                 Direction::Back => Some(i.saturating_sub(1)),
