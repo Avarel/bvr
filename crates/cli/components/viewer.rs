@@ -23,7 +23,7 @@ pub struct ViewCache {
     curr_viewport: Viewport,
 
     follow_output: bool,
-    pub(crate) end_index: usize,
+    end_index: usize,
 
     need_recoloring: bool,
 }
@@ -39,6 +39,10 @@ impl ViewCache {
             need_recoloring: false,
             end_index: 0,
         }
+    }
+
+    pub fn set_end_index(&mut self, end_index: usize) {
+        self.end_index = end_index;
     }
 
     pub fn composite(&self) -> &LineSet {

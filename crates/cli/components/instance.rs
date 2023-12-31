@@ -93,7 +93,7 @@ impl Instance {
         self.view
             .viewport_mut()
             .fit_view(viewport_height, viewport_width);
-        self.view.end_index = self.visible_line_count();
+        self.view.set_end_index(self.visible_line_count());
 
         let left = self.view.viewport().left();
         let cursor_state = self.cursor.state();
@@ -205,7 +205,7 @@ impl Instance {
         }
         self.cursor
             .clamp(self.visible_line_count().saturating_sub(1));
-        self.view.end_index = self.visible_line_count();
+        self.view.set_end_index(self.visible_line_count());
         self.invalidate_cache();
     }
 
