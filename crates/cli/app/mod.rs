@@ -11,6 +11,7 @@ use self::{
 };
 use crate::components::{
     filters::Filter,
+    history::History,
     instance::Instance,
     mux::{MultiplexerApp, MultiplexerMode},
     prompt::{self, PromptApp, PromptMovement},
@@ -66,6 +67,7 @@ pub struct App {
     mux: MultiplexerApp,
     status: StatusApp,
     prompt: PromptApp,
+    history: History,
     keybinds: Keybinding,
     gutter: bool,
 }
@@ -76,6 +78,7 @@ impl App {
             mode: InputMode::Normal,
             prompt: PromptApp::new(),
             mux: MultiplexerApp::new(),
+            history: History::new(),
             status: StatusApp::new(),
             keybinds: Keybinding::Hardcoded,
             gutter: true,
@@ -161,7 +164,7 @@ impl App {
         match action {
             Action::Exit => return false,
             Action::SwitchMode(new_mode) => {
-                self.prompt.submit();
+                self.prompt.take();
                 self.mode = new_mode;
 
                 if new_mode == InputMode::Visual {
@@ -190,7 +193,9 @@ impl App {
                             ViewDelta::Boundary => usize::MAX,
                             ViewDelta::Match => {
                                 let current = viewer.viewport().top();
-                                if let Some(next) = viewer.compositor_mut().compute_jump(current, direction) {
+                                if let Some(next) =
+                                    viewer.compositor_mut().compute_jump(current, direction)
+                                {
                                     viewer.viewport_mut().top_to(next)
                                 }
                                 return true;
@@ -325,9 +330,9 @@ impl App {
                     }
                 }
                 CommandAction::Submit => {
-                    let command = self.prompt.submit();
+                    let command = self.prompt.take();
                     let result = match self.mode {
-                        InputMode::Command(PromptMode::Command) => self.process_command(command),
+                        InputMode::Command(PromptMode::Command) => self.process_command(&command),
                         InputMode::Command(PromptMode::NewFilter) => {
                             self.process_search(&command, false)
                         }
@@ -338,6 +343,25 @@ impl App {
                     };
                     self.mode = InputMode::Normal;
                     return result;
+                }
+                CommandAction::History { direction } => {
+                    let was_using_history = self.history.is_using_history();
+                    let Some((entry, is_history)) = (match direction {
+                        crate::direction::Direction::Back => self.history.backward(),
+                        crate::direction::Direction::Next => self.history.forward(),
+                    }) else {
+                        return true;
+                    };
+
+                    if is_history {
+                        let curr = self.prompt.take();
+                        self.prompt.set_buffer(entry.to_string());
+                        if !was_using_history {
+                            self.history.set_curr(curr);
+                        }
+                    } else {
+                        self.prompt.set_buffer(entry.to_string());
+                    }
                 }
                 CommandAction::Complete => (),
             },
@@ -376,7 +400,8 @@ impl App {
         true
     }
 
-    fn process_command(&mut self, command: String) -> bool {
+    fn process_command(&mut self, command: &str) -> bool {
+        self.history.push(command.to_string());
         let mut parts = command.split_whitespace();
 
         match parts.next() {

@@ -61,6 +61,9 @@ pub enum CommandAction {
         select: bool,
         jump: CommandJump,
     },
+    History {
+        direction: Direction,
+    },
     Type(char),
     Paste(String),
     Backspace,

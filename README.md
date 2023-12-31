@@ -32,7 +32,6 @@ a plethora of other features that I couldn't find in any other pager.
 ### In-Progress or Planned
 | Feature            | Description                                         | Progress  |
 | ------------------ | --------------------------------------------------- | --------- |
-| Command History    | Use arrow keys to navigate through command history. | Planned   |
 | Command Completion | Use tabs to complete commands.                      | Planned   |
 | Filter Presets     | Add preset filters upon startup.                    | After MVP |
 | Custom Keybindings | Customize the keybindings of the program.           | After MVP |

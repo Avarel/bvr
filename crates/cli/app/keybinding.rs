@@ -162,7 +162,7 @@ impl Keybinding {
                 },
                 _ => None,
             },
-            InputMode::Command(_) => match event {
+            InputMode::Command(ty) => match event {
                 Event::Paste(paste) => {
                     Some(Action::Command(CommandAction::Paste(std::mem::take(paste))))
                 }
@@ -185,6 +185,11 @@ impl Keybinding {
                         select: key.modifiers.contains(KeyModifiers::SHIFT),
                         jump: CommandJump::Boundary,
                     })),
+                    KeyCode::Up | KeyCode::Down if ty == PromptMode::Command => {
+                        Some(Action::Command(CommandAction::History {
+                            direction: Direction::back_if(key.code == KeyCode::Up),
+                        }))
+                    }
                     KeyCode::Backspace => Some(Action::Command(CommandAction::Backspace)),
                     KeyCode::Char(to_insert) => match to_insert {
                         'b' | 'f' if key.modifiers.contains(KeyModifiers::ALT) => {

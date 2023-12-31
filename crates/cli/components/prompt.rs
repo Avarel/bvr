@@ -165,7 +165,12 @@ impl PromptApp {
         true
     }
 
-    pub fn submit(&mut self) -> String {
+    pub fn set_buffer(&mut self, buf: String) {
+        self.buf = buf;
+        self.cursor.place(self.buf.len());
+    }
+
+    pub fn take(&mut self) -> String {
         self.cursor.reset();
         std::mem::take(&mut self.buf)
     }

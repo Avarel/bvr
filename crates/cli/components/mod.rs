@@ -1,6 +1,7 @@
 pub mod cursor;
 pub mod viewport;
 
+pub mod history;
 pub mod filters;
 pub mod instance;
 pub mod mux;
