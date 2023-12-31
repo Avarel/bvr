@@ -190,7 +190,7 @@ impl App {
                             ViewDelta::Boundary => usize::MAX,
                             ViewDelta::Match => {
                                 let current = viewer.viewport().top();
-                                if let Some(next) = viewer.compute_jump(current, direction) {
+                                if let Some(next) = viewer.compositor_mut().compute_jump(current, direction) {
                                     viewer.viewport_mut().top_to(next)
                                 }
                                 return true;
@@ -255,15 +255,14 @@ impl App {
                         return true;
                     };
                     viewer
-                        .view
-                        .compositor
+                        .compositor_mut()
                         .filters_mut()
                         .bookmarks_mut()
                         .toggle(line_number);
                     // TODO: future optimization opportunity, do not need to recompute composite
                     // if the line number is part of a search filter and bookmark is not the only
                     // filter that satisfies the line number
-                    viewer.view.invalidate_cache();
+                    viewer.invalidate_cache();
                 }
             },
             Action::Filter(action) => match action {
@@ -273,7 +272,9 @@ impl App {
                     delta,
                 } => {
                     if let Some(viewer) = self.mux.active_viewer_mut() {
-                        viewer.view.compositor.move_select(direction, select, delta)
+                        viewer
+                            .compositor_mut()
+                            .move_select(direction, select, delta)
                     }
                 }
                 actions::FilterAction::ToggleSelectedFilter => {
@@ -292,12 +293,11 @@ impl App {
                 } => {
                     if let Some(viewer) = self.mux.viewers_mut().get_mut(target_view) {
                         viewer
-                            .view
-                            .compositor
+                            .compositor_mut()
                             .filters_mut()
                             .get_mut(filter_index)
                             .map(Filter::toggle);
-                        viewer.view.invalidate_cache();
+                        viewer.invalidate_cache();
                     }
                 }
             },
@@ -425,22 +425,23 @@ impl App {
                 }
                 Some("clear" | "c") => {
                     if let Some(viewer) = self.mux.active_viewer_mut() {
-                        viewer.view.compositor.filters_mut().clear();
+                        viewer.compositor_mut().filters_mut().clear();
                     }
                 }
                 Some("union" | "u" | "||" | "|") => {
                     if let Some(viewer) = self.mux.active_viewer_mut() {
-                        viewer.view.compositor.set_strategy(CompositeStrategy::Union);
-                        viewer.view.invalidate_cache();
+                        viewer
+                            .compositor_mut()
+                            .set_strategy(CompositeStrategy::Union);
+                        viewer.invalidate_cache();
                     }
                 }
                 Some("intersect" | "i" | "&&" | "&") => {
                     if let Some(viewer) = self.mux.active_viewer_mut() {
                         viewer
-                            .view
-                            .compositor
+                            .compositor_mut()
                             .set_strategy(CompositeStrategy::Intersection);
-                        viewer.view.invalidate_cache();
+                        viewer.invalidate_cache();
                     }
                 }
                 Some(cmd) => {
@@ -459,16 +460,6 @@ impl App {
             Some("export") => {
                 let path = parts.collect::<PathBuf>();
                 if let Some(viewer) = self.mux.active_viewer_mut() {
-                    if !viewer.view.composite().is_complete() {
-                        self.status.submit_message(
-                            format!(
-                                "{}: export not allowed composite is incomplete",
-                                path.display()
-                            ),
-                            Some(Duration::from_secs(2)),
-                        );
-                        return true;
-                    }
                     self.status.submit_message(
                         format!(
                             "{}: export starting (this may take a while...)",

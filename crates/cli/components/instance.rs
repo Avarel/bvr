@@ -1,15 +1,16 @@
 use super::{
     cursor::{Cursor, CursorState, SelectionOrigin},
-    filters::{Compositor, Filters},
+    filters::Compositor,
+    viewer::ViewCache,
     viewport::Viewport,
 };
 use crate::{app::ViewDelta, direction::Direction};
 use bitflags::bitflags;
-use bvr_core::{LineSet, Result};
-use bvr_core::{SegBuffer, SegStr};
+use bvr_core::Result;
+use bvr_core::SegBuffer;
 use ratatui::style::Color;
 use regex::bytes::Regex;
-use std::{collections::VecDeque, fs::File};
+use std::fs::File;
 
 bitflags! {
     #[derive(Clone)]
@@ -32,229 +33,21 @@ pub struct LineData<'a> {
     pub ty: LineType,
 }
 
-#[derive(Clone)]
-struct CachedLine {
-    index: usize,
-    line_number: usize,
-    data: SegStr,
-    color: Color,
-    bookmarked: bool,
-}
-
-pub struct ViewManager {
-    composite: LineSet,
-
-    cache: VecDeque<CachedLine>,
-
-    prev_viewport: Viewport,
-    curr_viewport: Viewport,
-
-    follow_output: bool,
-    end_index: usize,
-
-    need_recoloring: bool,
-    pub compositor: Compositor,
-}
-
-impl ViewManager {
-    fn new(buf: &SegBuffer) -> Self {
-        let compositor = Compositor::new(buf);
-        Self {
-            composite: compositor.create_composite(),
-            compositor,
-            cache: VecDeque::new(),
-            prev_viewport: Viewport::new(),
-            curr_viewport: Viewport::new(),
-            follow_output: false,
-            need_recoloring: false,
-            end_index: 0,
-        }
-    }
-
-    pub fn set_follow_output(&mut self, follow_output: bool) {
-        self.follow_output = follow_output;
-    }
-
-    pub fn viewport(&self) -> &Viewport {
-        &self.curr_viewport
-    }
-
-    pub fn viewport_mut(&mut self) -> &mut Viewport {
-        &mut self.curr_viewport
-    }
-
-    pub fn composite(&self) -> &LineSet {
-        &self.composite
-    }
-
-    fn line_at_view_index(&self, index: usize) -> Option<usize> {
-        self.composite.get(index)
-    }
-
-    fn push_front(&mut self, index: usize, buf: &SegBuffer) {
-        let Some(line_number) = self.line_at_view_index(index) else {
-            return;
-        };
-
-        let Some(data) = buf.get_line(line_number) else {
-            todo!("push empty line");
-        };
-
-        self.cache.push_front(CachedLine {
-            index,
-            line_number,
-            data,
-            color: Color::Reset,
-            bookmarked: false,
-        });
-    }
-
-    fn push_back(&mut self, index: usize, buf: &SegBuffer) -> bool {
-        let Some(line_number) = self.line_at_view_index(index) else {
-            return false;
-        };
-
-        let Some(data) = buf.get_line(line_number) else {
-            return false;
-        };
-
-        self.cache.push_back(CachedLine {
-            index,
-            line_number,
-            data,
-            color: Color::Reset,
-            bookmarked: false,
-        });
-        true
-    }
-
-    fn compute_view(&mut self, buf: &SegBuffer) -> impl Iterator<Item = &CachedLine> {
-        if self.follow_output {
-            self.curr_viewport.jump_to(self.end_index.saturating_sub(1));
-        }
-
-        let (old_top, new_top) = (self.prev_viewport.top(), self.curr_viewport.top());
-        let (old_bot, new_bot) = (self.prev_viewport.bottom(), self.curr_viewport.bottom());
-
-        self.curr_viewport.clamp(self.end_index);
-
-        if new_top > old_bot || new_bot < old_top {
-            // No overlap between old and new viewports
-            self.cache.clear();
-        } else {
-            // Overlap between old and new viewports
-            // Shift the cache to match the new viewport
-            if old_top < new_top {
-                for _ in old_top..new_top {
-                    self.cache.pop_front();
-                }
-            } else if old_top > new_top {
-                for i in (new_top..old_top).rev() {
-                    self.push_front(i, buf);
-                }
-            }
-        }
-
-        // Populate the cache to fill the viewport
-        while self.cache.len() < self.curr_viewport.height() {
-            if !self.push_back(self.cache.len() + new_top, buf) {
-                break;
-            }
-        }
-
-        self.cache.truncate(self.curr_viewport.height());
-
-        self.prev_viewport = self.curr_viewport;
-
-        self.color_cache();
-
-        self.cache.iter()
-    }
-
-    fn color_cache(&mut self) {
-        if self.need_recoloring {
-            self.reset_color_cache();
-            self.need_recoloring = self
-                .compositor
-                .filters()
-                .iter_active()
-                .any(|filter| !filter.is_complete());
-        }
-
-        let filters = self.compositor.filters().iter_active().collect::<Vec<_>>();
-
-        self.cache
-            .iter_mut()
-            .filter(|line| line.color == Color::Reset)
-            .for_each(|line| {
-                line.color = filters
-                    .iter()
-                    .rev()
-                    .find(|filter| filter.has_line(line.line_number))
-                    .map(|filter| filter.color())
-                    .unwrap_or(Color::White);
-
-                line.bookmarked = self
-                    .compositor
-                    .filters()
-                    .bookmarks()
-                    .has_line(line.line_number);
-            });
-    }
-
-    pub fn reset_color_cache(&mut self) {
-        self.need_recoloring = true;
-        self.cache
-            .iter_mut()
-            .for_each(|line| line.color = Color::Reset);
-    }
-
-    pub fn invalidate_cache(&mut self) {
-        let prev_all = self.composite.is_all();
-        let now_all = !self.compositor.needs_composite();
-
-        if prev_all && now_all {
-            self.reset_color_cache();
-        } else {
-            self.cache.clear();
-            self.composite = self.compositor.create_composite();
-        }
-    }
-
-    pub fn compute_jump(&self, i: usize, direction: Direction, filters: &Filters) -> Option<usize> {
-        if !self.composite.is_all() {
-            // The composite is literally all matches
-            return match direction {
-                Direction::Back => Some(i.saturating_sub(1)),
-                Direction::Next => Some(i.saturating_add(1)),
-            };
-        }
-        match direction {
-            Direction::Back => filters
-                .iter_active()
-                .filter_map(|filter| filter.nearest_backward(i))
-                .filter(|&ln| ln < i)
-                .max(),
-            Direction::Next => filters
-                .iter_active()
-                .filter_map(|filter| filter.nearest_forward(i))
-                .filter(|&ln| ln > i)
-                .min(),
-        }
-    }
-}
-
 pub struct Instance {
     name: String,
     buf: SegBuffer,
     cursor: CursorState,
-    pub view: ViewManager,
+    compositor: Compositor,
+    view: ViewCache,
 }
 
 impl Instance {
     pub fn new(name: String, buf: SegBuffer) -> Self {
+        let compositor = Compositor::new(&buf);
+        let composite = compositor.create_composite();
         Self {
-            view: ViewManager::new(&buf),
+            view: ViewCache::new(composite),
+            compositor: Compositor::new(&buf),
             name,
             buf,
             cursor: CursorState::new(),
@@ -278,71 +71,72 @@ impl Instance {
     }
 
     pub fn visible_line_count(&self) -> usize {
-        self.view.composite.len()
+        self.view.composite().len()
     }
 
-    fn line_at_view_index(&self, index: usize) -> Option<usize> {
-        self.view.composite.get(index)
+    pub fn compositor_mut(&mut self) -> &mut Compositor {
+        &mut self.compositor
     }
 
     pub fn nearest_index(&self, line_number: usize) -> Option<usize> {
         self.view
-            .composite
+            .composite()
             .nearest_backward(line_number)
-            .and_then(|ln| self.view.composite.find(ln))
+            .and_then(|ln| self.view.composite().find(ln))
     }
 
     pub fn update_and_view(
         &mut self,
         viewport_height: usize,
         viewport_width: usize,
-    ) -> Vec<LineData<'_>> {
+    ) -> (impl Iterator<Item = LineData<'_>>, Option<usize>) {
         self.view
-            .curr_viewport
+            .viewport_mut()
             .fit_view(viewport_height, viewport_width);
         self.view.end_index = self.visible_line_count();
 
-        let left = self.view.curr_viewport.left();
+        let left = self.view.viewport().left();
         let cursor_state = self.cursor.state();
 
-        self.view
-            .compute_view(&self.buf)
-            .map(move |line| LineData {
-                line_number: line.line_number,
-                data: line.data.as_str(),
-                start: left,
-                color: line.color,
-                ty: match cursor_state {
-                    Cursor::Singleton(i) => {
-                        if line.index == i {
-                            LineType::Origin
-                        } else {
-                            LineType::None
-                        }
+        let (cache, last_line) = self
+            .view
+            .cache_view(&self.buf, |cache| cache.color_cache(&self.compositor));
+        let iter = cache.map(move |line| LineData {
+            line_number: line.line_number,
+            data: line.data.as_str(),
+            start: left,
+            color: line.color,
+            ty: match cursor_state {
+                Cursor::Singleton(i) => {
+                    if line.index == i {
+                        LineType::Origin
+                    } else {
+                        LineType::None
                     }
-                    Cursor::Selection(start, end, _) => {
-                        if !(start..=end).contains(&line.index) {
-                            LineType::None
-                        } else if line.index == start {
-                            LineType::Origin | LineType::OriginStart
-                        } else if line.index == end {
-                            LineType::Origin | LineType::OriginEnd
-                        } else {
-                            LineType::Within
-                        }
+                }
+                Cursor::Selection(start, end, _) => {
+                    if !(start..=end).contains(&line.index) {
+                        LineType::None
+                    } else if line.index == start {
+                        LineType::Origin | LineType::OriginStart
+                    } else if line.index == end {
+                        LineType::Origin | LineType::OriginEnd
+                    } else {
+                        LineType::Within
                     }
-                } | if line.bookmarked {
-                    LineType::Bookmarked
-                } else {
-                    LineType::None
-                },
-            })
-            .collect()
+                }
+            } | if line.bookmarked {
+                LineType::Bookmarked
+            } else {
+                LineType::None
+            },
+        });
+        (iter, last_line)
     }
 
     pub fn filter_search(&mut self, regex: Regex) {
-        self.view.compositor.filter_search(&self.buf, regex);
-        self.view.invalidate_cache();
+        self.compositor.filter_search(&self.buf, regex);
+        self.invalidate_cache();
     }
 
     pub fn name(&self) -> &str {
@@ -355,48 +149,30 @@ impl Instance {
             | Cursor::Selection(i, _, SelectionOrigin::Left)
             | Cursor::Selection(_, i, SelectionOrigin::Right) => i,
         };
-        if current < self.view.curr_viewport.top() {
-            self.cursor.place(self.view.curr_viewport.top());
-        } else if current >= self.view.curr_viewport.bottom() {
+        if current < self.view.viewport().top() {
+            self.cursor.place(self.view.viewport().top());
+        } else if current >= self.view.viewport().bottom() {
             self.cursor
-                .place(self.view.curr_viewport.bottom().saturating_sub(1));
+                .place(self.view.viewport().bottom().saturating_sub(1));
         }
     }
 
     pub fn move_select(&mut self, dir: Direction, select: bool, delta: ViewDelta) {
-        let ndelta = match delta {
+        let compute_delta = |i: usize| match delta {
             ViewDelta::Number(n) => usize::from(n),
-            ViewDelta::Page => self.view.curr_viewport.height(),
-            ViewDelta::HalfPage => self.view.curr_viewport.height().div_ceil(2),
+            ViewDelta::Page => self.view.viewport().height(),
+            ViewDelta::HalfPage => self.view.viewport().height().div_ceil(2),
             ViewDelta::Boundary => usize::MAX,
-            ViewDelta::Match => 0,
+            ViewDelta::Match => i.abs_diff(self.compositor.compute_jump(i, dir).unwrap_or(i)),
         };
 
         match dir {
-            Direction::Back => self.cursor.back(select, |i| {
-                let delta = match delta {
-                    ViewDelta::Match => {
-                        return self
-                            .view
-                            .compute_jump(i, dir, self.view.compositor.filters())
-                            .unwrap_or(i)
-                    }
-                    _ => ndelta,
-                };
-                i.saturating_sub(delta)
-            }),
-            Direction::Next => self.cursor.forward(select, |i| {
-                let delta = match delta {
-                    ViewDelta::Match => {
-                        return self
-                            .view
-                            .compute_jump(i, dir, self.view.compositor.filters())
-                            .unwrap_or(i)
-                    }
-                    _ => ndelta,
-                };
-                i.saturating_add(delta)
-            }),
+            Direction::Back => self
+                .cursor
+                .back(select, |i| i.saturating_sub(compute_delta(i))),
+            Direction::Next => self
+                .cursor
+                .forward(select, |i| i.saturating_add(compute_delta(i))),
         }
         self.cursor
             .clamp(self.visible_line_count().saturating_sub(1));
@@ -405,24 +181,22 @@ impl Instance {
             | Cursor::Selection(i, _, SelectionOrigin::Left)
             | Cursor::Selection(_, i, SelectionOrigin::Right) => i,
         };
-        self.view.curr_viewport.jump_to(i);
+        self.view.viewport_mut().jump_to(i);
     }
 
     pub fn toggle_select_bookmarks(&mut self) {
         match self.cursor.state() {
             Cursor::Singleton(i) => {
-                let line_number = self.line_at_view_index(i).unwrap();
-                self.view
-                    .compositor
+                let line_number = self.view.line_at_view_index(i).unwrap();
+                self.compositor
                     .filters_mut()
                     .bookmarks_mut()
                     .toggle(line_number);
             }
             Cursor::Selection(start, end, _) => {
                 for i in (start..=end).rev() {
-                    let line_number = self.line_at_view_index(i).unwrap();
-                    self.view
-                        .compositor
+                    let line_number = self.view.line_at_view_index(i).unwrap();
+                    self.compositor
                         .filters_mut()
                         .bookmarks_mut()
                         .toggle(line_number);
@@ -432,24 +206,32 @@ impl Instance {
         self.cursor
             .clamp(self.visible_line_count().saturating_sub(1));
         self.view.end_index = self.visible_line_count();
-        self.view.invalidate_cache();
-    }
-
-    pub fn compute_jump(&self, i: usize, direction: Direction) -> Option<usize> {
-        self.view.compute_jump(i, direction, self.view.compositor.filters())
+        self.invalidate_cache();
     }
 
     pub fn toggle_select_filters(&mut self) {
-        self.view.compositor.toggle_select_filters();
-        self.view.invalidate_cache();
+        self.compositor.toggle_select_filters();
+        self.invalidate_cache();
     }
 
     pub fn remove_select_filter(&mut self) {
-        self.view.compositor.remove_select_filters();
-        self.view.invalidate_cache();
+        self.compositor.remove_select_filters();
+        self.invalidate_cache();
     }
 
     pub fn export_file(&mut self, file: File) -> Result<()> {
-        self.buf.write_file(file, self.view.composite.clone())
+        self.buf.write_file(file, self.view.composite().clone())
+    }
+
+    pub fn invalidate_cache(&mut self) {
+        let prev_all = self.view.composite().is_all();
+        let now_all = !self.compositor.needs_composite();
+
+        if prev_all && now_all {
+            self.view.reset_color_cache();
+        } else {
+            self.view
+                .insert_new_line_set(self.compositor.create_composite());
+        }
     }
 }

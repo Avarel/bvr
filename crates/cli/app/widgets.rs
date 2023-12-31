@@ -151,8 +151,7 @@ impl FilterViewerWidget<'_> {
         let mut y = area.y;
         for filter in self
             .viewer
-            .view
-            .compositor
+            .compositor_mut()
             .update_and_filter_view(area.height as usize)
         {
             FilterLineWidget {
@@ -173,13 +172,13 @@ pub struct ViewerWidget<'a> {
 
 impl ViewerWidget<'_> {
     fn render(self, area: Rect, buf: &mut Buffer, handle: &mut MouseHandler) {
-        let view = self
+        let (view, last_line) = self
             .viewer
             .update_and_view(area.height as usize, area.width as usize);
 
         let gutter_size = self.gutter.then(|| {
-            view.last()
-                .map(|ln| ((ln.line_number + 1).ilog10() + 1) as u16)
+            last_line
+                .map(|ln| ((ln + 1).ilog10() + 1) as u16)
                 .unwrap_or_default()
                 .max(4)
         });

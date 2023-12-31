@@ -405,4 +405,24 @@ impl Compositor {
                 .unwrap_or(Color::White),
         });
     }
+
+    pub fn compute_jump(&self, i: usize, direction: Direction) -> Option<usize> {
+        if !self.filters.all.is_enabled() {
+            return match direction {
+                Direction::Back => Some(i.saturating_sub(1)),
+                Direction::Next => Some(i + 1),
+            };
+        }
+        let active_filters = self.filters.iter_active();
+        match direction {
+            Direction::Back => active_filters
+                .filter_map(|filter| filter.nearest_backward(i))
+                .filter(|&ln| ln < i)
+                .max(),
+            Direction::Next => active_filters
+                .filter_map(|filter| filter.nearest_forward(i))
+                .filter(|&ln| ln > i)
+                .min(),
+        }
+    }
 }

@@ -486,8 +486,7 @@ mod tests {
         let matches6 = LineSet::from(vec![2, 10, 20, 26, 27, 28, 29, 30, 40, 50, 51, 52, 53]);
         let matches7 = LineSet::from(vec![10, 20, 30, 31, 32, 33, 34, 35, 40, 50, 51, 52, 53]);
         let matches8 = LineSet::from(vec![10, 20, 25, 30, 36, 37, 38, 39, 40, 45, 50]);
-        let matches9 =
-            LineSet::from(vec![4, 10, 20, 30, 40, 41, 42, 43, 44, 45, 50, 51, 52, 53]);
+        let matches9 = LineSet::from(vec![4, 10, 20, 30, 40, 41, 42, 43, 44, 45, 50, 51, 52, 53]);
         let matches10 = LineSet::from(vec![1, 10, 20, 30, 40, 46, 47, 48, 49, 50]);
 
         let composite = LineSet::compose(

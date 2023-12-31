@@ -6,3 +6,4 @@ pub mod instance;
 pub mod mux;
 pub mod prompt;
 pub mod status;
+pub mod viewer;
