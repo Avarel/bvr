@@ -1,8 +1,8 @@
-use crate::{cowvec::CowVecWriter, LineMatches, Result};
+use crate::{cowvec::CowVecWriter, LineSet, Result};
 use std::sync::{atomic::AtomicBool, Arc};
 
 struct QueueMatch {
-    matches: LineMatches,
+    matches: LineSet,
     index: usize,
 }
 
@@ -27,7 +27,7 @@ struct Queues {
 }
 
 impl Queues {
-    fn new(queues: Vec<LineMatches>, strategy: CompositeStrategy) -> Self {
+    fn new(queues: Vec<LineSet>, strategy: CompositeStrategy) -> Self {
         Self {
             queues: queues
                 .into_iter()
@@ -110,7 +110,7 @@ pub(super) struct LineCompositeRemote {
 }
 
 impl LineCompositeRemote {
-    pub fn compose(mut self, filters: Vec<LineMatches>) -> Result<()> {
+    pub fn compose(mut self, filters: Vec<LineSet>) -> Result<()> {
         let len = filters.iter().map(|filter| filter.len()).sum::<usize>();
         // Divide by 2 because there may be a lot of overlap, but hopefully this
         // nonscientific guess is good enough
@@ -120,7 +120,7 @@ impl LineCompositeRemote {
         let mut queues = Queues::new(filters, self.strategy);
 
         while let Some(line_number) = queues.take_lowest() {
-            if !self.buf.has_readers() {
+            if !self.has_readers() {
                 break;
             }
 
@@ -134,6 +134,10 @@ impl LineCompositeRemote {
         }
         Ok(())
     }
+
+    pub fn has_readers(&self) -> bool {
+        Arc::strong_count(&self.completed) > 1
+    }
 }
 
 impl Drop for LineCompositeRemote {
@@ -146,15 +150,15 @@ impl Drop for LineCompositeRemote {
 #[cfg(test)]
 mod tests {
     use super::CompositeStrategy;
-    use crate::LineMatches;
+    use crate::LineSet;
 
     #[test]
     fn test_composite_union_basic() {
-        let matches1 = LineMatches::from(vec![1, 2, 3, 4, 5]);
-        let matches2 = LineMatches::from(vec![1, 3, 5, 7, 9]);
+        let matches1 = LineSet::from(vec![1, 2, 3, 4, 5]);
+        let matches2 = LineSet::from(vec![1, 3, 5, 7, 9]);
 
         let composite =
-            LineMatches::compose(vec![matches1, matches2], true, CompositeStrategy::Union).unwrap();
+            LineSet::compose(vec![matches1, matches2], true, CompositeStrategy::Union).unwrap();
 
         let result = vec![1, 2, 3, 4, 5, 7, 9];
 
@@ -166,11 +170,11 @@ mod tests {
 
     #[test]
     fn test_composite_union_disjoint() {
-        let matches1 = LineMatches::from(vec![1, 2, 3, 4, 5]);
-        let matches2 = LineMatches::from(vec![6, 7, 8, 9, 10]);
+        let matches1 = LineSet::from(vec![1, 2, 3, 4, 5]);
+        let matches2 = LineSet::from(vec![6, 7, 8, 9, 10]);
 
         let composite =
-            LineMatches::compose(vec![matches1, matches2], true, CompositeStrategy::Union).unwrap();
+            LineSet::compose(vec![matches1, matches2], true, CompositeStrategy::Union).unwrap();
 
         let result = vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
 
@@ -182,11 +186,11 @@ mod tests {
 
     #[test]
     fn test_composite_union_same() {
-        let matches1 = LineMatches::from(vec![1, 2, 3, 4, 5]);
-        let matches2 = LineMatches::from(vec![1, 2, 3, 4, 5]);
+        let matches1 = LineSet::from(vec![1, 2, 3, 4, 5]);
+        let matches2 = LineSet::from(vec![1, 2, 3, 4, 5]);
 
         let composite =
-            LineMatches::compose(vec![matches1, matches2], true, CompositeStrategy::Union).unwrap();
+            LineSet::compose(vec![matches1, matches2], true, CompositeStrategy::Union).unwrap();
 
         let result = vec![1, 2, 3, 4, 5];
 
@@ -198,11 +202,11 @@ mod tests {
 
     #[test]
     fn test_composite_union_empty() {
-        let matches1 = LineMatches::from(vec![]);
-        let matches2 = LineMatches::from(vec![1, 2, 3, 4, 5]);
+        let matches1 = LineSet::from(vec![]);
+        let matches2 = LineSet::from(vec![1, 2, 3, 4, 5]);
 
         let composite =
-            LineMatches::compose(vec![matches1, matches2], true, CompositeStrategy::Union).unwrap();
+            LineSet::compose(vec![matches1, matches2], true, CompositeStrategy::Union).unwrap();
 
         let result = vec![1, 2, 3, 4, 5];
 
@@ -214,11 +218,11 @@ mod tests {
 
     #[test]
     fn test_composite_union_empty_all() {
-        let matches1 = LineMatches::from(vec![]);
-        let matches2 = LineMatches::from(vec![]);
+        let matches1 = LineSet::from(vec![]);
+        let matches2 = LineSet::from(vec![]);
 
         let composite =
-            LineMatches::compose(vec![matches1, matches2], true, CompositeStrategy::Union).unwrap();
+            LineSet::compose(vec![matches1, matches2], true, CompositeStrategy::Union).unwrap();
 
         let inner = composite.into_inner();
         assert_eq!(0, inner.len());
@@ -226,11 +230,11 @@ mod tests {
 
     #[test]
     fn test_composite_union_empty_all_but_one() {
-        let matches1 = LineMatches::from(vec![]);
-        let matches2 = LineMatches::from(vec![1, 2, 3, 4, 5]);
-        let matches3 = LineMatches::from(vec![]);
+        let matches1 = LineSet::from(vec![]);
+        let matches2 = LineSet::from(vec![1, 2, 3, 4, 5]);
+        let matches3 = LineSet::from(vec![]);
 
-        let composite = LineMatches::compose(
+        let composite = LineSet::compose(
             vec![matches1, matches2, matches3],
             true,
             CompositeStrategy::Union,
@@ -247,18 +251,18 @@ mod tests {
 
     #[test]
     fn test_composite_union_many() {
-        let matches1 = LineMatches::from(vec![1, 2, 3, 4, 5]);
-        let matches2 = LineMatches::from(vec![1, 3, 5, 7, 9]);
-        let matches3 = LineMatches::from(vec![2, 4, 6, 8, 10]);
-        let matches4 = LineMatches::from(vec![1, 2, 3, 4, 5]);
-        let matches5 = LineMatches::from(vec![1, 3, 5, 7, 9]);
-        let matches6 = LineMatches::from(vec![2, 4, 6, 8, 10]);
-        let matches7 = LineMatches::from(vec![1, 2, 3, 4, 5]);
-        let matches8 = LineMatches::from(vec![1, 3, 5, 7, 9]);
-        let matches9 = LineMatches::from(vec![2, 4, 6, 8, 10]);
-        let matches10 = LineMatches::from(vec![1, 2, 3, 4, 5]);
+        let matches1 = LineSet::from(vec![1, 2, 3, 4, 5]);
+        let matches2 = LineSet::from(vec![1, 3, 5, 7, 9]);
+        let matches3 = LineSet::from(vec![2, 4, 6, 8, 10]);
+        let matches4 = LineSet::from(vec![1, 2, 3, 4, 5]);
+        let matches5 = LineSet::from(vec![1, 3, 5, 7, 9]);
+        let matches6 = LineSet::from(vec![2, 4, 6, 8, 10]);
+        let matches7 = LineSet::from(vec![1, 2, 3, 4, 5]);
+        let matches8 = LineSet::from(vec![1, 3, 5, 7, 9]);
+        let matches9 = LineSet::from(vec![2, 4, 6, 8, 10]);
+        let matches10 = LineSet::from(vec![1, 2, 3, 4, 5]);
 
-        let composite = LineMatches::compose(
+        let composite = LineSet::compose(
             vec![
                 matches1, matches2, matches3, matches4, matches5, matches6, matches7, matches8,
                 matches9, matches10,
@@ -278,18 +282,18 @@ mod tests {
 
     #[test]
     fn test_composite_union_many_disjoint() {
-        let matches1 = LineMatches::from(vec![1, 2, 3, 4, 5]);
-        let matches2 = LineMatches::from(vec![6, 7, 8, 9, 10]);
-        let matches3 = LineMatches::from(vec![11, 12, 13, 14, 15]);
-        let matches4 = LineMatches::from(vec![16, 17, 18, 19, 20]);
-        let matches5 = LineMatches::from(vec![21, 22, 23, 24, 25]);
-        let matches6 = LineMatches::from(vec![26, 27, 28, 29, 30]);
-        let matches7 = LineMatches::from(vec![31, 32, 33, 34, 35]);
-        let matches8 = LineMatches::from(vec![36, 37, 38, 39, 40]);
-        let matches9 = LineMatches::from(vec![41, 42, 43, 44, 45]);
-        let matches10 = LineMatches::from(vec![46, 47, 48, 49, 50]);
+        let matches1 = LineSet::from(vec![1, 2, 3, 4, 5]);
+        let matches2 = LineSet::from(vec![6, 7, 8, 9, 10]);
+        let matches3 = LineSet::from(vec![11, 12, 13, 14, 15]);
+        let matches4 = LineSet::from(vec![16, 17, 18, 19, 20]);
+        let matches5 = LineSet::from(vec![21, 22, 23, 24, 25]);
+        let matches6 = LineSet::from(vec![26, 27, 28, 29, 30]);
+        let matches7 = LineSet::from(vec![31, 32, 33, 34, 35]);
+        let matches8 = LineSet::from(vec![36, 37, 38, 39, 40]);
+        let matches9 = LineSet::from(vec![41, 42, 43, 44, 45]);
+        let matches10 = LineSet::from(vec![46, 47, 48, 49, 50]);
 
-        let composite = LineMatches::compose(
+        let composite = LineSet::compose(
             vec![
                 matches1, matches2, matches3, matches4, matches5, matches6, matches7, matches8,
                 matches9, matches10,
@@ -315,10 +319,10 @@ mod tests {
 
     #[test]
     fn test_composite_intersection_basic() {
-        let matches1 = LineMatches::from(vec![1, 2, 3, 4, 5]);
-        let matches2 = LineMatches::from(vec![1, 3, 5, 7, 9]);
+        let matches1 = LineSet::from(vec![1, 2, 3, 4, 5]);
+        let matches2 = LineSet::from(vec![1, 3, 5, 7, 9]);
 
-        let composite = LineMatches::compose(
+        let composite = LineSet::compose(
             vec![matches1, matches2],
             true,
             CompositeStrategy::Intersection,
@@ -335,10 +339,10 @@ mod tests {
 
     #[test]
     fn test_composite_intersection_disjoint() {
-        let matches1 = LineMatches::from(vec![1, 2, 3, 4, 5]);
-        let matches2 = LineMatches::from(vec![6, 7, 8, 9, 10]);
+        let matches1 = LineSet::from(vec![1, 2, 3, 4, 5]);
+        let matches2 = LineSet::from(vec![6, 7, 8, 9, 10]);
 
-        let composite = LineMatches::compose(
+        let composite = LineSet::compose(
             vec![matches1, matches2],
             true,
             CompositeStrategy::Intersection,
@@ -351,10 +355,10 @@ mod tests {
 
     #[test]
     fn test_composite_intersection_same() {
-        let matches1 = LineMatches::from(vec![1, 2, 3, 4, 5]);
-        let matches2 = LineMatches::from(vec![1, 2, 3, 4, 5]);
+        let matches1 = LineSet::from(vec![1, 2, 3, 4, 5]);
+        let matches2 = LineSet::from(vec![1, 2, 3, 4, 5]);
 
-        let composite = LineMatches::compose(
+        let composite = LineSet::compose(
             vec![matches1, matches2],
             true,
             CompositeStrategy::Intersection,
@@ -371,10 +375,10 @@ mod tests {
 
     #[test]
     fn test_composite_intersection_empty() {
-        let matches1 = LineMatches::from(vec![]);
-        let matches2 = LineMatches::from(vec![1, 2, 3, 4, 5]);
+        let matches1 = LineSet::from(vec![]);
+        let matches2 = LineSet::from(vec![1, 2, 3, 4, 5]);
 
-        let composite = LineMatches::compose(
+        let composite = LineSet::compose(
             vec![matches1, matches2],
             true,
             CompositeStrategy::Intersection,
@@ -387,10 +391,10 @@ mod tests {
 
     #[test]
     fn test_composite_intersection_empty_all() {
-        let matches1 = LineMatches::from(vec![]);
-        let matches2 = LineMatches::from(vec![]);
+        let matches1 = LineSet::from(vec![]);
+        let matches2 = LineSet::from(vec![]);
 
-        let composite = LineMatches::compose(
+        let composite = LineSet::compose(
             vec![matches1, matches2],
             true,
             CompositeStrategy::Intersection,
@@ -403,11 +407,11 @@ mod tests {
 
     #[test]
     fn test_composite_intersection_empty_all_but_one() {
-        let matches1 = LineMatches::from(vec![]);
-        let matches2 = LineMatches::from(vec![1, 2, 3, 4, 5]);
-        let matches3 = LineMatches::from(vec![]);
+        let matches1 = LineSet::from(vec![]);
+        let matches2 = LineSet::from(vec![1, 2, 3, 4, 5]);
+        let matches3 = LineSet::from(vec![]);
 
-        let composite = LineMatches::compose(
+        let composite = LineSet::compose(
             vec![matches1, matches2, matches3],
             true,
             CompositeStrategy::Intersection,
@@ -420,18 +424,18 @@ mod tests {
 
     #[test]
     fn test_composite_intersection_many() {
-        let matches1 = LineMatches::from(vec![1, 2, 3, 4, 5]);
-        let matches2 = LineMatches::from(vec![1, 3, 5, 7, 9]);
-        let matches3 = LineMatches::from(vec![2, 4, 6, 8, 10]);
-        let matches4 = LineMatches::from(vec![1, 2, 3, 4, 5]);
-        let matches5 = LineMatches::from(vec![1, 3, 5, 7, 9]);
-        let matches6 = LineMatches::from(vec![2, 4, 6, 8, 10]);
-        let matches7 = LineMatches::from(vec![1, 2, 3, 4, 5]);
-        let matches8 = LineMatches::from(vec![1, 3, 5, 7, 9]);
-        let matches9 = LineMatches::from(vec![2, 4, 6, 8, 10]);
-        let matches10 = LineMatches::from(vec![1, 2, 3, 4, 5]);
+        let matches1 = LineSet::from(vec![1, 2, 3, 4, 5]);
+        let matches2 = LineSet::from(vec![1, 3, 5, 7, 9]);
+        let matches3 = LineSet::from(vec![2, 4, 6, 8, 10]);
+        let matches4 = LineSet::from(vec![1, 2, 3, 4, 5]);
+        let matches5 = LineSet::from(vec![1, 3, 5, 7, 9]);
+        let matches6 = LineSet::from(vec![2, 4, 6, 8, 10]);
+        let matches7 = LineSet::from(vec![1, 2, 3, 4, 5]);
+        let matches8 = LineSet::from(vec![1, 3, 5, 7, 9]);
+        let matches9 = LineSet::from(vec![2, 4, 6, 8, 10]);
+        let matches10 = LineSet::from(vec![1, 2, 3, 4, 5]);
 
-        let composite = LineMatches::compose(
+        let composite = LineSet::compose(
             vec![
                 matches1, matches2, matches3, matches4, matches5, matches6, matches7, matches8,
                 matches9, matches10,
@@ -447,18 +451,18 @@ mod tests {
 
     #[test]
     fn test_composite_intersection_many_disjoint() {
-        let matches1 = LineMatches::from(vec![1, 2, 3, 4, 5]);
-        let matches2 = LineMatches::from(vec![6, 7, 8, 9, 10]);
-        let matches3 = LineMatches::from(vec![11, 12, 13, 14, 15]);
-        let matches4 = LineMatches::from(vec![16, 17, 18, 19, 20]);
-        let matches5 = LineMatches::from(vec![21, 22, 23, 24, 25]);
-        let matches6 = LineMatches::from(vec![26, 27, 28, 29, 30]);
-        let matches7 = LineMatches::from(vec![31, 32, 33, 34, 35]);
-        let matches8 = LineMatches::from(vec![36, 37, 38, 39, 40]);
-        let matches9 = LineMatches::from(vec![41, 42, 43, 44, 45]);
-        let matches10 = LineMatches::from(vec![46, 47, 48, 49, 50]);
+        let matches1 = LineSet::from(vec![1, 2, 3, 4, 5]);
+        let matches2 = LineSet::from(vec![6, 7, 8, 9, 10]);
+        let matches3 = LineSet::from(vec![11, 12, 13, 14, 15]);
+        let matches4 = LineSet::from(vec![16, 17, 18, 19, 20]);
+        let matches5 = LineSet::from(vec![21, 22, 23, 24, 25]);
+        let matches6 = LineSet::from(vec![26, 27, 28, 29, 30]);
+        let matches7 = LineSet::from(vec![31, 32, 33, 34, 35]);
+        let matches8 = LineSet::from(vec![36, 37, 38, 39, 40]);
+        let matches9 = LineSet::from(vec![41, 42, 43, 44, 45]);
+        let matches10 = LineSet::from(vec![46, 47, 48, 49, 50]);
 
-        let composite = LineMatches::compose(
+        let composite = LineSet::compose(
             vec![
                 matches1, matches2, matches3, matches4, matches5, matches6, matches7, matches8,
                 matches9, matches10,
@@ -474,19 +478,19 @@ mod tests {
 
     #[test]
     fn test_composite_intersection_many_some() {
-        let matches1 = LineMatches::from(vec![1, 2, 3, 4, 5, 10, 20, 30, 40, 50, 51, 213]);
-        let matches2 = LineMatches::from(vec![6, 7, 8, 9, 10, 15, 20, 30, 40, 45, 50, 51]);
-        let matches3 = LineMatches::from(vec![10, 11, 12, 13, 14, 15, 20, 30, 35, 40, 50, 60]);
-        let matches4 = LineMatches::from(vec![10, 16, 17, 18, 19, 20, 30, 40, 50, 51, 52, 53]);
-        let matches5 = LineMatches::from(vec![10, 20, 21, 22, 23, 24, 25, 30, 32, 33, 35, 40, 50]);
-        let matches6 = LineMatches::from(vec![2, 10, 20, 26, 27, 28, 29, 30, 40, 50, 51, 52, 53]);
-        let matches7 = LineMatches::from(vec![10, 20, 30, 31, 32, 33, 34, 35, 40, 50, 51, 52, 53]);
-        let matches8 = LineMatches::from(vec![10, 20, 25, 30, 36, 37, 38, 39, 40, 45, 50]);
+        let matches1 = LineSet::from(vec![1, 2, 3, 4, 5, 10, 20, 30, 40, 50, 51, 213]);
+        let matches2 = LineSet::from(vec![6, 7, 8, 9, 10, 15, 20, 30, 40, 45, 50, 51]);
+        let matches3 = LineSet::from(vec![10, 11, 12, 13, 14, 15, 20, 30, 35, 40, 50, 60]);
+        let matches4 = LineSet::from(vec![10, 16, 17, 18, 19, 20, 30, 40, 50, 51, 52, 53]);
+        let matches5 = LineSet::from(vec![10, 20, 21, 22, 23, 24, 25, 30, 32, 33, 35, 40, 50]);
+        let matches6 = LineSet::from(vec![2, 10, 20, 26, 27, 28, 29, 30, 40, 50, 51, 52, 53]);
+        let matches7 = LineSet::from(vec![10, 20, 30, 31, 32, 33, 34, 35, 40, 50, 51, 52, 53]);
+        let matches8 = LineSet::from(vec![10, 20, 25, 30, 36, 37, 38, 39, 40, 45, 50]);
         let matches9 =
-            LineMatches::from(vec![4, 10, 20, 30, 40, 41, 42, 43, 44, 45, 50, 51, 52, 53]);
-        let matches10 = LineMatches::from(vec![1, 10, 20, 30, 40, 46, 47, 48, 49, 50]);
+            LineSet::from(vec![4, 10, 20, 30, 40, 41, 42, 43, 44, 45, 50, 51, 52, 53]);
+        let matches10 = LineSet::from(vec![1, 10, 20, 30, 40, 46, 47, 48, 49, 50]);
 
-        let composite = LineMatches::compose(
+        let composite = LineSet::compose(
             vec![
                 matches1, matches2, matches3, matches4, matches5, matches6, matches7, matches8,
                 matches9, matches10,

@@ -1,11 +1,11 @@
 use super::{
     cursor::{Cursor, CursorState, SelectionOrigin},
-    filters::Compositor,
+    filters::{Compositor, Filters},
     viewport::Viewport,
 };
 use crate::{app::ViewDelta, direction::Direction};
 use bitflags::bitflags;
-use bvr_core::{LineMatches, Result};
+use bvr_core::{LineSet, Result};
 use bvr_core::{SegBuffer, SegStr};
 use ratatui::style::Color;
 use regex::bytes::Regex;
@@ -42,7 +42,7 @@ struct CachedLine {
 }
 
 pub struct ViewManager {
-    composite: Option<LineMatches>,
+    composite: LineSet,
 
     cache: VecDeque<CachedLine>,
 
@@ -57,16 +57,17 @@ pub struct ViewManager {
 }
 
 impl ViewManager {
-    fn new() -> Self {
+    fn new(buf: &SegBuffer) -> Self {
+        let compositor = Compositor::new(buf);
         Self {
-            composite: None,
+            composite: compositor.create_composite(),
+            compositor,
             cache: VecDeque::new(),
             prev_viewport: Viewport::new(),
             curr_viewport: Viewport::new(),
             follow_output: false,
             need_recoloring: false,
             end_index: 0,
-            compositor: Compositor::new(),
         }
     }
 
@@ -82,14 +83,12 @@ impl ViewManager {
         &mut self.curr_viewport
     }
 
+    pub fn composite(&self) -> &LineSet {
+        &self.composite
+    }
+
     fn line_at_view_index(&self, index: usize) -> Option<usize> {
-        if let Some(composite) = self.composite() {
-            composite.get(index)
-        } else if index < self.end_index {
-            Some(index)
-        } else {
-            None
-        }
+        self.composite.get(index)
     }
 
     fn push_front(&mut self, index: usize, buf: &SegBuffer) {
@@ -165,7 +164,7 @@ impl ViewManager {
 
         self.cache.truncate(self.curr_viewport.height());
 
-        self.prev_viewport = self.curr_viewport.clone();
+        self.prev_viewport = self.curr_viewport;
 
         self.color_cache();
 
@@ -211,27 +210,19 @@ impl ViewManager {
     }
 
     pub fn invalidate_cache(&mut self) {
-        let prev_all = self.composite.is_none();
+        let prev_all = self.composite.is_all();
         let now_all = !self.compositor.needs_composite();
 
         if prev_all && now_all {
             self.reset_color_cache();
         } else {
             self.cache.clear();
-            self.compute_composite();
+            self.composite = self.compositor.create_composite();
         }
     }
 
-    fn compute_composite(&mut self) {
-        if !self.compositor.needs_composite() {
-            self.composite = None;
-            return;
-        }
-        self.composite = Some(self.compositor.create_composite());
-    }
-
-    pub fn compute_jump(&self, i: usize, direction: Direction) -> Option<usize> {
-        if self.composite.is_some() {
+    pub fn compute_jump(&self, i: usize, direction: Direction, filters: &Filters) -> Option<usize> {
+        if !self.composite.is_all() {
             // The composite is literally all matches
             return match direction {
                 Direction::Back => Some(i.saturating_sub(1)),
@@ -239,25 +230,17 @@ impl ViewManager {
             };
         }
         match direction {
-            Direction::Back => self
-                .compositor
-                .filters()
+            Direction::Back => filters
                 .iter_active()
                 .filter_map(|filter| filter.nearest_backward(i))
                 .filter(|&ln| ln < i)
                 .max(),
-            Direction::Next => self
-                .compositor
-                .filters()
+            Direction::Next => filters
                 .iter_active()
                 .filter_map(|filter| filter.nearest_forward(i))
                 .filter(|&ln| ln > i)
                 .min(),
         }
-    }
-
-    pub fn composite(&self) -> Option<&LineMatches> {
-        self.composite.as_ref()
     }
 }
 
@@ -271,10 +254,10 @@ pub struct Instance {
 impl Instance {
     pub fn new(name: String, buf: SegBuffer) -> Self {
         Self {
+            view: ViewManager::new(&buf),
             name,
             buf,
             cursor: CursorState::new(),
-            view: ViewManager::new(),
         }
     }
 
@@ -295,33 +278,18 @@ impl Instance {
     }
 
     pub fn visible_line_count(&self) -> usize {
-        if let Some(composite) = self.view.composite() {
-            composite.len()
-        } else {
-            self.buf.line_count()
-        }
+        self.view.composite.len()
     }
 
     fn line_at_view_index(&self, index: usize) -> Option<usize> {
-        if let Some(composite) = self.view.composite() {
-            composite.get(index)
-        } else if index < self.buf.line_count() {
-            Some(index)
-        } else {
-            None
-        }
+        self.view.composite.get(index)
     }
 
     pub fn nearest_index(&self, line_number: usize) -> Option<usize> {
-        if let Some(composite) = self.view.composite() {
-            composite
-                .nearest_backward(line_number)
-                .and_then(|ln| composite.find(ln))
-        } else if line_number < self.buf.line_count() {
-            Some(line_number.saturating_sub(1))
-        } else {
-            None
-        }
+        self.view
+            .composite
+            .nearest_backward(line_number)
+            .and_then(|ln| self.view.composite.find(ln))
     }
 
     pub fn update_and_view(
@@ -407,14 +375,24 @@ impl Instance {
         match dir {
             Direction::Back => self.cursor.back(select, |i| {
                 let delta = match delta {
-                    ViewDelta::Match => return self.view.compute_jump(i, dir).unwrap_or(i),
+                    ViewDelta::Match => {
+                        return self
+                            .view
+                            .compute_jump(i, dir, self.view.compositor.filters())
+                            .unwrap_or(i)
+                    }
                     _ => ndelta,
                 };
                 i.saturating_sub(delta)
             }),
             Direction::Next => self.cursor.forward(select, |i| {
                 let delta = match delta {
-                    ViewDelta::Match => return self.view.compute_jump(i, dir).unwrap_or(i),
+                    ViewDelta::Match => {
+                        return self
+                            .view
+                            .compute_jump(i, dir, self.view.compositor.filters())
+                            .unwrap_or(i)
+                    }
                     _ => ndelta,
                 };
                 i.saturating_add(delta)
@@ -458,7 +436,7 @@ impl Instance {
     }
 
     pub fn compute_jump(&self, i: usize, direction: Direction) -> Option<usize> {
-        self.view.compute_jump(i, direction)
+        self.view.compute_jump(i, direction, self.view.compositor.filters())
     }
 
     pub fn toggle_select_filters(&mut self) {
@@ -472,6 +450,6 @@ impl Instance {
     }
 
     pub fn export_file(&mut self, file: File) -> Result<()> {
-        self.buf.write_file(file, self.view.composite().cloned())
+        self.buf.write_file(file, self.view.composite.clone())
     }
 }

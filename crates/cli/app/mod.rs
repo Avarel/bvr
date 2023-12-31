@@ -451,7 +451,7 @@ impl App {
                 }
                 None => {
                     self.status.submit_message(
-                        format!("filter: requires subcommand, one of `r[egex]`, `l[it]`, `clear`, `union`, `intersect`"),
+                        String::from("filter: requires subcommand, one of `r[egex]`, `l[it]`, `clear`, `union`, `intersect`"),
                         Some(Duration::from_secs(2)),
                     );
                 }
@@ -459,18 +459,7 @@ impl App {
             Some("export") => {
                 let path = parts.collect::<PathBuf>();
                 if let Some(viewer) = self.mux.active_viewer_mut() {
-                    let Some(composite) = viewer.view.composite() else {
-                        self.status.submit_message(
-                            format!(
-                                "{}: export not allowed while All Lines is enabled",
-                                path.display()
-                            ),
-                            Some(Duration::from_secs(2)),
-                        );
-                        return true;
-                    };
-
-                    if !composite.is_complete() {
+                    if !viewer.view.composite().is_complete() {
                         self.status.submit_message(
                             format!(
                                 "{}: export not allowed composite is incomplete",

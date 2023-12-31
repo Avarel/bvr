@@ -120,9 +120,9 @@ impl<T> CowVecWriter<T>
 where
     T: Copy,
 {
-    pub fn has_readers(&self) -> bool {
-        Arc::strong_count(&self.buf) > 1
-    }
+    // pub fn has_readers(&self) -> bool {
+    //     Arc::strong_count(&self.buf) > 1
+    // }
 
     /// Appends an element to the back of this collection.
     ///

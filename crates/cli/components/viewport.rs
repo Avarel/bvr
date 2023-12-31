@@ -8,6 +8,7 @@ pub struct Viewport {
     left: usize,
     /// Visible height
     height: usize,
+    /// Visible width
     width: usize,
 }
 

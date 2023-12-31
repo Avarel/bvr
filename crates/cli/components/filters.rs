@@ -4,17 +4,15 @@ use super::{
 };
 use crate::{app::ViewDelta, colors, direction::Direction};
 use bitflags::bitflags;
-use bvr_core::{matches::CompositeStrategy, LineMatches, SegBuffer};
+use bvr_core::{matches::CompositeStrategy, LineSet, SegBuffer};
 use ratatui::style::Color;
 use regex::bytes::Regex;
-
-type SearchResults = bvr_core::LineMatches;
 
 #[derive(Clone)]
 enum FilterRepr {
     All,
     Bookmarks(Bookmarks),
-    Search(SearchResults),
+    Search(LineSet),
 }
 
 #[derive(Clone)]
@@ -72,9 +70,9 @@ impl Filter {
         }
     }
 
-    pub fn as_line_matches(&self) -> LineMatches {
+    pub fn as_line_matches(&self) -> LineSet {
         match &self.repr {
-            FilterRepr::All => LineMatches::empty(),
+            FilterRepr::All => LineSet::empty(),
             FilterRepr::Bookmarks(mask) => mask.lines.clone().into(),
             FilterRepr::Search(mask) => mask.clone(),
         }
@@ -254,6 +252,7 @@ pub struct FilterData<'a> {
 }
 
 pub struct Compositor {
+    all_composite: LineSet,
     strategy: CompositeStrategy,
     viewport: Viewport,
     cursor: CursorState,
@@ -261,8 +260,9 @@ pub struct Compositor {
 }
 
 impl Compositor {
-    pub fn new() -> Self {
+    pub fn new(buf: &SegBuffer) -> Self {
         Self {
+            all_composite: buf.all_line_matches(),
             viewport: Viewport::new(),
             cursor: CursorState::new(),
             filters: Filters::new(),
@@ -330,13 +330,17 @@ impl Compositor {
             })
     }
 
-    pub fn create_composite(&self) -> LineMatches {
-        let filters = self
-            .filters
-            .iter_active()
-            .map(|filter| filter.as_line_matches())
-            .collect();
-        LineMatches::compose(filters, false, self.strategy).unwrap()
+    pub fn create_composite(&self) -> LineSet {
+        if self.filters.all.is_enabled() {
+            self.all_composite.clone()
+        } else {
+            let filters = self
+                .filters
+                .iter_active()
+                .map(|filter| filter.as_line_matches())
+                .collect();
+            LineSet::compose(filters, false, self.strategy).unwrap()
+        }
     }
 
     pub fn move_select(&mut self, dir: Direction, select: bool, delta: ViewDelta) {
@@ -394,7 +398,7 @@ impl Compositor {
         self.filters.searches.push(Filter {
             name: regex.to_string(),
             enabled: true,
-            repr: FilterRepr::Search(SearchResults::search(file.segment_iter().unwrap(), regex)),
+            repr: FilterRepr::Search(LineSet::search(file.segment_iter().unwrap(), regex)),
             color: colors::SEARCH_COLOR_LIST
                 .get(self.filters.searches.len())
                 .copied()

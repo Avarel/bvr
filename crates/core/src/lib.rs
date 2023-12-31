@@ -9,4 +9,4 @@ pub mod matches;
 pub use buf::{segment::SegStr, SegBuffer};
 pub use err::Result;
 pub use index::LineIndex;
-pub use matches::LineMatches;
+pub use matches::LineSet;

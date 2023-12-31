@@ -3,7 +3,7 @@ pub mod composite;
 use crate::{
     buf::ContiguousSegmentIterator,
     cowvec::{CowVec, CowVecSnapshot, CowVecWriter},
-    Result,
+    LineIndex, Result,
 };
 use regex::bytes::Regex;
 use std::sync::{atomic::AtomicBool, Arc};
@@ -18,7 +18,7 @@ struct LineMatchRemote {
 impl LineMatchRemote {
     pub fn search(mut self, mut iter: ContiguousSegmentIterator, regex: Regex) -> Result<()> {
         while let Some((idx, start, buf)) = iter.next_buf() {
-            if !self.buf.has_readers() {
+            if !self.has_readers() {
                 break;
             }
 
@@ -41,6 +41,10 @@ impl LineMatchRemote {
         }
         Ok(())
     }
+
+    pub fn has_readers(&self) -> bool {
+        Arc::strong_count(&self.completed) > 1
+    }
 }
 
 impl Drop for LineMatchRemote {
@@ -51,22 +55,35 @@ impl Drop for LineMatchRemote {
 }
 
 #[derive(Clone)]
-pub struct LineMatches {
-    buf: CowVec<usize>,
-    completed: Arc<AtomicBool>,
-    // Optimization field for composite filters
-    // Minimum length of all filters combined
-    min_len: usize,
+pub enum LineSet {
+    All {
+        buf: LineIndex,
+    },
+    Subset {
+        buf: CowVec<usize>,
+        completed: Arc<AtomicBool>,
+        // Optimization field for composite filters
+        // Minimum length of all filters combined
+        min_len: usize,
+    },
 }
 
-impl LineMatches {
+impl LineSet {
     #[inline]
     pub fn empty() -> Self {
-        Self {
+        Self::Subset {
             buf: CowVec::empty(),
             completed: Arc::new(AtomicBool::new(true)),
             min_len: 0,
         }
+    }
+
+    pub fn all(buf: LineIndex) -> Self {
+        Self::All { buf }
+    }
+
+    pub fn is_all(&self) -> bool {
+        matches!(self, Self::All { .. })
     }
 
     #[inline]
@@ -83,7 +100,7 @@ impl LineMatches {
                 .search(iter, regex)
             }
         });
-        Self {
+        Self::Subset {
             buf,
             completed: complete,
             min_len: 0,
@@ -92,17 +109,13 @@ impl LineMatches {
 
     #[inline]
     pub fn compose(
-        filters: Vec<Self>,
+        mut filters: Vec<Self>,
         complete: bool,
         strategy: CompositeStrategy,
     ) -> Result<Self> {
         match filters.len() {
             0 => Ok(Self::empty()),
-            1 => Ok(Self {
-                buf: filters.into_iter().next().unwrap().into_inner(),
-                completed: Arc::new(AtomicBool::new(true)),
-                min_len: 0,
-            }),
+            1 => Ok(filters.remove(0)),
             _ => {
                 let min_len = match strategy {
                     CompositeStrategy::Intersection => 0,
@@ -126,7 +139,7 @@ impl LineMatches {
                 } else {
                     std::thread::spawn(task);
                 }
-                Ok(Self {
+                Ok(Self::Subset {
                     buf,
                     completed,
                     min_len,
@@ -135,27 +148,56 @@ impl LineMatches {
         }
     }
 
+    #[cfg(test)]
     pub(crate) fn into_inner(self) -> CowVec<usize> {
-        self.buf
+        match self {
+            Self::All { .. } => unimplemented!(),
+            Self::Subset { buf, .. } => buf,
+        }
     }
 
     #[inline]
     pub fn is_complete(&self) -> bool {
-        self.completed.load(std::sync::atomic::Ordering::Relaxed)
+        match self {
+            LineSet::All { buf } => buf.is_complete(),
+            LineSet::Subset { completed, .. } => {
+                completed.load(std::sync::atomic::Ordering::Relaxed)
+            }
+        }
     }
 
     pub fn get(&self, idx: usize) -> Option<usize> {
-        self.buf.get(idx)
+        match self {
+            LineSet::All { buf } => {
+                if idx < buf.line_count() {
+                    Some(idx)
+                } else {
+                    None
+                }
+            }
+            LineSet::Subset { buf, .. } => buf.get(idx),
+        }
     }
 
     pub fn find(&self, line_number: usize) -> Option<usize> {
-        let slice = self.buf.snapshot();
-        match *slice.as_slice() {
-            [first, .., last] if (first..=last).contains(&line_number) => {
-                slice.binary_search(&line_number).ok()
+        match self {
+            LineSet::All { buf } => {
+                if line_number < buf.line_count() {
+                    Some(line_number)
+                } else {
+                    None
+                }
             }
-            [item] if item == line_number => Some(0),
-            _ => None,
+            LineSet::Subset { buf, .. } => {
+                let slice = buf.snapshot();
+                match *slice.as_slice() {
+                    [first, .., last] if (first..=last).contains(&line_number) => {
+                        slice.binary_search(&line_number).ok()
+                    }
+                    [item] if item == line_number => Some(0),
+                    _ => None,
+                }
+            }
         }
     }
 
@@ -164,51 +206,73 @@ impl LineMatches {
     }
 
     pub fn nearest_forward(&self, line_number: usize) -> Option<usize> {
-        let snap = self.buf.snapshot();
-        let slice = snap.as_slice();
-        match *slice {
-            [_, ..] => Some(
-                slice[match slice.binary_search(&line_number) {
-                    Ok(i) => i.saturating_add(1),
-                    Err(i) => i,
+        match self {
+            LineSet::All { buf } => {
+                if line_number < buf.line_count() {
+                    Some((line_number + 1).min(buf.line_count()))
+                } else {
+                    None
                 }
-                .min(slice.len() - 1)],
-            ),
-            [] => None,
+            }
+            LineSet::Subset { buf, .. } => {
+                let snap = buf.snapshot();
+                let slice = snap.as_slice();
+                match *slice {
+                    [_, ..] => Some(
+                        slice[match slice.binary_search(&line_number) {
+                            Ok(i) => i.saturating_add(1),
+                            Err(i) => i,
+                        }
+                        .min(slice.len() - 1)],
+                    ),
+                    [] => None,
+                }
+            }
         }
     }
 
     pub fn nearest_backward(&self, line_number: usize) -> Option<usize> {
-        let snap = self.buf.snapshot();
-        let slice = snap.as_slice();
-        match *slice {
-            [_, ..] => Some(
-                slice[match slice.binary_search(&line_number) {
-                    Ok(i) | Err(i) => i,
+        match self {
+            LineSet::All { .. } => line_number.checked_sub(1),
+            LineSet::Subset { buf, .. } => {
+                let snap = buf.snapshot();
+                let slice = snap.as_slice();
+                match *slice {
+                    [_, ..] => Some(
+                        slice[match slice.binary_search(&line_number) {
+                            Ok(i) | Err(i) => i,
+                        }
+                        .saturating_sub(1)
+                        .min(slice.len() - 1)],
+                    ),
+                    [] => None,
                 }
-                .saturating_sub(1)
-                .min(slice.len() - 1)],
-            ),
-            [] => None,
+            }
         }
     }
 
     pub fn len(&self) -> usize {
-        self.min_len.max(self.buf.len())
+        match self {
+            LineSet::All { buf } => buf.line_count(),
+            LineSet::Subset { buf, min_len, .. } => buf.len().max(*min_len),
+        }
     }
 
     pub fn is_empty(&self) -> bool {
-        self.buf.is_empty()
+        self.len() == 0
     }
 
-    pub(crate) fn snapshot(&self) -> CowVecSnapshot<usize> {
-        self.buf.snapshot()
+    pub(crate) fn snapshot(&self) -> Option<CowVecSnapshot<usize>> {
+        match self {
+            LineSet::All { .. } => None,
+            LineSet::Subset { buf, .. } => Some(buf.snapshot()),
+        }
     }
 }
 
-impl From<Vec<usize>> for LineMatches {
+impl From<Vec<usize>> for LineSet {
     fn from(vec: Vec<usize>) -> Self {
-        Self {
+        Self::Subset {
             min_len: vec.len(),
             buf: CowVec::from(vec),
             completed: Arc::new(AtomicBool::new(true)),

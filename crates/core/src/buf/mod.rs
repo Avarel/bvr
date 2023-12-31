@@ -4,7 +4,7 @@
 pub mod segment;
 
 use self::segment::{SegBytes, SegStr, Segment};
-use crate::{index::BoxedStream, LineIndex, LineMatches, Result};
+use crate::{index::BoxedStream, LineIndex, LineSet, Result};
 use lru::LruCache;
 use std::{
     cell::RefCell,
@@ -200,30 +200,39 @@ impl SegBuffer {
         }
     }
 
-    pub fn write_file(&mut self, output: File, lines: Option<LineMatches>) -> Result<()> {
-        if let Some(lines) = lines {
-            if !lines.is_complete() {
-                return Err(crate::err::Error::InProgress);
-            }
+    pub fn all_line_matches(&self) -> LineSet {
+        LineSet::all(self.index.clone())
+    }
 
-            let mut writer = BufWriter::new(output);
-            let snap = lines.snapshot();
+    pub fn write_file(&mut self, output: File, lines: LineSet) -> Result<()> {
+        if !lines.is_complete() {
+            return Err(crate::err::Error::InProgress);
+        }
 
-            for &ln in snap.iter() {
-                let line = self.get_bytes(ln).unwrap();
-                writer.write_all(line.as_bytes())?;
+        match lines.snapshot() {
+            Some(snap) => {
+                let mut writer = BufWriter::new(output);
+                for &ln in snap.iter() {
+                    let line = self.get_bytes(ln).unwrap();
+                    writer.write_all(line.as_bytes())?;
+                }
             }
-        } else {
-            match &mut self.repr {
+            None => match &mut self.repr {
                 BufferRepr::File { ref file, .. } => {
                     let mut output = output;
                     std::io::copy(&mut file.try_clone()?, &mut output)?;
                 }
-                BufferRepr::Stream(_) => {
-                    return Err(crate::err::Error::Unimplemented);
+                BufferRepr::Stream(inner) => {
+                    let mut writer = BufWriter::new(output);
+                    let inner = inner.borrow();
+
+                    for seg in inner.segments.iter() {
+                        writer.write_all(seg)?;
+                    }
                 }
-            }
+            },
         }
+
         Ok(())
     }
 }
