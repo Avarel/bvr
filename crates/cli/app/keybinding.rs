@@ -162,7 +162,7 @@ impl Keybinding {
                 },
                 _ => None,
             },
-            InputMode::Command(ty) => match event {
+            InputMode::Command(_) => match event {
                 Event::Paste(paste) => {
                     Some(Action::Command(CommandAction::Paste(std::mem::take(paste))))
                 }
@@ -185,7 +185,7 @@ impl Keybinding {
                         select: key.modifiers.contains(KeyModifiers::SHIFT),
                         jump: CommandJump::Boundary,
                     })),
-                    KeyCode::Up | KeyCode::Down if ty == PromptMode::Command => {
+                    KeyCode::Up | KeyCode::Down => {
                         Some(Action::Command(CommandAction::History {
                             direction: Direction::back_if(key.code == KeyCode::Up),
                         }))

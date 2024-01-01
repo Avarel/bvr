@@ -51,6 +51,13 @@ impl<'a> Widget for StatusWidget<'a> {
             .bg(accent_color),
         );
         v.push(Span::raw(" "));
+        
+        if let Some(viewer) = &self.viewer {
+            v.push(Span::raw(viewer.name()).fg(colors::STATUS_BAR_TEXT));
+        } else {
+            v.push(Span::raw("Empty").fg(colors::STATUS_BAR_TEXT));
+        }
+        v.push(Span::raw(" │ ").fg(colors::STATUS_BAR_TEXT));
 
         if let Some(message) = self.message {
             v.push(Span::raw(message));
@@ -63,6 +70,9 @@ impl<'a> Widget for StatusWidget<'a> {
             }
             v.push(Span::raw(" │ ").fg(accent_color));
             v.push(Span::raw(viewer.name()).fg(accent_color));
+        } else {
+            v.push(Span::raw(":open [file name]").fg(accent_color));
+            v.push(Span::raw(" to view a file").fg(colors::STATUS_BAR_TEXT));
         }
 
         Paragraph::new(Line::from(v))
@@ -561,6 +571,9 @@ impl MultiplexerWidget<'_> {
                     EdgeBg(true).render(viewer_chunk, buf)
                 }
             }
+        } else {
+            const BG_BLOCK: Block = Block::new().style(Style::new().bg(colors::BG));
+            BG_BLOCK.render(mux_chunk, buf);
         }
 
         StatusWidget {

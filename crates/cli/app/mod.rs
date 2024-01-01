@@ -345,6 +345,9 @@ impl App {
                     return result;
                 }
                 CommandAction::History { direction } => {
+                    if self.mode != InputMode::Command(PromptMode::Command) {
+                        return true;
+                    }
                     let was_using_history = self.history.is_using_history();
                     let Some((entry, is_history)) = (match direction {
                         crate::direction::Direction::Back => self.history.backward(),
