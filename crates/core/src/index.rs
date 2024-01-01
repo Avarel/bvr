@@ -1,14 +1,10 @@
-use crate::{
-    buf::segment::{Segment, SegmentMut},
-    cowvec::{CowVec, CowVecWriter},
-    err::{Error, Result},
-};
+use crate::buf::segment::{Segment, SegmentMut};
+use crate::cowvec::{CowVec, CowVecWriter};
+use crate::err::{Error, Result};
+use std::fs::File;
 use std::sync::mpsc::{Receiver, Sender};
+use std::sync::{atomic::AtomicBool, Arc};
 use std::thread::JoinHandle;
-use std::{
-    fs::File,
-    sync::{atomic::AtomicBool, Arc},
-};
 
 struct IndexingTask {
     /// This is the sender side of the channel that receives byte indexes of `\n`.

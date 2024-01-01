@@ -1,10 +1,8 @@
 pub mod composite;
 
-use crate::{
-    buf::ContiguousSegmentIterator,
-    cowvec::{CowVec, CowVecSnapshot, CowVecWriter},
-    LineIndex, Result,
-};
+use crate::buf::ContiguousSegmentIterator;
+use crate::cowvec::{CowVec, CowVecSnapshot, CowVecWriter};
+use crate::{LineIndex, Result};
 use regex::bytes::Regex;
 use std::sync::{atomic::AtomicBool, Arc};
 

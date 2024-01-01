@@ -6,17 +6,13 @@ pub mod segment;
 use self::segment::{SegBytes, SegStr, Segment};
 use crate::{index::BoxedStream, LineIndex, LineSet, Result};
 use lru::LruCache;
-use std::{
-    cell::RefCell,
-    fs::File,
-    io::{BufWriter, Write},
-    num::NonZeroUsize,
-    ops::Range,
-    sync::{
-        mpsc::{Receiver, TryRecvError},
-        Arc,
-    },
-};
+use std::cell::RefCell;
+use std::fs::File;
+use std::io::{BufWriter, Write};
+use std::num::NonZeroUsize;
+use std::ops::Range;
+use std::sync::mpsc::{Receiver, TryRecvError};
+use std::sync::Arc;
 
 /// A segmented buffer that holds data in multiple segments.
 ///

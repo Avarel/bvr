@@ -1,13 +1,13 @@
 use super::{
     cursor::{Cursor, CursorState, SelectionOrigin},
-    filters::Compositor,
+    filters::{Compositor, Filter},
     viewer::ViewCache,
     viewport::Viewport,
 };
 use crate::{app::ViewDelta, direction::Direction};
 use bitflags::bitflags;
-use bvr_core::Result;
 use bvr_core::SegBuffer;
+use bvr_core::{matches::CompositeStrategy, Result};
 use ratatui::style::Color;
 use regex::bytes::Regex;
 use std::fs::File;
@@ -68,6 +68,10 @@ impl Instance {
 
     pub fn set_follow_output(&mut self, follow_output: bool) {
         self.view.set_follow_output(follow_output);
+    }
+
+    pub fn is_following_output(&self) -> bool {
+        self.view.is_following_output()
     }
 
     pub fn visible_line_count(&self) -> usize {
@@ -184,29 +188,65 @@ impl Instance {
         self.view.viewport_mut().jump_to(i);
     }
 
+    pub fn toggle_bookmark_line_number(&mut self, line_number: usize) {
+        self.compositor
+            .filters_mut()
+            .bookmarks_mut()
+            .toggle(line_number);
+        self.cursor
+            .clamp(self.visible_line_count().saturating_sub(1));
+        self.view.set_end_index(self.visible_line_count());
+
+        if self
+            .compositor
+            .filters()
+            .iter_active()
+            .all(|filter| !filter.has_line(line_number))
+        {
+            self.invalidate_cache();
+        } else {
+            self.view.reset_color_cache();
+        }
+    }
+
     pub fn toggle_select_bookmarks(&mut self) {
+        let mut needs_invalidation = true;
         match self.cursor.state() {
             Cursor::Singleton(i) => {
                 let line_number = self.view.line_at_view_index(i).unwrap();
-                self.compositor
-                    .filters_mut()
-                    .bookmarks_mut()
-                    .toggle(line_number);
+                return self.toggle_bookmark_line_number(line_number);
             }
             Cursor::Selection(start, end, _) => {
-                for i in (start..=end).rev() {
-                    let line_number = self.view.line_at_view_index(i).unwrap();
-                    self.compositor
-                        .filters_mut()
-                        .bookmarks_mut()
-                        .toggle(line_number);
+                let line_numbers = (start..=end)
+                    .map(|i| self.view.line_at_view_index(i).unwrap())
+                    .collect::<Vec<_>>();
+                let present = line_numbers
+                    .iter()
+                    .all(|&i| self.compositor.filters().bookmarks().has_line(i));
+
+                for line_number in line_numbers {
+                    needs_invalidation = self
+                        .compositor
+                        .filters()
+                        .iter_active()
+                        .all(|filter| !filter.has_line(line_number));
+                    let bookmarks = self.compositor.filters_mut().bookmarks_mut();
+                    if present {
+                        bookmarks.remove(line_number);
+                    } else {
+                        bookmarks.add(line_number);
+                    }
                 }
             }
         }
         self.cursor
             .clamp(self.visible_line_count().saturating_sub(1));
         self.view.set_end_index(self.visible_line_count());
-        self.invalidate_cache();
+        if needs_invalidation {
+            self.invalidate_cache();
+        } else {
+            self.view.reset_color_cache();
+        }
     }
 
     pub fn toggle_select_filters(&mut self) {
@@ -216,6 +256,19 @@ impl Instance {
 
     pub fn remove_select_filter(&mut self) {
         self.compositor.remove_select_filters();
+        self.invalidate_cache();
+    }
+
+    pub fn toggle_filter(&mut self, filter_index: usize) {
+        self.compositor
+            .filters_mut()
+            .get_mut(filter_index)
+            .map(Filter::toggle);
+        self.invalidate_cache();
+    }
+
+    pub fn set_composite_strategy(&mut self, strategy: CompositeStrategy) {
+        self.compositor.set_strategy(strategy);
         self.invalidate_cache();
     }
 

@@ -1,13 +1,9 @@
 use arc_swap::ArcSwap;
-use std::{
-    alloc::{self, Layout},
-    ops::Deref,
-    ptr::NonNull,
-    sync::{
-        atomic::{AtomicUsize, Ordering},
-        Arc,
-    },
-};
+use std::alloc::{self, Layout};
+use std::ops::Deref;
+use std::ptr::NonNull;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Arc;
 
 struct RawBuf<T> {
     ptr: NonNull<T>,

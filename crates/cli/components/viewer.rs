@@ -186,4 +186,8 @@ impl ViewCache {
         self.cache.clear();
         self.composite = line_set;
     }
+
+    pub fn is_following_output(&self) -> bool {
+        self.follow_output
+    }
 }

@@ -3,19 +3,15 @@ use super::{
     mouse::MouseHandler,
     InputMode, PromptMode, ViewDelta,
 };
-use crate::{
-    app::actions::VisualAction,
-    colors,
-    components::{
-        cursor::{Cursor, SelectionOrigin},
-        filters::{FilterData, FilterType},
-        instance::{Instance, LineData, LineType},
-        mux::{MultiplexerApp, MultiplexerMode},
-        prompt::PromptApp,
-        status::StatusApp,
-    },
-    direction::Direction,
+use crate::components::{
+    cursor::{Cursor, SelectionOrigin},
+    filters::{FilterData, FilterType},
+    instance::{Instance, LineData, LineType},
+    mux::{MultiplexerApp, MultiplexerMode},
+    prompt::PromptApp,
+    status::StatusApp,
 };
+use crate::{app::actions::VisualAction, colors, direction::Direction};
 use crossterm::event::MouseEventKind;
 use ratatui::{prelude::*, widgets::*};
 
@@ -51,7 +47,7 @@ impl<'a> Widget for StatusWidget<'a> {
             .bg(accent_color),
         );
         v.push(Span::raw(" "));
-        
+
         if let Some(viewer) = &self.viewer {
             v.push(Span::raw(viewer.name()).fg(colors::STATUS_BAR_TEXT));
         } else {
@@ -80,24 +76,29 @@ impl<'a> Widget for StatusWidget<'a> {
             .render(area, buf);
 
         if let Some(viewer) = self.viewer {
-            let bottom = viewer.viewport().bottom();
-            let ln_vis = viewer.visible_line_count();
-            let percentage = if ln_vis == 0 {
-                1.0
+            if viewer.is_following_output() {
+                Paragraph::new(Span::raw("Follow  ").fg(colors::STATUS_BAR_TEXT))
             } else {
-                bottom as f64 / ln_vis as f64
+                let bottom = viewer.viewport().bottom();
+                let ln_vis = viewer.visible_line_count();
+                let percentage = if ln_vis == 0 {
+                    1.0
+                } else {
+                    bottom as f64 / ln_vis as f64
+                }
+                .clamp(0.0, 1.0);
+
+                let row = viewer.viewport().top();
+                let col = viewer.viewport().left();
+
+                Paragraph::new(Line::from(vec![
+                    Span::raw(format!("{}:{}", row + 1, col + 1)).fg(colors::STATUS_BAR_TEXT),
+                    Span::raw(format!("  {:.0}%  ", percentage * 100.0))
+                        .fg(colors::STATUS_BAR_TEXT),
+                ]))
             }
-            .clamp(0.0, 1.0);
-
-            let row = viewer.viewport().top();
-            let col = viewer.viewport().left();
-
-            Paragraph::new(Line::from(vec![
-                Span::raw(format!(" {}:{} ", row + 1, col + 1)),
-                Span::raw(format!(" {:.0}% ", percentage * 100.0)),
-            ]))
             .alignment(Alignment::Right)
-            .render(area, buf);
+            .render(area, buf)
         }
     }
 }

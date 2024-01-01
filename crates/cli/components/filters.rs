@@ -113,6 +113,18 @@ impl Bookmarks {
         Bookmarks { lines: Vec::new() }
     }
 
+    pub fn add(&mut self, line_number: usize) {
+        if let Err(idx) = self.lines.binary_search(&line_number) {
+            self.lines.insert(idx, line_number);
+        }
+    }
+
+    pub fn remove(&mut self, line_number: usize) {
+        if let Ok(idx) = self.lines.binary_search(&line_number) {
+            self.lines.remove(idx);
+        }
+    }
+
     pub fn toggle(&mut self, line_number: usize) {
         match self.lines.binary_search(&line_number) {
             Ok(idx) => {

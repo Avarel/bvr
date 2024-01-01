@@ -10,7 +10,6 @@ use self::{
     widgets::{MultiplexerWidget, PromptWidget},
 };
 use crate::components::{
-    filters::Filter,
     history::History,
     instance::Instance,
     mux::{MultiplexerApp, MultiplexerMode},
@@ -19,12 +18,11 @@ use crate::components::{
 };
 use anyhow::Result;
 use bvr_core::{buf::SegBuffer, err::Error, index::BoxedStream, matches::CompositeStrategy};
-use crossterm::{
-    event::{
-        self, DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture,
-    },
-    execute,
-    terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
+use crossterm::event::{
+    self, DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture,
+};
+use crossterm::terminal::{
+    disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
 };
 use ratatui::{prelude::*, widgets::Widget};
 use regex::bytes::RegexBuilder;
@@ -110,7 +108,7 @@ impl App {
 
     pub fn run_app(&mut self, terminal: &mut Terminal) -> Result<()> {
         enable_raw_mode()?;
-        execute!(
+        crossterm::execute!(
             terminal.backend_mut(),
             EnterAlternateScreen,
             EnableBracketedPaste,
@@ -121,7 +119,7 @@ impl App {
 
         // restore terminal
         disable_raw_mode()?;
-        execute!(
+        crossterm::execute!(
             terminal.backend_mut(),
             DisableMouseCapture,
             DisableBracketedPaste,
@@ -259,15 +257,7 @@ impl App {
                     let Some(viewer) = self.mux.viewers_mut().get_mut(target_view) else {
                         return true;
                     };
-                    viewer
-                        .compositor_mut()
-                        .filters_mut()
-                        .bookmarks_mut()
-                        .toggle(line_number);
-                    // TODO: future optimization opportunity, do not need to recompute composite
-                    // if the line number is part of a search filter and bookmark is not the only
-                    // filter that satisfies the line number
-                    viewer.invalidate_cache();
+                    viewer.toggle_bookmark_line_number(line_number)
                 }
             },
             Action::Filter(action) => match action {
@@ -297,12 +287,7 @@ impl App {
                     filter_index,
                 } => {
                     if let Some(viewer) = self.mux.viewers_mut().get_mut(target_view) {
-                        viewer
-                            .compositor_mut()
-                            .filters_mut()
-                            .get_mut(filter_index)
-                            .map(Filter::toggle);
-                        viewer.invalidate_cache();
+                        viewer.toggle_filter(filter_index)
                     }
                 }
             },
@@ -458,18 +443,12 @@ impl App {
                 }
                 Some("union" | "u" | "||" | "|") => {
                     if let Some(viewer) = self.mux.active_viewer_mut() {
-                        viewer
-                            .compositor_mut()
-                            .set_strategy(CompositeStrategy::Union);
-                        viewer.invalidate_cache();
+                        viewer.set_composite_strategy(CompositeStrategy::Union);
                     }
                 }
                 Some("intersect" | "i" | "&&" | "&") => {
                     if let Some(viewer) = self.mux.active_viewer_mut() {
-                        viewer
-                            .compositor_mut()
-                            .set_strategy(CompositeStrategy::Intersection);
-                        viewer.invalidate_cache();
+                        viewer.set_composite_strategy(CompositeStrategy::Intersection);
                     }
                 }
                 Some(cmd) => {
