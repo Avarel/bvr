@@ -9,12 +9,14 @@ use self::{
     mouse::MouseHandler,
     widgets::{MultiplexerWidget, PromptWidget},
 };
-use crate::components::{
-    history::History,
-    instance::Instance,
-    mux::{MultiplexerApp, MultiplexerMode},
-    prompt::{self, PromptApp, PromptMovement},
-    status::StatusApp,
+use crate::{
+    components::{
+        instance::Instance,
+        mux::{MultiplexerApp, MultiplexerMode},
+        prompt::{self, PromptApp, PromptMovement},
+        status::StatusApp,
+    },
+    direction::Direction,
 };
 use anyhow::Result;
 use bvr_core::{buf::SegBuffer, err::Error, index::BoxedStream, matches::CompositeStrategy};
@@ -65,7 +67,6 @@ pub struct App {
     mux: MultiplexerApp,
     status: StatusApp,
     prompt: PromptApp,
-    history: History,
     keybinds: Keybinding,
     gutter: bool,
 }
@@ -76,7 +77,6 @@ impl App {
             mode: InputMode::Normal,
             prompt: PromptApp::new(),
             mux: MultiplexerApp::new(),
-            history: History::new(),
             status: StatusApp::new(),
             keybinds: Keybinding::Hardcoded,
             gutter: true,
@@ -315,14 +315,14 @@ impl App {
                     }
                 }
                 CommandAction::Submit => {
-                    let command = self.prompt.take();
                     let result = match self.mode {
-                        InputMode::Command(PromptMode::Command) => self.process_command(&command),
-                        InputMode::Command(PromptMode::NewFilter) => {
-                            self.process_search(&command, false)
+                        InputMode::Command(PromptMode::Command) => {
+                            let command = self.prompt.submit();
+                            self.process_command(&command)
                         }
-                        InputMode::Command(PromptMode::NewLit) => {
-                            self.process_search(&command, true)
+                        InputMode::Command(mode @ (PromptMode::NewFilter | PromptMode::NewLit)) => {
+                            let command = self.prompt.take();
+                            self.process_search(&command, matches!(mode, PromptMode::NewLit))
                         }
                         InputMode::Normal | InputMode::Visual | InputMode::Filter => unreachable!(),
                     };
@@ -333,22 +333,9 @@ impl App {
                     if self.mode != InputMode::Command(PromptMode::Command) {
                         return true;
                     }
-                    let was_using_history = self.history.is_using_history();
-                    let Some((entry, is_history)) = (match direction {
-                        crate::direction::Direction::Back => self.history.backward(),
-                        crate::direction::Direction::Next => self.history.forward(),
-                    }) else {
-                        return true;
-                    };
-
-                    if is_history {
-                        let curr = self.prompt.take();
-                        self.prompt.set_buffer(entry.to_string());
-                        if !was_using_history {
-                            self.history.set_curr(curr);
-                        }
-                    } else {
-                        self.prompt.set_buffer(entry.to_string());
+                    match direction {
+                        Direction::Back => self.prompt.backward(),
+                        Direction::Next => self.prompt.forward(),
                     }
                 }
                 CommandAction::Complete => (),
@@ -389,7 +376,6 @@ impl App {
     }
 
     fn process_command(&mut self, command: &str) -> bool {
-        self.history.push(command.to_string());
         let mut parts = command.split_whitespace();
 
         match parts.next() {

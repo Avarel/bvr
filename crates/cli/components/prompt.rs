@@ -23,6 +23,8 @@ impl PromptMovement {
 }
 
 pub struct PromptApp {
+    history: Vec<String>,
+    index: usize,
     buf: String,
     cursor: CursorState,
 }
@@ -30,6 +32,8 @@ pub struct PromptApp {
 impl PromptApp {
     pub fn new() -> Self {
         Self {
+            history: Vec::new(),
+            index: 0,
             buf: String::new(),
             cursor: CursorState::new(),
         }
@@ -37,7 +41,11 @@ impl PromptApp {
 
     #[inline(always)]
     pub fn buf(&self) -> &str {
-        &self.buf
+        if self.index < self.history.len() {
+            &self.history[self.index]
+        } else {
+            &self.buf
+        }
     }
 
     #[inline(always)]
@@ -46,10 +54,15 @@ impl PromptApp {
     }
 
     pub fn move_cursor(&mut self, direction: Direction, movement: PromptMovement) {
+        let buf = if self.index < self.history.len() {
+            &self.history[self.index]
+        } else {
+            &self.buf
+        };
         match direction {
             Direction::Back => self.cursor.back(movement.select, |i| match movement.delta {
                 PromptDelta::Word => {
-                    if self.buf[..i]
+                    if buf[..i]
                         .chars()
                         .rev()
                         .nth(0)
@@ -57,19 +70,19 @@ impl PromptApp {
                         .unwrap_or(false)
                     {
                         i.saturating_sub(
-                            self.buf[..i]
+                            buf[..i]
                                 .chars()
                                 .rev()
                                 .position(|c| c.is_alphanumeric())
                                 .unwrap_or(0),
                         )
                     } else {
-                        self.buf[..i].rfind(' ').map(|p| p + 1).unwrap_or(0)
+                        buf[..i].rfind(' ').map(|p| p + 1).unwrap_or(0)
                     }
                 }
                 PromptDelta::Boundary => 0,
                 PromptDelta::Number(delta) => i.saturating_sub(
-                    self.buf[..i]
+                    buf[..i]
                         .chars()
                         .rev()
                         .take(delta)
@@ -80,20 +93,20 @@ impl PromptApp {
             Direction::Next => self.cursor.forward(movement.select, |i| {
                 match movement.delta {
                     PromptDelta::Word => {
-                        if self.buf[i..]
+                        if buf[i..]
                             .chars()
                             .nth(0)
                             .map(|c| c.is_whitespace())
                             .unwrap_or(false)
                         {
                             i.saturating_add(
-                                self.buf[i..]
+                                buf[i..]
                                     .chars()
                                     .position(|c| c.is_alphanumeric())
                                     .unwrap_or(usize::MAX),
                             )
                         } else {
-                            self.buf[(i + 1).min(self.buf.len())..]
+                            buf[(i + 1).min(buf.len())..]
                                 .chars()
                                 .position(|c| c.is_whitespace())
                                 .map(|z| z + i + 1)
@@ -102,14 +115,14 @@ impl PromptApp {
                     }
                     PromptDelta::Boundary => usize::MAX,
                     PromptDelta::Number(delta) => i.saturating_add(
-                        self.buf[i..]
+                        buf[i..]
                             .chars()
                             .take(delta)
                             .map(|c| c.len_utf8())
                             .sum::<usize>(),
                     ),
                 }
-                .min(self.buf.len())
+                .min(buf.len())
             }),
         }
     }
@@ -120,6 +133,11 @@ impl PromptApp {
     }
 
     pub fn enter_str(&mut self, input: &str) {
+        if self.index < self.history.len() {
+            self.buf = self.history[self.index].clone();
+            self.index = self.history.len();
+        }
+
         match self.cursor.state() {
             Cursor::Singleton(i) => {
                 self.buf.insert_str(i, input);
@@ -146,6 +164,11 @@ impl PromptApp {
     }
 
     pub fn delete(&mut self) -> bool {
+        if self.index < self.history.len() {
+            self.buf = self.history[self.index].clone();
+            self.index = self.history.len();
+        }
+
         match self.cursor.state() {
             Cursor::Singleton(curr) => {
                 if curr == 0 {
@@ -165,13 +188,47 @@ impl PromptApp {
         true
     }
 
-    pub fn set_buffer(&mut self, buf: String) {
-        self.buf = buf;
-        self.cursor.place(self.buf.len());
+    #[allow(dead_code)]
+    pub fn replace_last_word(&mut self, word: &str) {
+        let buf = if self.index < self.history.len() {
+            &mut self.history[self.index]
+        } else {
+            &mut self.buf
+        };
+        if let Some(i) = buf.rfind(' ') {
+            buf.replace_range(i + 1.., word);
+        } else {
+            *buf = word.to_owned();
+        }
+    }
+
+    pub fn backward(&mut self) {
+        self.index = self.index.saturating_sub(1);
+        self.cursor.place(self.buf().len());
+    }
+
+    pub fn forward(&mut self) {
+        self.index = self.index.saturating_add(1).min(self.history.len());
+        self.cursor.place(self.buf().len());
+    }
+
+    pub fn submit(&mut self) -> String {
+        let output = self.take();
+        if self.history.last() != Some(&output) {
+            self.history.push(output.clone());
+            self.index = self.history.len();
+        }
+        output
     }
 
     pub fn take(&mut self) -> String {
         self.cursor.reset();
-        std::mem::take(&mut self.buf)
+        if self.index < self.history.len() {
+            let output = self.history.remove(self.index);
+            self.index = self.history.len();
+            output
+        } else {
+            std::mem::take(&mut self.buf)
+        }
     }
 }
