@@ -37,6 +37,7 @@ ratatui = "0.25"
 regex = "1.10"
 itoa = "1.0"
 bitflags = "2.4"
+lru = "0.12"
 
 [profile.release]
 strip = true

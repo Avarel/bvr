@@ -5,8 +5,10 @@ use super::{
 use crate::{app::ViewDelta, colors, direction::Direction};
 use bitflags::bitflags;
 use bvr_core::{matches::CompositeStrategy, LineSet, SegBuffer};
+use lru::LruCache;
 use ratatui::style::Color;
 use regex::bytes::Regex;
+use std::num::NonZeroUsize;
 
 #[derive(Clone)]
 enum FilterRepr {
@@ -17,6 +19,7 @@ enum FilterRepr {
 
 #[derive(Clone)]
 pub struct Filter {
+    id: usize,
     name: String,
     enabled: bool,
     color: Color,
@@ -26,6 +29,7 @@ pub struct Filter {
 impl Filter {
     fn all() -> Self {
         Self {
+            id: 0,
             name: "All Lines".to_string(),
             repr: FilterRepr::All,
             enabled: true,
@@ -35,6 +39,7 @@ impl Filter {
 
     fn bookmark() -> Self {
         Self {
+            id: 1,
             name: "Bookmarks".to_string(),
             enabled: true,
             color: colors::SELECT_ACCENT,
@@ -263,8 +268,28 @@ pub struct FilterData<'a> {
     pub ty: FilterType,
 }
 
+#[derive(Clone, Hash, PartialEq, Eq)]
+struct CacheKey(Box<[usize]>, CompositeStrategy);
+
+impl CacheKey {
+    fn new(filters: &Filters, strategy: CompositeStrategy) -> Self {
+        let mut filter_ids = filters
+            .iter_active()
+            .map(|filter| filter.id)
+            .collect::<Vec<_>>();
+        filter_ids.sort();
+        Self(filter_ids.into_boxed_slice(), strategy)
+    }
+
+    fn contains(&self, filter: &Filter) -> bool {
+        self.0.contains(&filter.id)
+    }
+}
+
 pub struct Compositor {
+    id_source: usize,
     all_composite: LineSet,
+    composite_cache: LruCache<CacheKey, LineSet>,
     strategy: CompositeStrategy,
     viewport: Viewport,
     cursor: CursorState,
@@ -274,7 +299,9 @@ pub struct Compositor {
 impl Compositor {
     pub fn new(buf: &SegBuffer) -> Self {
         Self {
+            id_source: 2,
             all_composite: buf.all_line_matches(),
+            composite_cache: LruCache::new(NonZeroUsize::new(8).unwrap()),
             viewport: Viewport::new(),
             cursor: CursorState::new(),
             filters: Filters::new(),
@@ -342,16 +369,22 @@ impl Compositor {
             })
     }
 
-    pub fn create_composite(&self) -> LineSet {
+    pub fn create_composite(&mut self) -> LineSet {
         if self.filters.all.is_enabled() {
             self.all_composite.clone()
         } else {
-            let filters = self
-                .filters
-                .iter_active()
-                .map(|filter| filter.as_line_matches())
-                .collect();
-            LineSet::compose(filters, false, self.strategy).unwrap()
+            let filter_key = CacheKey::new(&self.filters, self.strategy);
+            self.composite_cache
+                .try_get_or_insert(filter_key, || {
+                    let filters = self
+                        .filters
+                        .iter_active()
+                        .map(|filter| filter.as_line_matches())
+                        .collect();
+                    LineSet::compose(filters, false, self.strategy)
+                })
+                .unwrap()
+                .clone()
         }
     }
 
@@ -390,24 +423,46 @@ impl Compositor {
     }
 
     pub fn remove_select_filters(&mut self) {
+        let mut remove_keys = Vec::new();
         match self.cursor.state() {
             Cursor::Singleton(i) => {
                 if i > 1 {
-                    self.filters.searches.remove(i - 2);
+                    let filter = self.filters.searches.remove(i - 2);
+                    for (k, _) in self.composite_cache.iter() {
+                        if k.contains(&filter) {
+                            remove_keys.push(k.clone())
+                        }
+                    }
                 }
             }
             Cursor::Selection(start, end, _) => {
                 let start = start.max(2);
                 if start <= end {
-                    self.filters.searches.drain(start - 2..=end - 2);
+                    let filters = self
+                        .filters
+                        .searches
+                        .drain(start - 2..=end - 2)
+                        .collect::<Vec<_>>();
+                    let mut remove_keys = Vec::new();
+                    for (k, _) in self.composite_cache.iter() {
+                        if filters.iter().any(|f| k.contains(f)) {
+                            remove_keys.push(k.clone())
+                        }
+                    }
                 }
             }
+        }
+        for key in remove_keys {
+            self.composite_cache.pop(&key);
         }
         self.cursor.clamp(self.filters.len().saturating_sub(1));
     }
 
     pub fn filter_search(&mut self, file: &SegBuffer, regex: Regex) {
+        let id = self.id_source;
+        self.id_source += 1;
         self.filters.searches.push(Filter {
+            id,
             name: regex.to_string(),
             enabled: true,
             repr: FilterRepr::Search(LineSet::search(file.segment_iter().unwrap(), regex)),

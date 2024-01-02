@@ -1,7 +1,4 @@
-use super::{
-    filters::Compositor,
-    viewport::Viewport,
-};
+use super::{filters::Compositor, viewport::Viewport};
 use bvr_core::{LineSet, SegBuffer, SegStr};
 use ratatui::style::Color;
 use std::collections::VecDeque;
@@ -105,7 +102,7 @@ impl ViewCache {
     pub fn cache_view(
         &mut self,
         buf: &SegBuffer,
-        preprocess: impl FnOnce(&mut Self)
+        preprocess: impl FnOnce(&mut Self),
     ) -> (impl Iterator<Item = &CachedLine>, Option<usize>) {
         if self.follow_output {
             self.curr_viewport.jump_to(self.end_index.saturating_sub(1));
@@ -146,7 +143,10 @@ impl ViewCache {
 
         preprocess(self);
 
-        (self.cache.iter(), self.cache.back().map(|line| line.line_number))
+        (
+            self.cache.iter(),
+            self.cache.back().map(|line| line.line_number),
+        )
     }
 
     pub fn color_cache(&mut self, compositor: &Compositor) {
@@ -184,7 +184,13 @@ impl ViewCache {
 
     pub fn insert_new_line_set(&mut self, line_set: LineSet) {
         self.cache.clear();
+        let old_line_number = self.line_at_view_index(self.curr_viewport.top());
         self.composite = line_set;
+        if let Some(old_line_number) = old_line_number {
+            if let Some(index) = self.composite.find(old_line_number) {
+                self.curr_viewport.top_to(index);
+            }
+        }
     }
 
     pub fn is_following_output(&self) -> bool {

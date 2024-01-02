@@ -117,6 +117,7 @@ dependencies = [
  "clap",
  "crossterm",
  "itoa",
+ "lru",
  "ratatui",
  "regex",
 ]

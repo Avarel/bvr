@@ -97,7 +97,7 @@ impl Queues {
     }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Hash, PartialEq, Eq, Debug)]
 pub enum CompositeStrategy {
     Intersection,
     Union,

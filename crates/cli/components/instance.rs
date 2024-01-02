@@ -43,7 +43,7 @@ pub struct Instance {
 
 impl Instance {
     pub fn new(name: String, buf: SegBuffer) -> Self {
-        let compositor = Compositor::new(&buf);
+        let mut compositor = Compositor::new(&buf);
         let composite = compositor.create_composite();
         Self {
             view: ViewCache::new(composite),
