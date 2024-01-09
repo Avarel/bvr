@@ -91,4 +91,9 @@ impl MultiplexerApp {
     pub fn set_mode(&mut self, mode: MultiplexerMode) {
         self.mode = mode;
     }
+
+    pub fn clear(&mut self) {
+        self.views.clear();
+        self.active = 0;
+    }
 }

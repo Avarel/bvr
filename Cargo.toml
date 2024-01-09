@@ -39,6 +39,8 @@ itoa = "1.0"
 bitflags = "2.4"
 lru = "0.12"
 arboard = "3.3"
+shellexpand = "3.1"
+shlex = "1.2"
 
 [profile.release]
 strip = true

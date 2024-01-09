@@ -52,6 +52,7 @@ pub enum InputMode {
 #[derive(PartialEq, Clone, Copy)]
 pub enum PromptMode {
     Command,
+    Shell,
     NewFilter,
     NewLit,
 }
@@ -70,7 +71,7 @@ pub struct App {
     status: StatusApp,
     prompt: PromptApp,
     keybinds: Keybinding,
-    clipboard: Clipboard,
+    clipboard: Option<Clipboard>,
     gutter: bool,
     action_queue: VecDeque<Action>,
 }
@@ -83,7 +84,7 @@ impl App {
             mux: MultiplexerApp::new(),
             status: StatusApp::new(),
             keybinds: Keybinding::Hardcoded,
-            clipboard: Clipboard::new().unwrap(),
+            clipboard: Clipboard::new().ok(),
             gutter: true,
             action_queue: VecDeque::new(),
         }
@@ -112,7 +113,7 @@ impl App {
         self.mux.push_viewer(viewer);
     }
 
-    pub fn run_app(&mut self, terminal: &mut Terminal) -> Result<()> {
+    fn enter_terminal(terminal: &mut Terminal) -> Result<()> {
         enable_raw_mode()?;
         crossterm::execute!(
             terminal.backend_mut(),
@@ -120,20 +121,25 @@ impl App {
             EnableBracketedPaste,
             EnableMouseCapture,
         )?;
+        Ok(())
+    }
 
-        self.event_loop(terminal)?;
-
-        // restore terminal
+    fn exit_terminal(terminal: &mut Terminal) -> Result<()> {
         disable_raw_mode()?;
         crossterm::execute!(
             terminal.backend_mut(),
-            DisableMouseCapture,
-            DisableBracketedPaste,
             LeaveAlternateScreen,
+            DisableBracketedPaste,
+            DisableMouseCapture,
         )?;
-        terminal.show_cursor()?;
-
         Ok(())
+    }
+
+    pub fn run_app(&mut self, terminal: &mut Terminal) -> Result<()> {
+        Self::enter_terminal(terminal)?;
+        let result = self.event_loop(terminal);
+        Self::exit_terminal(terminal)?;
+        result
     }
 
     fn event_loop(&mut self, terminal: &mut Terminal) -> Result<()> {
@@ -160,14 +166,14 @@ impl App {
                 },
             };
 
-            if !self.process_action(action) {
+            if !self.process_action(action, terminal) {
                 break;
             }
         }
         Ok(())
     }
 
-    fn process_action(&mut self, action: Action) -> bool {
+    fn process_action(&mut self, action: Action, terminal: &mut Terminal) -> bool {
         match action {
             Action::Exit => return false,
             Action::SwitchMode(new_mode) => {
@@ -335,6 +341,10 @@ impl App {
                             let command = self.prompt.take();
                             self.process_search(&command, matches!(mode, PromptMode::NewLit))
                         }
+                        InputMode::Command(PromptMode::Shell) => {
+                            let command = self.prompt.take();
+                            self.process_shell(&command, true, terminal)
+                        }
                         InputMode::Normal | InputMode::Visual | InputMode::Filter => unreachable!(),
                     };
                     self.mode = InputMode::Normal;
@@ -383,6 +393,96 @@ impl App {
         true
     }
 
+    fn context(&mut self, s: &str) -> Result<Option<Cow<'static, str>>, std::env::VarError> {
+        match s {
+            "SEL" => {
+                if let Some(viewer) = self.mux.active_viewer_mut() {
+                    match viewer.export_string() {
+                        Ok(text) => Ok(Some(text.into())),
+                        Err(err) => {
+                            self.status.submit_message(
+                                format!("selection expansion: {err}"),
+                                Some(Duration::from_secs(2)),
+                            );
+                            Ok(Some("".into()))
+                        }
+                    }
+                } else {
+                    Ok(Some("".into()))
+                }
+            }
+            s => match std::env::var(s) {
+                Ok(value) => Ok(Some(value.into())),
+                Err(std::env::VarError::NotPresent) => Ok(Some("".into())),
+                Err(e) => Err(e),
+            },
+        }
+    }
+
+    fn process_shell(&mut self, command: &str, terminate: bool, terminal: &mut Terminal) -> bool {
+        let Ok(expanded) = shellexpand::env_with_context(command, |s| self.context(s)) else {
+            self.status.submit_message(
+                format!("shell: expansion failed"),
+                Some(Duration::from_secs(2)),
+            );
+            return true;
+        };
+
+        let mut shl = shlex::Shlex::new(&expanded);
+        let Some(cmd) = shl.next() else {
+            self.status.submit_message(
+                format!("shell: no command provided"),
+                Some(Duration::from_secs(2)),
+            );
+            return true;
+        };
+
+        let args = shl.by_ref().collect::<Vec<_>>();
+
+        if shl.had_error {
+            self.status.submit_message(
+                format!("shell: lexing failed"),
+                Some(Duration::from_secs(2)),
+            );
+            return true;
+        }
+
+        let mut command = std::process::Command::new(&cmd);
+        command.args(args);
+
+        let mut child = match command.spawn() {
+            Err(err) => {
+                self.status.submit_message(
+                    format!("shell: {err}"),
+                    Some(Duration::from_secs(2)),
+                );
+                return true;
+            }
+            Ok(child) => {
+                if terminate {
+                    self.mux.clear();
+                    Self::exit_terminal(terminal).ok();
+                }
+                child
+            }
+        };
+
+        let status = match child.wait() {
+            Err(err) => {
+                self.status
+                    .submit_message(format!("shell: {err}"), Some(Duration::from_secs(2)));
+                return true;
+            }
+            Ok(status) => status,
+        };
+
+        if terminate {
+            std::process::exit(status.code().unwrap_or(0));
+        }
+
+        !terminate
+    }
+
     fn process_search(&mut self, pat: &str, escaped: bool) -> bool {
         let pat = if escaped {
             Cow::Owned(regex::escape(pat))
@@ -428,9 +528,29 @@ impl App {
                 }
             }
             Some("pb" | "pbcopy") => {
+                let Some(clipboard) = self.clipboard.as_mut() else {
+                    self.status.submit_message(
+                        format!("pbcopy: clipboard not available"),
+                        Some(Duration::from_secs(2)),
+                    );
+                    return true;
+                };
                 if let Some(viewer) = self.mux.active_viewer_mut() {
                     match viewer.export_string() {
-                        Ok(text) => self.clipboard.set_text(text).unwrap(),
+                        Ok(text) => match clipboard.set_text(text) {
+                            Ok(_) => {
+                                self.status.submit_message(
+                                    format!("pbcopy: copied to clipboard"),
+                                    Some(Duration::from_secs(2)),
+                                );
+                            }
+                            Err(err) => {
+                                self.status.submit_message(
+                                    format!("pbcopy: {err}"),
+                                    Some(Duration::from_secs(2)),
+                                );
+                            }
+                        },
                         Err(err) => {
                             self.status.submit_message(
                                 format!("pbcopy: {err}"),

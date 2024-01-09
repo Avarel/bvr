@@ -28,7 +28,10 @@ impl<'a> Widget for StatusWidget<'a> {
             .bg(colors::STATUS_BAR);
 
         let accent_color = match self.input_mode {
-            InputMode::Command(_) => colors::COMMAND_ACCENT,
+            InputMode::Command(PromptMode::Command) => colors::COMMAND_ACCENT,
+            InputMode::Command(PromptMode::Shell) => colors::SHELL_ACCENT,
+            InputMode::Command(PromptMode::NewFilter) => colors::FILTER_ACCENT,
+            InputMode::Command(PromptMode::NewLit) => colors::FILTER_ACCENT,
             InputMode::Normal => colors::VIEWER_ACCENT,
             InputMode::Visual => colors::SELECT_ACCENT,
             InputMode::Filter => colors::FILTER_ACCENT,
@@ -38,7 +41,10 @@ impl<'a> Widget for StatusWidget<'a> {
 
         v.push(
             Span::from(match self.input_mode {
-                InputMode::Command(_) => " COMMAND ",
+                InputMode::Command(PromptMode::Command) => " COMMAND ",
+                InputMode::Command(PromptMode::Shell) => " SHELL ",
+                InputMode::Command(PromptMode::NewFilter) => " FILTER REGEX ",
+                InputMode::Command(PromptMode::NewLit) => " FILTER LITERAL ",
                 InputMode::Normal => " NORMAL ",
                 InputMode::Visual => " VISUAL ",
                 InputMode::Filter => " FILTER ",
@@ -117,21 +123,22 @@ impl Widget for PromptWidget<'_> {
             return;
         };
 
-        let c = match mode {
-            PromptMode::Command => ":",
-            PromptMode::NewFilter => "/",
-            PromptMode::NewLit => "?",
+        let indicator = match mode {
+            PromptMode::Command => Span::raw(":").fg(colors::COMMAND_ACCENT),
+            PromptMode::NewFilter => Span::raw("/").fg(colors::FILTER_ACCENT),
+            PromptMode::NewLit => Span::raw("?").fg(colors::FILTER_ACCENT),
+            PromptMode::Shell => Span::raw("!").fg(colors::SHELL_ACCENT),
         };
 
         let input = Paragraph::new(Line::from(match self.inner.cursor() {
             Cursor::Singleton(_) => {
-                vec![Span::from(c), Span::from(self.inner.buf())]
+                vec![indicator, Span::raw(self.inner.buf())]
             }
             Cursor::Selection(start, end, _) => vec![
-                Span::from(c),
-                Span::from(&self.inner.buf()[..start]),
-                Span::from(&self.inner.buf()[start..end]).bg(colors::COMMAND_BAR_SELECT),
-                Span::from(&self.inner.buf()[end..]),
+                indicator,
+                Span::raw(&self.inner.buf()[..start]),
+                Span::raw(&self.inner.buf()[start..end]).bg(colors::COMMAND_BAR_SELECT),
+                Span::raw(&self.inner.buf()[end..]),
             ],
         }))
         .bg(colors::BG);

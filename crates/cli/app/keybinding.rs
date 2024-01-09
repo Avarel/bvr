@@ -225,6 +225,9 @@ impl Keybinding {
                 KeyCode::Char('/') => Some(Action::SwitchMode(InputMode::Command(
                     PromptMode::NewFilter,
                 ))),
+                KeyCode::Char('!') => Some(Action::SwitchMode(InputMode::Command(
+                    PromptMode::Shell,
+                ))),
                 KeyCode::Char('?') => {
                     Some(Action::SwitchMode(InputMode::Command(PromptMode::NewLit)))
                 }
