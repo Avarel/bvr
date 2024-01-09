@@ -178,6 +178,7 @@ impl FilterViewerWidget<'_> {
 pub struct ViewerWidget<'a> {
     view_index: usize,
     viewer: &'a mut Instance,
+    show_selection: bool,
     gutter: bool,
 }
 
@@ -200,6 +201,7 @@ impl ViewerWidget<'_> {
             ViewerLineWidget {
                 view_index: self.view_index,
                 line: Some(line),
+                show_selection: self.show_selection,
                 itoa_buf: &mut itoa_buf,
                 gutter_size,
             }
@@ -211,6 +213,7 @@ impl ViewerWidget<'_> {
             ViewerLineWidget {
                 view_index: self.view_index,
                 line: None,
+                show_selection: self.show_selection,
                 itoa_buf: &mut itoa_buf,
                 gutter_size,
             }
@@ -317,6 +320,7 @@ impl FilterLineWidget<'_> {
 struct ViewerLineWidget<'a> {
     view_index: usize,
     itoa_buf: &'a mut itoa::Buffer,
+    show_selection: bool,
     gutter_size: Option<u16>,
     line: Option<LineData<'a>>,
 }
@@ -366,9 +370,11 @@ impl ViewerLineWidget<'_> {
 
                 ln.render(gutter_chunk, buf);
 
-                Paragraph::new(Self::gutter_selection(line))
-                    .fg(colors::SELECT_ACCENT)
-                    .render(type_chunk, buf);
+                if self.show_selection {
+                    Paragraph::new(Self::gutter_selection(line))
+                        .fg(colors::SELECT_ACCENT)
+                        .render(type_chunk, buf);
+                }
 
                 let mut chars = line.data.chars();
                 for _ in 0..line.start {
@@ -385,9 +391,11 @@ impl ViewerLineWidget<'_> {
                 ln.render(gutter_chunk, buf);
             }
         } else if let Some(line) = &self.line {
-            Paragraph::new(Self::gutter_selection(line))
-                .fg(colors::SELECT_ACCENT)
-                .render(type_chunk, buf);
+            if self.show_selection {
+                Paragraph::new(Self::gutter_selection(line))
+                    .fg(colors::SELECT_ACCENT)
+                    .render(type_chunk, buf);
+            }
 
             let data = Paragraph::new(line.data).fg(line.color);
 
@@ -522,6 +530,7 @@ impl MultiplexerWidget<'_> {
 
                         ViewerWidget {
                             view_index: i,
+                            show_selection: self.mode == InputMode::Visual,
                             viewer,
                             gutter: self.gutter,
                         }
@@ -565,6 +574,7 @@ impl MultiplexerWidget<'_> {
                     }
                     ViewerWidget {
                         view_index: active,
+                        show_selection: self.mode == InputMode::Visual,
                         viewer,
                         gutter: self.gutter,
                     }
