@@ -8,7 +8,7 @@ use crate::{index::BoxedStream, LineIndex, LineSet, Result};
 use lru::LruCache;
 use std::cell::RefCell;
 use std::fs::File;
-use std::io::{BufWriter, Write};
+use std::io::{BufWriter, Cursor, Read, Write, Seek};
 use std::num::NonZeroUsize;
 use std::ops::Range;
 use std::sync::mpsc::{Receiver, TryRecvError};
@@ -200,7 +200,10 @@ impl SegBuffer {
         LineSet::all(self.index.clone())
     }
 
-    pub fn write_file(&mut self, output: File, lines: LineSet) -> Result<()> {
+    pub fn write_to_file<W>(&mut self, output: &mut W, lines: &LineSet) -> Result<()>
+    where
+        W: Write,
+    {
         if !lines.is_complete() {
             return Err(crate::err::Error::InProgress);
         }
@@ -214,9 +217,10 @@ impl SegBuffer {
                 }
             }
             None => match &mut self.repr {
-                BufferRepr::File { ref file, .. } => {
+                BufferRepr::File { file, .. } => {
+                    file.seek(std::io::SeekFrom::Start(0))?;
                     let mut output = output;
-                    std::io::copy(&mut file.try_clone()?, &mut output)?;
+                    std::io::copy(file, &mut output)?;
                 }
                 BufferRepr::Stream(inner) => {
                     let mut writer = BufWriter::new(output);
@@ -228,6 +232,38 @@ impl SegBuffer {
                 }
             },
         }
+
+        Ok(())
+    }
+
+    pub fn write_to_string(&mut self, output: &mut String, lines: &LineSet) -> Result<()> {
+        if !lines.is_complete() {
+            return Err(crate::err::Error::InProgress);
+        }
+
+        match lines.snapshot() {
+            Some(snap) => {
+                for &ln in snap.iter() {
+                    let line = self.get_line(ln).unwrap();
+                    output.push_str(line.as_str());
+                }
+            }
+            None => match &mut self.repr {
+                BufferRepr::File { file, .. } => {
+                    file.seek(std::io::SeekFrom::Start(0))?;
+                    file.read_to_string(output)?;
+                }
+                BufferRepr::Stream(inner) => {
+                    let inner = inner.borrow();
+
+                    for seg in inner.segments.iter() {
+                        let mut reader = Cursor::new(&seg[..]);
+                        reader.read_to_string(output)?;
+                    }
+                }
+            },
+        }
+        output.truncate(output.trim_end().len());
 
         Ok(())
     }

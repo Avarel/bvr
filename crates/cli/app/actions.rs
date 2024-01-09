@@ -1,3 +1,5 @@
+use std::path::PathBuf;
+
 use super::{InputMode, ViewDelta};
 use crate::direction::Direction;
 
@@ -8,6 +10,7 @@ pub enum Action {
     Normal(NormalAction),
     Visual(VisualAction),
     Filter(FilterAction),
+    ExportFile(PathBuf),
 }
 
 pub enum NormalAction {

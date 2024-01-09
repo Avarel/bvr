@@ -38,6 +38,7 @@ regex = "1.10"
 itoa = "1.0"
 bitflags = "2.4"
 lru = "0.12"
+arboard = "3.3"
 
 [profile.release]
 strip = true

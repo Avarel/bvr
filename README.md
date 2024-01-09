@@ -30,12 +30,12 @@ a plethora of other features that I couldn't find in any other pager.
 ## Features
 
 ### In-Progress or Planned
-| Feature            | Description                                         | Progress  |
-| ------------------ | --------------------------------------------------- | --------- |
-| Command Completion | Use tabs to complete commands.                      | Planned   |
-| Filter Presets     | Add preset filters upon startup.                    | After MVP |
-| Custom Keybindings | Customize the keybindings of the program.           | After MVP |
-| Word-Wrapping      | Wrap long lines.                                    | After MVP |
+| Feature            | Description                               | Progress  |
+| ------------------ | ----------------------------------------- | --------- |
+| Command Completion | Use tabs to complete commands.            | Planned   |
+| Filter Presets     | Add preset filters upon startup.          | After MVP |
+| Custom Keybindings | Customize the keybindings of the program. | After MVP |
+| Word-Wrapping      | Wrap long lines.                          | After MVP |
 
 ### Basic Support
 | Feature              | Description                                                   | Progress |
@@ -77,6 +77,7 @@ In this mode, you can enter commands to interact with the pager.
 | `:close` <br> `:c`                          | Close the current tab/view.                                   |
 | `:mux` <br>  `:m`                           | Toggle the multiplexer mode between windows or tabs.          |
 | `:mux tabs` `:mux split` <br> `:m t` `:m s` | Set the multiplexer to the respective mode.                   |
+| `:pb` `pbcopy`                              | Copy the output of the active filters to the clipboard.       |
 | `:filter regex <regex>` <br> `:f r <regex>` | Create a new filter searching for the regex.                  |
 | `:filter lit <lit>` <br> `:f l <regex>`     | Create a new filter searching for the literal.                |
 | `:filter clear` <br> `:f c`                 | Clear all filters.                                            |

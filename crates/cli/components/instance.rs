@@ -272,8 +272,16 @@ impl Instance {
         self.invalidate_cache();
     }
 
-    pub fn export_file(&mut self, file: File) -> Result<()> {
-        self.buf.write_file(file, self.view.composite().clone())
+    pub fn export_file(&mut self, mut file: File) -> Result<()> {
+        self.buf
+            .write_to_file(&mut file, &self.compositor.create_composite())
+    }
+
+    pub fn export_string(&mut self) -> Result<String> {
+        let mut output = String::new();
+        self.buf
+            .write_to_string(&mut output, &self.compositor.create_composite())?;
+        Ok(output)
     }
 
     pub fn invalidate_cache(&mut self) {

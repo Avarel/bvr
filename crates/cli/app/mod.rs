@@ -19,6 +19,7 @@ use crate::{
     direction::Direction,
 };
 use anyhow::Result;
+use arboard::Clipboard;
 use bvr_core::{buf::SegBuffer, err::Error, index::BoxedStream, matches::CompositeStrategy};
 use crossterm::event::{
     self, DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture,
@@ -30,6 +31,7 @@ use ratatui::{prelude::*, widgets::Widget};
 use regex::bytes::RegexBuilder;
 use std::{
     borrow::Cow,
+    collections::VecDeque,
     fs::OpenOptions,
     num::NonZeroUsize,
     path::{Path, PathBuf},
@@ -68,7 +70,9 @@ pub struct App {
     status: StatusApp,
     prompt: PromptApp,
     keybinds: Keybinding,
+    clipboard: Clipboard,
     gutter: bool,
+    action_queue: VecDeque<Action>,
 }
 
 impl App {
@@ -79,7 +83,9 @@ impl App {
             mux: MultiplexerApp::new(),
             status: StatusApp::new(),
             keybinds: Keybinding::Hardcoded,
+            clipboard: Clipboard::new().unwrap(),
             gutter: true,
+            action_queue: VecDeque::new(),
         }
     }
 
@@ -136,19 +142,22 @@ impl App {
         loop {
             terminal.draw(|f| self.ui(f, &mut mouse_handler))?;
 
-            let action = match mouse_handler.extract() {
+            let action = match self.action_queue.pop_front() {
                 Some(action) => action,
-                None => {
-                    if !event::poll(Duration::from_secs_f64(1.0 / 30.0))? {
-                        continue;
-                    }
+                None => match mouse_handler.extract() {
+                    Some(action) => action,
+                    None => {
+                        if !event::poll(Duration::from_secs_f64(1.0 / 30.0))? {
+                            continue;
+                        }
 
-                    let mut event = event::read()?;
-                    let key = self.keybinds.map_key(self.mode, &mut event);
-                    mouse_handler.publish_event(event);
-                    let Some(action) = key else { continue };
-                    action
-                }
+                        let mut event = event::read()?;
+                        let key = self.keybinds.map_key(self.mode, &mut event);
+                        mouse_handler.publish_event(event);
+                        let Some(action) = key else { continue };
+                        action
+                    }
+                },
             };
 
             if !self.process_action(action) {
@@ -167,7 +176,8 @@ impl App {
 
                 if new_mode == InputMode::Visual {
                     if let Some(viewer) = self.mux.active_viewer_mut() {
-                        viewer.move_selected_into_view()
+                        viewer.move_selected_into_view();
+                        viewer.set_follow_output(false);
                     }
                 }
             }
@@ -242,7 +252,8 @@ impl App {
                     delta,
                 } => {
                     if let Some(viewer) = self.mux.active_viewer_mut() {
-                        viewer.move_select(direction, select, delta)
+                        viewer.move_select(direction, select, delta);
+                        viewer.set_follow_output(false);
                     }
                 }
                 VisualAction::ToggleSelectedLine => {
@@ -340,6 +351,33 @@ impl App {
                 }
                 CommandAction::Complete => (),
             },
+            Action::ExportFile(path) => {
+                if let Some(viewer) = self.mux.active_viewer_mut() {
+                    if let Err(err) = OpenOptions::new()
+                        .create_new(true)
+                        .write(true)
+                        .truncate(true)
+                        .open(&path)
+                        .map_err(Error::from)
+                        .and_then(|file| viewer.export_file(file))
+                    {
+                        self.status.submit_message(
+                            format!("{}: {err}", path.display()),
+                            Some(Duration::from_secs(2)),
+                        );
+                    } else {
+                        self.status.submit_message(
+                            format!("{}: export complete", path.display()),
+                            Some(Duration::from_secs(2)),
+                        );
+                    }
+                } else {
+                    self.status.submit_message(
+                        String::from("No active viewer"),
+                        Some(Duration::from_secs(2)),
+                    );
+                }
+            }
         };
 
         true
@@ -387,6 +425,19 @@ impl App {
                         format!("{}: {err}", path.display()),
                         Some(Duration::from_secs(2)),
                     );
+                }
+            }
+            Some("pb" | "pbcopy") => {
+                if let Some(viewer) = self.mux.active_viewer_mut() {
+                    match viewer.export_string() {
+                        Ok(text) => self.clipboard.set_text(text).unwrap(),
+                        Err(err) => {
+                            self.status.submit_message(
+                                format!("pbcopy: {err}"),
+                                Some(Duration::from_secs(2)),
+                            );
+                        }
+                    }
                 }
             }
             Some("close" | "c") => {
@@ -452,38 +503,14 @@ impl App {
             },
             Some("export") => {
                 let path = parts.collect::<PathBuf>();
-                if let Some(viewer) = self.mux.active_viewer_mut() {
-                    self.status.submit_message(
-                        format!(
-                            "{}: export starting (this may take a while...)",
-                            path.display()
-                        ),
-                        Some(Duration::from_secs(2)),
-                    );
-                    if let Err(err) = OpenOptions::new()
-                        .create_new(true)
-                        .write(true)
-                        .truncate(true)
-                        .open(&path)
-                        .map_err(Error::from)
-                        .and_then(|file| viewer.export_file(file))
-                    {
-                        self.status.submit_message(
-                            format!("{}: {err}", path.display()),
-                            Some(Duration::from_secs(2)),
-                        );
-                    } else {
-                        self.status.submit_message(
-                            format!("{}: export complete", path.display()),
-                            Some(Duration::from_secs(2)),
-                        );
-                    }
-                } else {
-                    self.status.submit_message(
-                        String::from("No active viewer"),
-                        Some(Duration::from_secs(2)),
-                    );
-                }
+                self.status.submit_message(
+                    format!(
+                        "{}: export starting (this may take a while...)",
+                        path.display()
+                    ),
+                    Some(Duration::from_secs(2)),
+                );
+                self.action_queue.push_back(Action::ExportFile(path));
             }
             Some(cmd) => {
                 if let Ok(line_number) = cmd.parse::<usize>() {
