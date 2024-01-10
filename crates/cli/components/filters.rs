@@ -422,6 +422,19 @@ impl Compositor {
         }
     }
 
+    pub fn invalidate_bookmark_cache(&mut self) {
+        let keys = self
+            .composite_cache
+            .iter_mut()
+            .filter(|(k, _)| k.contains(&self.filters.bookmarks))
+            .map(|(k, _)| k.clone())
+            .collect::<Vec<_>>();
+
+        for key in keys {
+            self.composite_cache.pop(&key);
+        }
+    }
+
     pub fn remove_select_filters(&mut self) {
         let mut remove_keys = Vec::new();
         match self.cursor.state() {

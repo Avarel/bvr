@@ -197,6 +197,7 @@ impl Instance {
             .clamp(self.visible_line_count().saturating_sub(1));
         self.view.set_end_index(self.visible_line_count());
 
+        self.compositor.invalidate_bookmark_cache();
         if self
             .compositor
             .filters()
@@ -242,6 +243,7 @@ impl Instance {
         self.cursor
             .clamp(self.visible_line_count().saturating_sub(1));
         self.view.set_end_index(self.visible_line_count());
+        self.compositor.invalidate_bookmark_cache();
         if needs_invalidation {
             self.invalidate_cache();
         } else {
