@@ -2,7 +2,7 @@
 name = "bvr-core"
 description = "The core components used for the bvr pager."
 authors = ["An Tran <antranprm@gmail.com>"]
-version = "0.0.3"
+version = "0.0.4"
 edition = "2021"
 license = "MIT"
 readme = "README.md"

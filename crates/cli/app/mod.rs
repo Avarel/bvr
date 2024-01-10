@@ -395,7 +395,7 @@ impl App {
 
     fn context(&mut self, s: &str) -> Result<Option<Cow<'static, str>>, std::env::VarError> {
         match s {
-            "SEL" => {
+            "SEL" | "sel" => {
                 if let Some(viewer) = self.mux.active_viewer_mut() {
                     match viewer.export_string() {
                         Ok(text) => Ok(Some(text.into())),

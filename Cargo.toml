@@ -3,7 +3,7 @@ name = "bvr"
 description = "A pager designed to help you chew through logs."
 categories = ["command-line-utilities"]
 authors = ["An Tran <antranprm@gmail.com>"]
-version = "0.0.3"
+version = "0.0.4"
 edition = "2021"
 license = "MIT"
 keywords = ["cli", "pager"]
@@ -29,7 +29,7 @@ name = "bvr"
 members = ["crates/core", "crates/test_gen"]
 
 [dependencies]
-bvr-core = { version = "0.0.3", path = "crates/core" }
+bvr-core = { version = "0.0.4", path = "crates/core" }
 anyhow = "1.0"
 clap = { version = "4.4", features = ["cargo", "derive"] }
 crossterm = { version = "0.27", features = ["use-dev-tty"] }
@@ -38,7 +38,7 @@ regex = "1.10"
 itoa = "1.0"
 bitflags = "2.4"
 lru = "0.12"
-arboard = "3.3"
+arboard = { version = "3.3", features = ["wayland-data-control"] }
 shellexpand = "3.1"
 shlex = "1.2"
 
