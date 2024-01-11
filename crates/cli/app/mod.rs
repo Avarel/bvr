@@ -166,16 +166,16 @@ impl App {
                 },
             };
 
-            if !self.process_action(action, terminal) {
+            if !self.process_action(action, terminal)? {
                 break;
             }
         }
         Ok(())
     }
 
-    fn process_action(&mut self, action: Action, terminal: &mut Terminal) -> bool {
+    fn process_action(&mut self, action: Action, terminal: &mut Terminal) -> Result<bool> {
         match action {
-            Action::Exit => return false,
+            Action::Exit => return Ok(false),
             Action::SwitchMode(new_mode) => {
                 self.prompt.take();
                 self.mode = new_mode;
@@ -212,7 +212,7 @@ impl App {
                                 {
                                     viewer.viewport_mut().top_to(next)
                                 }
-                                return true;
+                                return Ok(true);
                             }
                         };
                         viewer.viewport_mut().pan_vertical(direction, delta);
@@ -272,7 +272,7 @@ impl App {
                     line_number,
                 } => {
                     let Some(viewer) = self.mux.viewers_mut().get_mut(target_view) else {
-                        return true;
+                        return Ok(true);
                     };
                     viewer.toggle_bookmark_line_number(line_number)
                 }
@@ -335,11 +335,11 @@ impl App {
                     let result = match self.mode {
                         InputMode::Command(PromptMode::Command) => {
                             let command = self.prompt.submit();
-                            self.process_command(&command)
+                            Ok(self.process_command(&command))
                         }
                         InputMode::Command(mode @ (PromptMode::NewFilter | PromptMode::NewLit)) => {
                             let command = self.prompt.take();
-                            self.process_search(&command, matches!(mode, PromptMode::NewLit))
+                            Ok(self.process_search(&command, matches!(mode, PromptMode::NewLit)))
                         }
                         InputMode::Command(PromptMode::Shell) => {
                             let command = self.prompt.take();
@@ -352,7 +352,7 @@ impl App {
                 }
                 CommandAction::History { direction } => {
                     if self.mode != InputMode::Command(PromptMode::Command) {
-                        return true;
+                        return Ok(true);
                     }
                     match direction {
                         Direction::Back => self.prompt.backward(),
@@ -390,7 +390,7 @@ impl App {
             }
         };
 
-        true
+        Ok(true)
     }
 
     fn context(&mut self, s: &str) -> Result<Option<Cow<'static, str>>, std::env::VarError> {
@@ -419,13 +419,13 @@ impl App {
         }
     }
 
-    fn process_shell(&mut self, command: &str, terminate: bool, terminal: &mut Terminal) -> bool {
+    fn process_shell(&mut self, command: &str, terminate: bool, terminal: &mut Terminal) -> Result<bool> {
         let Ok(expanded) = shellexpand::env_with_context(command, |s| self.context(s)) else {
             self.status.submit_message(
                 format!("shell: expansion failed"),
                 Some(Duration::from_secs(2)),
             );
-            return true;
+            return Ok(true);
         };
 
         let mut shl = shlex::Shlex::new(&expanded);
@@ -434,7 +434,7 @@ impl App {
                 format!("shell: no command provided"),
                 Some(Duration::from_secs(2)),
             );
-            return true;
+            return Ok(true);
         };
 
         let args = shl.by_ref().collect::<Vec<_>>();
@@ -444,24 +444,26 @@ impl App {
                 format!("shell: lexing failed"),
                 Some(Duration::from_secs(2)),
             );
-            return true;
+            return Ok(true);
         }
 
         let mut command = std::process::Command::new(&cmd);
         command.args(args);
 
+        Self::exit_terminal(terminal)?;
         let mut child = match command.spawn() {
             Err(err) => {
+                terminal.clear()?;
+                Self::enter_terminal(terminal)?;
                 self.status.submit_message(
                     format!("shell: {err}"),
                     Some(Duration::from_secs(2)),
                 );
-                return true;
+                return Ok(true);
             }
             Ok(child) => {
                 if terminate {
                     self.mux.clear();
-                    Self::exit_terminal(terminal).ok();
                 }
                 child
             }
@@ -471,7 +473,7 @@ impl App {
             Err(err) => {
                 self.status
                     .submit_message(format!("shell: {err}"), Some(Duration::from_secs(2)));
-                return true;
+                return Ok(true);
             }
             Ok(status) => status,
         };
@@ -480,7 +482,7 @@ impl App {
             std::process::exit(status.code().unwrap_or(0));
         }
 
-        !terminate
+        Ok(!terminate)
     }
 
     fn process_search(&mut self, pat: &str, escaped: bool) -> bool {
