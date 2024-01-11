@@ -28,7 +28,6 @@ use crossterm::terminal::{
     disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
 };
 use ratatui::{prelude::*, widgets::Widget};
-use regex::bytes::RegexBuilder;
 use std::{
     borrow::Cow,
     collections::VecDeque,
@@ -419,10 +418,15 @@ impl App {
         }
     }
 
-    fn process_shell(&mut self, command: &str, terminate: bool, terminal: &mut Terminal) -> Result<bool> {
+    fn process_shell(
+        &mut self,
+        command: &str,
+        terminate: bool,
+        terminal: &mut Terminal,
+    ) -> Result<bool> {
         let Ok(expanded) = shellexpand::env_with_context(command, |s| self.context(s)) else {
             self.status.submit_message(
-                format!("shell: expansion failed"),
+                "shell: expansion failed".to_string(),
                 Some(Duration::from_secs(2)),
             );
             return Ok(true);
@@ -431,7 +435,7 @@ impl App {
         let mut shl = shlex::Shlex::new(&expanded);
         let Some(cmd) = shl.next() else {
             self.status.submit_message(
-                format!("shell: no command provided"),
+                "shell: no command provided".to_string(),
                 Some(Duration::from_secs(2)),
             );
             return Ok(true);
@@ -441,13 +445,13 @@ impl App {
 
         if shl.had_error {
             self.status.submit_message(
-                format!("shell: lexing failed"),
+                "shell: lexing failed".to_string(),
                 Some(Duration::from_secs(2)),
             );
             return Ok(true);
         }
 
-        let mut command = std::process::Command::new(&cmd);
+        let mut command = std::process::Command::new(cmd);
         command.args(args);
 
         Self::exit_terminal(terminal)?;
@@ -455,10 +459,8 @@ impl App {
             Err(err) => {
                 terminal.clear()?;
                 Self::enter_terminal(terminal)?;
-                self.status.submit_message(
-                    format!("shell: {err}"),
-                    Some(Duration::from_secs(2)),
-                );
+                self.status
+                    .submit_message(format!("shell: {err}"), Some(Duration::from_secs(2)));
                 return Ok(true);
             }
             Ok(child) => {
@@ -486,14 +488,8 @@ impl App {
     }
 
     fn process_search(&mut self, pat: &str, escaped: bool) -> bool {
-        let pat = if escaped {
-            Cow::Owned(regex::escape(pat))
-        } else {
-            Cow::Borrowed(pat)
-        };
-        let regex = match RegexBuilder::new(&pat).case_insensitive(true).build() {
-            Ok(r) => r,
-            Err(err) => {
+        if let Some(viewer) = self.mux.active_viewer_mut() {
+            if let Err(err) = viewer.filter_search(pat, escaped) {
                 self.status.submit_message(
                     match err {
                         regex::Error::Syntax(err) => format!("{pat}: syntax ({err})"),
@@ -504,12 +500,7 @@ impl App {
                     },
                     Some(Duration::from_secs(2)),
                 );
-                return true;
-            }
-        };
-
-        if let Some(viewer) = self.mux.active_viewer_mut() {
-            viewer.filter_search(regex);
+            };
         }
 
         true
@@ -532,7 +523,7 @@ impl App {
             Some("pb" | "pbcopy") => {
                 let Some(clipboard) = self.clipboard.as_mut() else {
                     self.status.submit_message(
-                        format!("pbcopy: clipboard not available"),
+                        "pbcopy: clipboard not available".to_string(),
                         Some(Duration::from_secs(2)),
                     );
                     return true;
@@ -542,7 +533,7 @@ impl App {
                         Ok(text) => match clipboard.set_text(text) {
                             Ok(_) => {
                                 self.status.submit_message(
-                                    format!("pbcopy: copied to clipboard"),
+                                    "pbcopy: copied to clipboard".to_string(),
                                     Some(Duration::from_secs(2)),
                                 );
                             }

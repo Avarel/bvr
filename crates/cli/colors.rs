@@ -29,12 +29,12 @@ pub const SHELL_ACCENT: Color = Color::Indexed(161);
 
 pub const SEARCH_COLOR_LIST: &[Color] = &[
     Color::Red,
-    Color::Indexed(178), // Orange
-    Color::Yellow,
-    Color::Green,
-    Color::Cyan,
     Color::Indexed(33),
+    Color::Indexed(178),
     Color::Indexed(135),
+    Color::Green,
+    Color::Yellow,
+    Color::Cyan,
     Color::Magenta,
     Color::Indexed(21),
     Color::Indexed(43),

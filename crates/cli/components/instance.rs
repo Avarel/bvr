@@ -1,6 +1,6 @@
 use super::{
     cursor::{Cursor, CursorState, SelectionOrigin},
-    filters::{Compositor, Filter},
+    filters::{Compositor, FilterState},
     viewer::ViewCache,
     viewport::Viewport,
 };
@@ -9,7 +9,6 @@ use bitflags::bitflags;
 use bvr_core::SegBuffer;
 use bvr_core::{matches::CompositeStrategy, Result};
 use ratatui::style::Color;
-use regex::bytes::Regex;
 use std::fs::File;
 
 bitflags! {
@@ -138,9 +137,10 @@ impl Instance {
         (iter, last_line)
     }
 
-    pub fn filter_search(&mut self, regex: Regex) {
-        self.compositor.filter_search(&self.buf, regex);
+    pub fn filter_search(&mut self, pattern: &str, literal: bool)  -> Result<(), regex::Error> {
+        self.compositor.filter_search(&self.buf, pattern, literal)?;
         self.invalidate_cache();
+        Ok(())
     }
 
     pub fn name(&self) -> &str {
@@ -265,7 +265,7 @@ impl Instance {
         self.compositor
             .filters_mut()
             .get_mut(filter_index)
-            .map(Filter::toggle);
+            .map(FilterState::toggle);
         self.invalidate_cache();
     }
 

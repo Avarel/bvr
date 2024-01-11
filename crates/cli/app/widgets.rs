@@ -5,7 +5,7 @@ use super::{
 };
 use crate::components::{
     cursor::{Cursor, SelectionOrigin},
-    filters::{FilterData, FilterType},
+    filters::{FilterData, FilterType, Filter},
     instance::{Instance, LineData, LineType},
     mux::{MultiplexerApp, MultiplexerMode},
     prompt::PromptApp,
@@ -141,7 +141,8 @@ impl Widget for PromptWidget<'_> {
             Cursor::Selection(start, end, _) => vec![
                 indicator,
                 Span::raw(&cmd_buf[..start.saturating_sub(left)]),
-                Span::raw(&cmd_buf[start.saturating_sub(left)..end.saturating_sub(left)]).bg(colors::COMMAND_BAR_SELECT),
+                Span::raw(&cmd_buf[start.saturating_sub(left)..end.saturating_sub(left)])
+                    .bg(colors::COMMAND_BAR_SELECT),
                 Span::raw(&cmd_buf[end.saturating_sub(left)..]),
             ],
         }))
@@ -309,8 +310,19 @@ impl FilterLineWidget<'_> {
                 " ◯ "
             })
             .fg(self.inner.color),
-            Span::from(self.inner.name).fg(self.inner.color),
         ];
+
+        match self.inner.name {
+            Filter::Builtin(name) => v.push(Span::raw(*name).fg(self.inner.color)),
+            Filter::Literal(name, _) => {
+                v.push(Span::raw("Lit ").fg(colors::TEXT_INACTIVE));
+                v.push(Span::raw(name).fg(self.inner.color));
+            },
+            Filter::Regex(regex) => {
+                v.push(Span::raw("Rgx ").fg(colors::TEXT_INACTIVE));
+                v.push(Span::raw(regex.as_str()).fg(self.inner.color));
+            }
+        }
 
         if let Some(len) = self.inner.len {
             v.push(Span::from(format!(" {}", len)).fg(colors::TEXT_INACTIVE));

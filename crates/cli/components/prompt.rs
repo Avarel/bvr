@@ -1,6 +1,6 @@
 use super::{
     cursor::{Cursor, CursorState},
-    viewport::{Viewport, self},
+    viewport::Viewport,
 };
 use crate::direction::Direction;
 

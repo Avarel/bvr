@@ -7,7 +7,7 @@ use bitflags::bitflags;
 use bvr_core::{matches::CompositeStrategy, LineSet, SegBuffer};
 use lru::LruCache;
 use ratatui::style::Color;
-use regex::bytes::Regex;
+use regex::bytes::{Regex, RegexBuilder};
 use std::num::NonZeroUsize;
 
 #[derive(Clone)]
@@ -18,19 +18,47 @@ enum FilterRepr {
 }
 
 #[derive(Clone)]
-pub struct Filter {
+pub enum Filter {
+    Builtin(&'static str),
+    Literal(String, Regex),
+    Regex(Regex),
+}
+
+impl Filter {
+    pub fn build(pattern: &str, literal: bool) -> Result<(Self, Regex), regex::Error> {
+        if literal {
+            let regex = RegexBuilder::new(&regex::escape(pattern))
+                .case_insensitive(true)
+                .build()?;
+            Ok((Self::Literal(pattern.to_owned(), regex.clone()), regex))
+        } else {
+            let regex = RegexBuilder::new(pattern).case_insensitive(true).build()?;
+            Ok((Self::Regex(regex.clone()), regex))
+        }
+    }
+
+    pub fn regex(&self) -> Option<Regex> {
+        match self {
+            Self::Builtin(_) => None,
+            Self::Literal(_, regex) | Self::Regex(regex) => Some(regex.clone()),
+        }
+    }
+}
+
+#[derive(Clone)]
+pub struct FilterState {
     id: usize,
-    name: String,
+    filter: Filter,
     enabled: bool,
     color: Color,
     repr: FilterRepr,
 }
 
-impl Filter {
+impl FilterState {
     fn all() -> Self {
         Self {
             id: 0,
-            name: "All Lines".to_string(),
+            filter: Filter::Builtin("All Lines"),
             repr: FilterRepr::All,
             enabled: true,
             color: Color::White,
@@ -40,10 +68,20 @@ impl Filter {
     fn bookmark() -> Self {
         Self {
             id: 1,
-            name: "Bookmarks".to_string(),
+            filter: Filter::Builtin("Bookmarks"),
             enabled: true,
             color: colors::SELECT_ACCENT,
             repr: FilterRepr::Bookmarks(Bookmarks::new()),
+        }
+    }
+
+    fn from_filter(id: usize, filter: Filter, color: Color, repr: FilterRepr) -> Self {
+        Self {
+            id,
+            filter,
+            enabled: true,
+            color,
+            repr,
         }
     }
 
@@ -191,16 +229,16 @@ impl Bookmarks {
 
 #[derive(Clone)]
 pub struct Filters {
-    all: Filter,
-    bookmarks: Filter,
-    searches: Vec<Filter>,
+    all: FilterState,
+    bookmarks: FilterState,
+    searches: Vec<FilterState>,
 }
 
 impl Filters {
     fn new() -> Self {
         Self {
-            all: Filter::all(),
-            bookmarks: Filter::bookmark(),
+            all: FilterState::all(),
+            bookmarks: FilterState::bookmark(),
             searches: Vec::new(),
         }
     }
@@ -209,17 +247,17 @@ impl Filters {
         self.searches.len() + 2
     }
 
-    pub fn iter(&self) -> impl Iterator<Item = &Filter> {
+    pub fn iter(&self) -> impl Iterator<Item = &FilterState> {
         std::iter::once(&self.all)
             .chain(std::iter::once(&self.bookmarks))
             .chain(self.searches.iter())
     }
 
-    pub fn iter_active(&self) -> impl Iterator<Item = &Filter> {
+    pub fn iter_active(&self) -> impl Iterator<Item = &FilterState> {
         self.iter().filter(|filter| filter.is_enabled())
     }
 
-    pub fn get_mut(&mut self, index: usize) -> Option<&mut Filter> {
+    pub fn get_mut(&mut self, index: usize) -> Option<&mut FilterState> {
         match index {
             0 => Some(&mut self.all),
             1 => Some(&mut self.bookmarks),
@@ -262,7 +300,7 @@ bitflags! {
 
 pub struct FilterData<'a> {
     pub index: usize,
-    pub name: &'a str,
+    pub name: &'a Filter,
     pub color: Color,
     pub len: Option<usize>,
     pub ty: FilterType,
@@ -281,7 +319,7 @@ impl CacheKey {
         Self(filter_ids.into_boxed_slice(), strategy)
     }
 
-    fn contains(&self, filter: &Filter) -> bool {
+    fn contains(&self, filter: &FilterState) -> bool {
         self.0.contains(&filter.id)
     }
 }
@@ -339,7 +377,7 @@ impl Compositor {
             .take(self.viewport.height())
             .map(|(index, filter)| FilterData {
                 index,
-                name: &filter.name,
+                name: &filter.filter,
                 color: filter.color,
                 len: filter.len(),
                 ty: match self.cursor.state() {
@@ -412,11 +450,11 @@ impl Compositor {
     pub fn toggle_select_filters(&mut self) {
         match self.cursor.state() {
             Cursor::Singleton(i) => {
-                self.filters.get_mut(i).map(Filter::toggle);
+                self.filters.get_mut(i).map(FilterState::toggle);
             }
             Cursor::Selection(start, end, _) => {
                 for i in start..=end {
-                    self.filters.get_mut(i).map(Filter::toggle);
+                    self.filters.get_mut(i).map(FilterState::toggle);
                 }
             }
         }
@@ -471,19 +509,26 @@ impl Compositor {
         self.cursor.clamp(self.filters.len().saturating_sub(1));
     }
 
-    pub fn filter_search(&mut self, file: &SegBuffer, regex: Regex) {
+    pub fn filter_search(
+        &mut self,
+        file: &SegBuffer,
+        pattern: &str,
+        literal: bool,
+    ) -> Result<(), regex::Error> {
+        let (filter, regex) = Filter::build(pattern, literal)?;
+
         let id = self.id_source;
         self.id_source += 1;
-        self.filters.searches.push(Filter {
+        self.filters.searches.push(FilterState::from_filter(
             id,
-            name: regex.to_string(),
-            enabled: true,
-            repr: FilterRepr::Search(LineSet::search(file.segment_iter().unwrap(), regex)),
-            color: colors::SEARCH_COLOR_LIST
-                .get(self.filters.searches.len())
+            filter,
+            colors::SEARCH_COLOR_LIST
+                .get(self.filters.searches.len() % colors::SEARCH_COLOR_LIST.len())
                 .copied()
                 .unwrap_or(Color::White),
-        });
+            FilterRepr::Search(LineSet::search(file.segment_iter().unwrap(), regex)),
+        ));
+        Ok(())
     }
 
     pub fn compute_jump(&self, i: usize, direction: Direction) -> Option<usize> {
