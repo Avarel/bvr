@@ -43,7 +43,7 @@ pub type Terminal<'a> = ratatui::Terminal<Backend<'a>>;
 
 #[derive(PartialEq, Clone, Copy)]
 pub enum InputMode {
-    Command(PromptMode),
+    Prompt(PromptMode),
     Normal,
     Visual,
     Filter,
@@ -333,15 +333,15 @@ impl App {
                 }
                 CommandAction::Submit => {
                     let result = match self.mode {
-                        InputMode::Command(PromptMode::Command) => {
+                        InputMode::Prompt(PromptMode::Command) => {
                             let command = self.prompt.submit();
                             Ok(self.process_command(&command))
                         }
-                        InputMode::Command(mode @ (PromptMode::NewFilter | PromptMode::NewLit)) => {
+                        InputMode::Prompt(mode @ (PromptMode::NewFilter | PromptMode::NewLit)) => {
                             let command = self.prompt.take();
                             Ok(self.process_search(&command, matches!(mode, PromptMode::NewLit)))
                         }
-                        InputMode::Command(PromptMode::Shell) => {
+                        InputMode::Prompt(PromptMode::Shell) => {
                             let command = self.prompt.take();
                             self.process_shell(&command, true, terminal)
                         }
@@ -351,7 +351,7 @@ impl App {
                     return result;
                 }
                 CommandAction::History { direction } => {
-                    if self.mode != InputMode::Command(PromptMode::Command) {
+                    if self.mode != InputMode::Prompt(PromptMode::Command) {
                         return Ok(true);
                     }
                     match direction {
@@ -638,7 +638,7 @@ impl App {
                 if let Ok(line_number) = cmd.parse::<usize>() {
                     if let Some(viewer) = self.mux.active_viewer_mut() {
                         if let Some(idx) = viewer.nearest_index(line_number) {
-                            viewer.viewport_mut().jump_to(idx);
+                            viewer.viewport_mut().jump_vertically_to(idx);
                         }
                     }
                 } else {
@@ -668,7 +668,7 @@ impl App {
         let mut cursor = None;
         PromptWidget {
             mode: self.mode,
-            inner: &self.prompt,
+            inner: &mut self.prompt,
             cursor: &mut cursor,
         }
         .render(cmd_chunk, f.buffer_mut());

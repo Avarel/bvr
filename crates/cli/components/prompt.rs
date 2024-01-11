@@ -1,4 +1,7 @@
-use super::cursor::{Cursor, CursorState};
+use super::{
+    cursor::{Cursor, CursorState},
+    viewport::{Viewport, self},
+};
 use crate::direction::Direction;
 
 #[derive(Clone, Copy)]
@@ -27,6 +30,7 @@ pub struct PromptApp {
     index: usize,
     buf: String,
     cursor: CursorState,
+    viewport: Viewport,
 }
 
 impl PromptApp {
@@ -36,6 +40,7 @@ impl PromptApp {
             index: 0,
             buf: String::new(),
             cursor: CursorState::new(),
+            viewport: Viewport::new(),
         }
     }
 
@@ -51,6 +56,23 @@ impl PromptApp {
     #[inline(always)]
     pub fn cursor(&self) -> Cursor {
         self.cursor.state()
+    }
+
+    #[inline(always)]
+    pub fn viewport(&self) -> &Viewport {
+        &self.viewport
+    }
+
+    pub fn view_and_update(&mut self, viewport_width: usize) -> &str {
+        self.viewport.fit_view(1, viewport_width);
+        match self.cursor.state() {
+            Cursor::Singleton(i)
+            | Cursor::Selection(_, i, super::cursor::SelectionOrigin::Left)
+            | Cursor::Selection(i, _, super::cursor::SelectionOrigin::Right) => {
+                self.viewport.jump_horizontally_to(i);
+            }
+        }
+        &self.buf()[self.viewport.left()..]
     }
 
     pub fn move_cursor(&mut self, direction: Direction, movement: PromptMovement) {

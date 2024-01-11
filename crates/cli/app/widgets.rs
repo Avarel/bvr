@@ -28,10 +28,10 @@ impl<'a> Widget for StatusWidget<'a> {
             .bg(colors::STATUS_BAR);
 
         let accent_color = match self.input_mode {
-            InputMode::Command(PromptMode::Command) => colors::COMMAND_ACCENT,
-            InputMode::Command(PromptMode::Shell) => colors::SHELL_ACCENT,
-            InputMode::Command(PromptMode::NewFilter) => colors::FILTER_ACCENT,
-            InputMode::Command(PromptMode::NewLit) => colors::FILTER_ACCENT,
+            InputMode::Prompt(PromptMode::Command) => colors::COMMAND_ACCENT,
+            InputMode::Prompt(PromptMode::Shell) => colors::SHELL_ACCENT,
+            InputMode::Prompt(PromptMode::NewFilter) => colors::FILTER_ACCENT,
+            InputMode::Prompt(PromptMode::NewLit) => colors::FILTER_ACCENT,
             InputMode::Normal => colors::VIEWER_ACCENT,
             InputMode::Visual => colors::SELECT_ACCENT,
             InputMode::Filter => colors::FILTER_ACCENT,
@@ -41,10 +41,10 @@ impl<'a> Widget for StatusWidget<'a> {
 
         v.push(
             Span::from(match self.input_mode {
-                InputMode::Command(PromptMode::Command) => " COMMAND ",
-                InputMode::Command(PromptMode::Shell) => " SHELL ",
-                InputMode::Command(PromptMode::NewFilter) => " FILTER REGEX ",
-                InputMode::Command(PromptMode::NewLit) => " FILTER LITERAL ",
+                InputMode::Prompt(PromptMode::Command) => " COMMAND ",
+                InputMode::Prompt(PromptMode::Shell) => " SHELL ",
+                InputMode::Prompt(PromptMode::NewFilter) => " FILTER REGEX ",
+                InputMode::Prompt(PromptMode::NewLit) => " FILTER LITERAL ",
                 InputMode::Normal => " NORMAL ",
                 InputMode::Visual => " VISUAL ",
                 InputMode::Filter => " FILTER ",
@@ -110,14 +110,14 @@ impl<'a> Widget for StatusWidget<'a> {
 }
 
 pub struct PromptWidget<'a> {
-    pub inner: &'a PromptApp,
+    pub inner: &'a mut PromptApp,
     pub mode: InputMode,
     pub cursor: &'a mut Option<(u16, u16)>,
 }
 
 impl Widget for PromptWidget<'_> {
     fn render(self, area: Rect, buf: &mut Buffer) {
-        let InputMode::Command(mode) = self.mode else {
+        let InputMode::Prompt(mode) = self.mode else {
             const WIDGET_BLOCK: Block = Block::new().style(Style::new().bg(colors::BG));
             WIDGET_BLOCK.render(area, buf);
             return;
@@ -130,24 +130,28 @@ impl Widget for PromptWidget<'_> {
             PromptMode::Shell => Span::raw("!").fg(colors::SHELL_ACCENT),
         };
 
-        let input = Paragraph::new(Line::from(match self.inner.cursor() {
+        let cursor = self.inner.cursor();
+        let left = self.inner.viewport().left();
+        let cmd_buf = self.inner.view_and_update(usize::from(area.width));
+
+        let input = Paragraph::new(Line::from(match cursor {
             Cursor::Singleton(_) => {
-                vec![indicator, Span::raw(self.inner.buf())]
+                vec![indicator, Span::raw(cmd_buf)]
             }
             Cursor::Selection(start, end, _) => vec![
                 indicator,
-                Span::raw(&self.inner.buf()[..start]),
-                Span::raw(&self.inner.buf()[start..end]).bg(colors::COMMAND_BAR_SELECT),
-                Span::raw(&self.inner.buf()[end..]),
+                Span::raw(&cmd_buf[..start.saturating_sub(left)]),
+                Span::raw(&cmd_buf[start.saturating_sub(left)..end.saturating_sub(left)]).bg(colors::COMMAND_BAR_SELECT),
+                Span::raw(&cmd_buf[end.saturating_sub(left)..]),
             ],
         }))
         .bg(colors::BG);
 
-        let i = match self.inner.cursor() {
+        let i = match cursor {
             Cursor::Singleton(i)
             | Cursor::Selection(_, i, SelectionOrigin::Right)
             | Cursor::Selection(i, _, SelectionOrigin::Left) => {
-                self.inner.buf()[..i].chars().count()
+                cmd_buf[..i.saturating_sub(left)].chars().count()
             }
         };
         *self.cursor = Some((area.x + i as u16 + 1, area.y));

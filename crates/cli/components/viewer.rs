@@ -105,7 +105,7 @@ impl ViewCache {
         preprocess: impl FnOnce(&mut Self),
     ) -> (impl Iterator<Item = &CachedLine>, Option<usize>) {
         if self.follow_output {
-            self.curr_viewport.jump_to(self.end_index.saturating_sub(1));
+            self.curr_viewport.jump_vertically_to(self.end_index.saturating_sub(1));
         }
 
         self.curr_viewport.clamp(self.end_index);

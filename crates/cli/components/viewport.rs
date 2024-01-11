@@ -37,8 +37,23 @@ impl Viewport {
         self.height = height;
         self.width = width;
     }
+    
+    #[inline(always)]
+    pub fn left(&self) -> usize {
+        self.left
+    }
 
-    #[inline]
+    #[inline(always)]
+    pub(crate) fn top(&self) -> usize {
+        self.top
+    }
+
+    #[inline(always)]
+    pub fn right(&self) -> usize {
+        self.left + self.width
+    }
+
+    #[inline(always)]
     pub fn bottom(&self) -> usize {
         self.top + self.height
     }
@@ -56,7 +71,7 @@ impl Viewport {
         self.top = index;
     }
 
-    pub fn jump_to(&mut self, index: usize) {
+    pub fn jump_vertically_to(&mut self, index: usize) {
         if !(self.top..self.bottom()).contains(&index) {
             // height remains unchanged
             if self.top.abs_diff(index) < self.bottom().abs_diff(index) {
@@ -65,6 +80,19 @@ impl Viewport {
             } else {
                 // bring the bottom to current
                 self.top = index.saturating_sub(self.height).saturating_add(1);
+            }
+        }
+    }
+
+    pub fn jump_horizontally_to(&mut self, index: usize) {
+        if !(self.left..self.right()).contains(&index) {
+            // width remains unchanged
+            if self.left.abs_diff(index) < self.right().abs_diff(index) {
+                // bring the left to current
+                self.left = index;
+            } else {
+                // bring the right to current
+                self.left = index.saturating_sub(self.width).saturating_add(1);
             }
         }
     }
@@ -83,13 +111,4 @@ impl Viewport {
         }
     }
 
-    #[inline(always)]
-    pub fn left(&self) -> usize {
-        self.left
-    }
-
-    #[inline(always)]
-    pub(crate) fn top(&self) -> usize {
-        self.top
-    }
 }

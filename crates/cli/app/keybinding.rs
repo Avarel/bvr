@@ -162,7 +162,7 @@ impl Keybinding {
                 },
                 _ => None,
             },
-            InputMode::Command(_) => match event {
+            InputMode::Prompt(_) => match event {
                 Event::Paste(paste) => {
                     Some(Action::Command(CommandAction::Paste(std::mem::take(paste))))
                 }
@@ -220,23 +220,26 @@ impl Keybinding {
         match event {
             Event::Key(key) => match key.code {
                 KeyCode::Char(':') => {
-                    Some(Action::SwitchMode(InputMode::Command(PromptMode::Command)))
+                    Some(Action::SwitchMode(InputMode::Prompt(PromptMode::Command)))
                 }
-                KeyCode::Char('/') => Some(Action::SwitchMode(InputMode::Command(
+                KeyCode::Char('/') => Some(Action::SwitchMode(InputMode::Prompt(
                     PromptMode::NewFilter,
                 ))),
-                KeyCode::Char('!') => Some(Action::SwitchMode(InputMode::Command(
+                KeyCode::Char('!') => Some(Action::SwitchMode(InputMode::Prompt(
                     PromptMode::Shell,
                 ))),
                 KeyCode::Char('?') => {
-                    Some(Action::SwitchMode(InputMode::Command(PromptMode::NewLit)))
+                    Some(Action::SwitchMode(InputMode::Prompt(PromptMode::NewLit)))
                 }
-                KeyCode::Tab => Some(Action::SwitchMode(InputMode::Filter)),
-                KeyCode::Char(c @ ('`' | '~')) => Some(Action::Normal(NormalAction::SwitchActive(
-                    Direction::back_if(c == '~'),
+                KeyCode::Char('f') => Some(Action::SwitchMode(InputMode::Filter)),
+                KeyCode::Tab => Some(Action::Normal(NormalAction::SwitchActive(
+                    Direction::Next
                 ))),
                 KeyCode::Esc => Some(Action::SwitchMode(InputMode::Normal)),
                 KeyCode::Char('i') => Some(Action::SwitchMode(InputMode::Visual)),
+                KeyCode::BackTab => Some(Action::Normal(NormalAction::SwitchActive(
+                    Direction::Back
+                ))),
                 KeyCode::Char(c @ '1'..='9') => {
                     Some(Action::Normal(NormalAction::SwitchActiveIndex {
                         target_view: c as usize - '1' as usize,

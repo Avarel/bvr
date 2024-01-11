@@ -406,7 +406,7 @@ impl Compositor {
             | Cursor::Selection(i, _, SelectionOrigin::Left)
             | Cursor::Selection(_, i, SelectionOrigin::Right) => i,
         };
-        self.viewport.jump_to(i);
+        self.viewport.jump_vertically_to(i);
     }
 
     pub fn toggle_select_filters(&mut self) {

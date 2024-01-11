@@ -185,7 +185,7 @@ impl Instance {
             | Cursor::Selection(i, _, SelectionOrigin::Left)
             | Cursor::Selection(_, i, SelectionOrigin::Right) => i,
         };
-        self.view.viewport_mut().jump_to(i);
+        self.view.viewport_mut().jump_vertically_to(i);
     }
 
     pub fn toggle_bookmark_line_number(&mut self, line_number: usize) {
