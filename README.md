@@ -109,14 +109,14 @@ In this mode, you can toggle filters from bookmarks or searches to omit or inclu
 | `Space` and `Enter` | Toggle selected filter.                  |
 
 ### Mode-Independent
-| Keybinding      | Description                                  |
-| --------------- | -------------------------------------------- |
-| `Esc`           | Exit selection mode (enter normal mode).     |
-| `Ctr;` + `C`    | Exit the program.                            |
-| `:`             | Enter command mode.                          |
-| `/`             | Create a new filter.                         |
-| `?`             | Create a new filter (literal).               |
-| `v`             | Enter visual mode.                           |
-| `Tab`           | Enter filter mode.                           |
-| `` ` `` and `~` | Switch selected view (forward and backward). |
-| `1` .. `9`      | Switch selected view to the `n`th buffer.    |
+| Keybinding          | Description                                  |
+| ------------------- | -------------------------------------------- |
+| `Esc`               | Exit selection mode (enter normal mode).     |
+| `Ctr;` + `C`        | Exit the program.                            |
+| `:`                 | Enter command mode.                          |
+| `/`                 | Create a new filter.                         |
+| `?`                 | Create a new filter (literal).               |
+| `v`                 | Enter visual mode.                           |
+| `f`                 | Enter filter mode.                           |
+| `Tab` and `BackTab` | Switch selected view (forward and backward). |
+| `1` .. `9`          | Switch selected view to the `n`th buffer.    |

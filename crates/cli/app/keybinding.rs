@@ -236,7 +236,7 @@ impl Keybinding {
                     Direction::Next
                 ))),
                 KeyCode::Esc => Some(Action::SwitchMode(InputMode::Normal)),
-                KeyCode::Char('i') => Some(Action::SwitchMode(InputMode::Visual)),
+                KeyCode::Char('v') => Some(Action::SwitchMode(InputMode::Visual)),
                 KeyCode::BackTab => Some(Action::Normal(NormalAction::SwitchActive(
                     Direction::Back
                 ))),
