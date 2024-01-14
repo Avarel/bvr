@@ -1,5 +1,6 @@
 pub mod buf;
 
+mod collections;
 mod cowvec;
 
 pub mod err;
