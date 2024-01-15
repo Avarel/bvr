@@ -58,7 +58,7 @@ pub enum LineSet {
         buf: LineIndex,
     },
     Subset {
-        buf: CowVec<usize>,
+        buf: Arc<CowVec<usize>>,
         completed: Arc<AtomicBool>,
         // Optimization field for composite filters
         // Minimum length of all filters combined
@@ -70,7 +70,7 @@ impl LineSet {
     #[inline]
     pub fn empty() -> Self {
         Self::Subset {
-            buf: CowVec::empty(),
+            buf: Arc::new(CowVec::empty()),
             completed: Arc::new(AtomicBool::new(true)),
             min_len: 0,
         }
@@ -150,7 +150,7 @@ impl LineSet {
     pub(crate) fn into_inner(self) -> CowVec<usize> {
         match self {
             Self::All { .. } => unimplemented!(),
-            Self::Subset { buf, .. } => buf,
+            Self::Subset { buf, .. } => Arc::try_unwrap(buf).unwrap(),
         }
     }
 
@@ -272,7 +272,7 @@ impl From<Vec<usize>> for LineSet {
     fn from(vec: Vec<usize>) -> Self {
         Self::Subset {
             min_len: vec.len(),
-            buf: CowVec::from(vec),
+            buf: Arc::new(CowVec::from(vec)),
             completed: Arc::new(AtomicBool::new(true)),
         }
     }

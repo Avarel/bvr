@@ -109,7 +109,7 @@ impl<T> Drop for RawBuf<T> {
 
 /// An exclusive writer to a `CowVec<T>`.
 pub struct CowVecWriter<T> {
-    buf: Arc<ArcSwap<RawBuf<T>>>,
+    target: Arc<CowVec<T>>,
 }
 
 impl<T> CowVecWriter<T>
@@ -120,7 +120,7 @@ where
     ///
     /// This operation is O(1) amortized.
     pub fn push(&mut self, elem: T) {
-        let buf = self.buf.load();
+        let buf = self.target.buf.load();
         let len = buf.len.load(Ordering::Acquire);
         let cap = buf.cap;
 
@@ -147,7 +147,7 @@ where
         // in the case of concurrent readers. So we need to allocate a new
         // buffer every time.
 
-        let buf = self.buf.load();
+        let buf = self.target.buf.load();
         let len = buf.len.load(Ordering::Acquire);
 
         assert!(index <= len, "index out of bounds");
@@ -169,7 +169,7 @@ where
 
         *new_buf.len.get_mut() = len + 1;
 
-        self.buf.store(Arc::new(new_buf))
+        self.target.buf.store(Arc::new(new_buf))
     }
 
     /// Reserves capacity for at least `additional` more elements to be inserted
@@ -178,7 +178,7 @@ where
     /// capacity will be greater than or equal to `self.len() + additional`.
     /// Does nothing if capacity is already sufficient.
     pub fn reserve(&mut self, additional: usize) {
-        let buf = self.buf.load();
+        let buf = self.target.buf.load();
         let len = buf.len.load(Ordering::Acquire);
         if len.saturating_add(additional) > buf.cap {
             self.grow(&buf, len, Some(buf.cap + additional));
@@ -188,7 +188,7 @@ where
     /// Grow will return a buffer that the caller can write to.
     fn grow(&mut self, buf: &RawBuf<T>, len: usize, new_cap: Option<usize>) -> Arc<RawBuf<T>> {
         let ret = Arc::new(buf.allocate_copy(len, new_cap));
-        self.buf.store(ret.clone());
+        self.target.buf.store(ret.clone());
         ret
     }
 }
@@ -201,7 +201,7 @@ impl<T> Deref for CowVecWriter<T> {
         // Safety: the writer itself pins the buffer, so it is safe to read
         //         from it as long as the lifetime prevents the writer from
         //         growing reallocating the internal buffer.
-        let buf = self.buf.load();
+        let buf = self.target.buf.load();
         let len = buf.len.load(Ordering::SeqCst);
         unsafe { std::slice::from_raw_parts(buf.as_ptr(), len) }
     }
@@ -217,9 +217,8 @@ impl<T> Deref for CowVecWriter<T> {
 /// so changes are reflected across all clones.
 ///
 /// The `CowVecWriter<T>` type is an exclusive writer to a `CowVec<T>`.
-#[derive(Clone)]
 pub struct CowVec<T> {
-    buf: Arc<ArcSwap<RawBuf<T>>>,
+    buf: ArcSwap<RawBuf<T>>,
 }
 
 impl<T> CowVec<T> {
@@ -227,10 +226,11 @@ impl<T> CowVec<T> {
     ///
     /// The vector will not allocate until elements are pushed onto it.
     #[inline]
-    pub fn new() -> (Self, CowVecWriter<T>) {
+    pub fn new() -> (Arc<Self>, CowVecWriter<T>) {
         assert!(std::mem::size_of::<T>() != 0);
-        let buf = Arc::new(ArcSwap::from_pointee(RawBuf::empty()));
-        (Self { buf: buf.clone() }, CowVecWriter { buf })
+        let buf = ArcSwap::from_pointee(RawBuf::empty());
+        let buf = Arc::new(Self { buf });
+        (buf.clone(), CowVecWriter { target: buf })
     }
 
     /// Constructs a new, empty `CowVec<T>` with at least the specified capacity.
@@ -239,16 +239,17 @@ impl<T> CowVec<T> {
     /// reallocating. This method is allowed to allocate for more elements than
     /// `capacity`. If `capacity` is 0, the vector will not allocate.
     #[allow(dead_code)]
-    pub fn with_capacity(cap: usize) -> (Self, CowVecWriter<T>) {
+    pub fn with_capacity(cap: usize) -> (Arc<Self>, CowVecWriter<T>) {
         assert!(std::mem::size_of::<T>() != 0);
-        let buf = Arc::new(ArcSwap::from_pointee(RawBuf::allocate(0, cap)));
-        (Self { buf: buf.clone() }, CowVecWriter { buf })
+        let buf = ArcSwap::from_pointee(RawBuf::allocate(0, cap));
+        let buf = Arc::new(Self { buf });
+        (buf.clone(), CowVecWriter { target: buf })
     }
 
     /// Constructs a new, empty `CowVec<T>`.
     #[inline]
     pub fn empty() -> Self {
-        Self::new().0
+        Arc::try_unwrap(Self::new().0).unwrap()
     }
 
     /// Returns the number of elements in the vector, also referred to as its ‘length’.
@@ -318,12 +319,18 @@ impl<T: Copy> From<Vec<T>> for CowVec<T> {
         let (ptr, len, cap) = (me.as_mut_ptr(), me.len(), me.capacity());
 
         Self {
-            buf: Arc::new(ArcSwap::from_pointee(RawBuf::new(
+            buf: ArcSwap::from_pointee(RawBuf::new(
                 NonNull::new(ptr).unwrap(),
                 len,
                 cap,
-            ))),
+            )),
         }
+    }
+}
+
+impl<T> std::fmt::Debug for CowVec<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "[..]")
     }
 }
 

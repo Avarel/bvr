@@ -142,7 +142,7 @@ impl Drop for LineIndex {
 
 #[derive(Clone)]
 pub struct LineIndex {
-    buf: CowVec<u64>,
+    buf: Arc<CowVec<u64>>,
     completed: Arc<AtomicBool>,
 }
 
