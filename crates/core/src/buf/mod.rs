@@ -8,7 +8,7 @@ use crate::{index::BoxedStream, LineIndex, LineSet, Result};
 use lru::LruCache;
 use std::cell::RefCell;
 use std::fs::File;
-use std::io::{BufWriter, Cursor, Read, Write, Seek};
+use std::io::{BufWriter, Cursor, Read, Seek, Write};
 use std::num::NonZeroUsize;
 use std::ops::Range;
 use std::sync::mpsc::{Receiver, TryRecvError};
@@ -281,6 +281,12 @@ pub struct ContiguousSegmentIterator {
     imm_seg: Option<Arc<Segment>>,
 }
 
+pub struct ContiguousSegment<'a> {
+    pub index: &'a LineIndex,
+    pub range: Range<u64>,
+    pub data: &'a [u8],
+}
+
 impl ContiguousSegmentIterator {
     fn new(index: LineIndex, line_range: Range<usize>, repr: BufferRepr) -> Self {
         Self {
@@ -307,7 +313,7 @@ impl ContiguousSegmentIterator {
     /// - `Some((&Idx, u64, &[u8]))`: A tuple containing the index, starting data
     ///                               position, and a slice of the buffer data.
     /// - `None`: If there are no more buffers available.
-    pub fn next_buf(&mut self) -> Option<(&LineIndex, u64, &[u8])> {
+    pub fn next_buf(&mut self) -> Option<ContiguousSegment> {
         if self.line_range.is_empty() {
             return None;
         }
@@ -338,7 +344,11 @@ impl ContiguousSegmentIterator {
             self.imm_buf.extend_from_slice(&seg_last[..end as usize]);
 
             self.line_range.start += 1;
-            Some((&self.index, curr_line_data_start, &self.imm_buf))
+            Some(ContiguousSegment {
+                index: &self.index,
+                range: curr_line_data_start..curr_line_data_end,
+                data: &self.imm_buf,
+            })
         } else {
             let curr_seg_data_start = curr_line_seg_start as u64 * Segment::MAX_SIZE;
             let curr_seg_data_end = curr_seg_data_start + Segment::MAX_SIZE;
@@ -361,11 +371,11 @@ impl ContiguousSegmentIterator {
             let segment = self.imm_seg.insert(segment);
 
             // line must end at the boundary
-            Some((
-                &self.index,
-                curr_line_data_start,
-                &segment[range.start as usize..range.end as usize],
-            ))
+            Some(ContiguousSegment {
+                index: &self.index,
+                range: curr_line_data_start..line_end_data_start,
+                data: &segment[range.start as usize..range.end as usize],
+            })
         }
     }
 }
@@ -441,13 +451,13 @@ mod test {
 
         let mut total_bytes = 0;
         let mut validate_buf = Vec::new();
-        while let Some((_, start, buf)) = buffers.next_buf() {
+        while let Some(segment) = buffers.next_buf() {
             // Validate that the specialized slice reader and normal sequential reads are consistent
-            assert_eq!(start, total_bytes);
-            total_bytes += buf.len() as u64;
-            validate_buf.resize(buf.len(), 0);
+            assert_eq!(segment.range.start, total_bytes);
+            total_bytes += segment.data.len() as u64;
+            validate_buf.resize(segment.data.len(), 0);
             reader.read_exact(&mut validate_buf)?;
-            assert_eq!(buf, validate_buf);
+            assert_eq!(segment.data, validate_buf);
         }
         assert_eq!(total_bytes, file_len);
 

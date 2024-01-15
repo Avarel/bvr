@@ -27,7 +27,6 @@ bitflags! {
 pub struct LineData<'a> {
     pub line_number: usize,
     pub data: &'a str,
-    pub start: usize,
     pub color: Color,
     pub ty: LineType,
 }
@@ -98,7 +97,6 @@ impl Instance {
             .fit_view(viewport_height, viewport_width);
         self.view.set_end_index(self.visible_line_count());
 
-        let left = self.view.viewport().left();
         let cursor_state = self.cursor.state();
 
         let (cache, last_line) = self
@@ -107,7 +105,6 @@ impl Instance {
         let iter = cache.map(move |line| LineData {
             line_number: line.line_number,
             data: line.data.as_str(),
-            start: left,
             color: line.color,
             ty: match cursor_state {
                 Cursor::Singleton(i) => {

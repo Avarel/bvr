@@ -196,6 +196,7 @@ pub struct ViewerWidget<'a> {
 
 impl ViewerWidget<'_> {
     fn render(self, area: Rect, buf: &mut Buffer, handle: &mut MouseHandler) {
+        let left = self.viewer.viewport().left();
         let (view, last_line) = self
             .viewer
             .update_and_view(area.height as usize, area.width as usize);
@@ -206,12 +207,12 @@ impl ViewerWidget<'_> {
                 .unwrap_or_default()
                 .max(4)
         });
-
         let mut itoa_buf = itoa::Buffer::new();
         let mut y = area.y;
         for line in view.into_iter() {
             ViewerLineWidget {
                 view_index: self.view_index,
+                start: left,
                 line: Some(line),
                 show_selection: self.show_selection,
                 itoa_buf: &mut itoa_buf,
@@ -224,6 +225,7 @@ impl ViewerWidget<'_> {
         while y < area.bottom() {
             ViewerLineWidget {
                 view_index: self.view_index,
+                start: left,
                 line: None,
                 show_selection: self.show_selection,
                 itoa_buf: &mut itoa_buf,
@@ -345,6 +347,7 @@ struct ViewerLineWidget<'a> {
     itoa_buf: &'a mut itoa::Buffer,
     show_selection: bool,
     gutter_size: Option<u16>,
+    start: usize,
     line: Option<LineData<'a>>,
 }
 
@@ -400,7 +403,7 @@ impl ViewerLineWidget<'_> {
                 }
 
                 let mut chars = line.data.chars();
-                for _ in 0..line.start {
+                for _ in 0..self.start {
                     chars.next();
                 }
 

@@ -15,15 +15,15 @@ struct LineMatchRemote {
 
 impl LineMatchRemote {
     pub fn search(mut self, mut iter: ContiguousSegmentIterator, regex: Regex) -> Result<()> {
-        while let Some((idx, start, buf)) = iter.next_buf() {
+        while let Some(segment) = iter.next_buf() {
             if !self.has_readers() {
                 break;
             }
 
             let mut buf_start = 0;
-            while let Some(res) = regex.find_at(buf, buf_start as usize) {
-                let match_start = res.start() as u64 + start;
-                let line_number = idx.line_of_data(match_start).unwrap();
+            while let Some(res) = regex.find_at(segment.data, buf_start as usize) {
+                let match_start = res.start() as u64 + segment.range.start;
+                let line_number = segment.index.line_of_data(match_start).unwrap();
 
                 if let Some(&last) = self.buf.last() {
                     if last == line_number {
@@ -34,7 +34,7 @@ impl LineMatchRemote {
 
                 self.buf.push(line_number);
 
-                buf_start = idx.data_of_line(line_number + 1).unwrap() - start;
+                buf_start = segment.index.data_of_line(line_number + 1).unwrap() - segment.range.start;
             }
         }
         Ok(())
