@@ -9,33 +9,41 @@ use super::ftree::FenwickTree;
 use std::cmp::Ordering;
 
 #[derive(Clone, Debug, PartialEq)]
-struct Node<T>
-where
-    T: Copy,
-{
-    pub inner: Vec<T>,
-    pub max: Option<T>,
+struct Node<T> {
+    inner: Vec<T>,
+    max: Option<T>,
+    iterations: usize,
 }
 
-impl<T: Copy> Default for Node<T> {
+impl<T: Ord + Copy> PartialOrd for Node<T> {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        self.max.partial_cmp(&other.max)
+    }
+}
+
+impl<T: Ord + Copy> Default for Node<T> {
     fn default() -> Self {
         Self {
             inner: Vec::new(),
             max: None,
+            iterations: 10,
         }
     }
 }
 
-impl<T: Ord + Copy + Copy> Node<T> {
-    pub fn new() -> Self {
+impl<T: Ord + Copy> Node<T> {
+    pub fn new(capacity: usize) -> Self {
         Self {
-            inner: Vec::new(),
+            inner: Vec::with_capacity(capacity),
+            iterations: capacity.ilog2() as usize,
             ..Default::default()
         }
     }
+
     pub fn get(&self, index: usize) -> Option<T> {
         self.inner.get(index).copied()
     }
+
     pub fn split_off(&mut self, cutoff: usize) -> Self {
         let latter_inner = self.inner.split_off(cutoff);
 
@@ -45,21 +53,53 @@ impl<T: Ord + Copy + Copy> Node<T> {
         Self {
             inner: latter_inner,
             max: latter_inner_max,
+            iterations: self.iterations,
         }
     }
+
     pub fn halve(&mut self) -> Self {
         self.split_off(DEFAULT_CUTOFF)
     }
+
     pub fn len(&self) -> usize {
         self.inner.len()
     }
+
     pub fn insert(&mut self, value: T) -> bool {
-        match self.inner.binary_search(&value) {
+        fn search<T: PartialOrd>(
+            haystack: &[T],
+            needle: &T,
+            iterations: usize,
+        ) -> Result<usize, usize> {
+            let mut left = 0;
+            let mut right = haystack.len();
+            for _ in 0..iterations {
+                if left >= right {
+                    break;
+                }
+
+                let mid = left + (right - left) / 2;
+
+                let mid_value = unsafe { haystack.get_unchecked(mid) };
+
+                if mid_value < needle {
+                    left = mid + 1;
+                } else if mid_value > needle {
+                    right = mid;
+                } else {
+                    return Ok(mid);
+                }
+            }
+
+            Err(left)
+        }
+
+        match search(&self.inner, &value, self.iterations) {
             Ok(_) => return false,
             Err(idx) => {
-                let some_value = Some(value);
-                if some_value > self.max {
-                    self.max = some_value;
+                let some_value = Some(&value);
+                if some_value > self.max.as_ref() {
+                    self.max = some_value.cloned()
                 }
 
                 self.inner.insert(idx, value);
@@ -68,15 +108,13 @@ impl<T: Ord + Copy + Copy> Node<T> {
 
         true
     }
+
     pub fn delete(&mut self, index: usize) -> T {
         self.inner.remove(index)
     }
 }
 
 /// An ordered set based on a B-Tree.
-///
-/// See [`BTreeMap`]'s documentation for a detailed discussion of this collection's performance
-/// benefits and drawbacks.
 ///
 /// It is a logic error for an item to be modified in such a way that the item's ordering relative
 /// to any other item, as determined by the [`Ord`] trait, changes while it is in the set. This is
@@ -99,29 +137,12 @@ impl<T: Ord + Copy + Copy> Node<T> {
 ///
 /// let set = BTreeSet::from_iter([1, 2, 3]);
 /// ```
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[derive(Clone)]
-pub struct BTreeSet<T>
-where
-    T: Copy + Ord,
-{
+pub struct BTreeSet<T> {
     inner: im::Vector<Node<T>>,
     index: FenwickTree<usize>,
+    node_capacity: usize,
     len: usize,
-}
-
-fn partition_point<T: Clone, P>(v: &im::Vector<T>, mut pred: P) -> usize
-where
-    P: FnMut(&T) -> bool,
-{
-    v.binary_search_by(|x| {
-        if pred(x) {
-            Ordering::Less
-        } else {
-            Ordering::Greater
-        }
-    })
-    .unwrap_or_else(|i| i)
 }
 
 impl<T: Copy + Ord> BTreeSet<T> {
@@ -159,12 +180,26 @@ impl<T: Copy + Ord> BTreeSet<T> {
     /// assert!(v.is_empty());
     /// ```
     pub fn clear(&mut self) {
-        self.inner = im::vector![Node::new()];
+        self.inner = im::vector![Node::new(self.node_capacity)];
         self.index = FenwickTree::from_iter(vec![0]);
         self.len = 0;
     }
 
     fn locate_node(&self, value: T) -> usize {
+        fn partition_point<T: Clone, P>(v: &im::Vector<T>, mut pred: P) -> usize
+        where
+            P: FnMut(&T) -> bool,
+        {
+            v.binary_search_by(|x| {
+                if pred(x) {
+                    Ordering::Less
+                } else {
+                    Ordering::Greater
+                }
+            })
+            .unwrap_or_else(|i| i)
+        }
+
         let mut node_idx = partition_point(&self.inner, |node| {
             if let Some(max) = node.max {
                 return max < value;
@@ -186,7 +221,9 @@ impl<T: Copy + Ord> BTreeSet<T> {
 
     fn locate_value(&self, value: T) -> (usize, usize) {
         let node_idx = self.locate_node(value);
-        let position_within_node = self.inner[node_idx].inner.partition_point(|&item| item < value);
+        let position_within_node = self.inner[node_idx]
+            .inner
+            .partition_point(|&item| item < value);
 
         (node_idx, position_within_node)
     }
@@ -810,9 +847,12 @@ where
     T: Copy + Ord,
 {
     fn default() -> Self {
+        let node_capacity = DEFAULT_INNER_SIZE;
+
         Self {
-            inner: im::vector![Node::new()],
+            inner: im::vector![Node::new(node_capacity)],
             index: FenwickTree::from_iter(vec![0]),
+            node_capacity,
             len: 0,
         }
     }
@@ -916,10 +956,12 @@ mod tests {
 
         let expected_output: Vec<isize> = vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
 
-        let actual_node = input.iter().fold(Node::new(), |mut acc, curr| {
-            acc.insert(curr);
-            acc
-        });
+        let actual_node = input
+            .iter()
+            .fold(Node::new(DEFAULT_INNER_SIZE), |mut acc, curr| {
+                acc.insert(curr);
+                acc
+            });
 
         let actual_output: Vec<isize> = actual_node.inner.into_iter().copied().collect();
 
@@ -934,7 +976,7 @@ mod tests {
             input.push(item.clone() as isize);
         }
 
-        let mut former_node = Node::new();
+        let mut former_node = Node::new(DEFAULT_INNER_SIZE);
         input.iter().for_each(|item| {
             former_node.insert(item.clone());
         });
