@@ -5,7 +5,7 @@ use super::{
 };
 use crate::components::{
     cursor::{Cursor, SelectionOrigin},
-    filters::{FilterData, FilterType, Filter},
+    filters::{Filter, FilterData, FilterType},
     instance::{Instance, LineData, LineType},
     mux::{MultiplexerApp, MultiplexerMode},
     prompt::PromptApp,
@@ -14,6 +14,7 @@ use crate::components::{
 use crate::{app::actions::VisualAction, colors, direction::Direction};
 use crossterm::event::MouseEventKind;
 use ratatui::{prelude::*, widgets::*};
+use regex::bytes::Regex;
 
 pub struct StatusWidget<'a> {
     input_mode: InputMode,
@@ -22,36 +23,24 @@ pub struct StatusWidget<'a> {
 }
 
 impl<'a> Widget for StatusWidget<'a> {
-    fn render(self, area: Rect, buf: &mut Buffer) {
+    fn render(self, mut area: Rect, buf: &mut Buffer) {
         const STATUS_BAR_STYLE: Style = Style::new()
             .fg(colors::STATUS_BAR_TEXT)
             .bg(colors::STATUS_BAR);
 
-        let accent_color = match self.input_mode {
-            InputMode::Prompt(PromptMode::Command) => colors::COMMAND_ACCENT,
-            InputMode::Prompt(PromptMode::Shell) => colors::SHELL_ACCENT,
-            InputMode::Prompt(PromptMode::NewFilter) => colors::FILTER_ACCENT,
-            InputMode::Prompt(PromptMode::NewLit) => colors::FILTER_ACCENT,
-            InputMode::Normal => colors::VIEWER_ACCENT,
-            InputMode::Visual => colors::SELECT_ACCENT,
-            InputMode::Filter => colors::FILTER_ACCENT,
+        let (accent_color, mode_name) = match self.input_mode {
+            InputMode::Prompt(PromptMode::Command) => (colors::COMMAND_ACCENT, " COMMAND "),
+            InputMode::Prompt(PromptMode::Shell) => (colors::SHELL_ACCENT, " SHELL "),
+            InputMode::Prompt(PromptMode::NewFilter) => (colors::FILTER_ACCENT, " FILTER (RGX) "),
+            InputMode::Prompt(PromptMode::NewLit) => (colors::FILTER_ACCENT, " FILTER (LIT) "),
+            InputMode::Normal => (colors::VIEWER_ACCENT, " NORMAL "),
+            InputMode::Visual => (colors::SELECT_ACCENT, " VISUAL "),
+            InputMode::Filter => (colors::FILTER_ACCENT, " FILTER "),
         };
 
         let mut v = Vec::new();
 
-        v.push(
-            Span::from(match self.input_mode {
-                InputMode::Prompt(PromptMode::Command) => " COMMAND ",
-                InputMode::Prompt(PromptMode::Shell) => " SHELL ",
-                InputMode::Prompt(PromptMode::NewFilter) => " FILTER REGEX ",
-                InputMode::Prompt(PromptMode::NewLit) => " FILTER LITERAL ",
-                InputMode::Normal => " NORMAL ",
-                InputMode::Visual => " VISUAL ",
-                InputMode::Filter => " FILTER ",
-            })
-            .fg(colors::WHITE)
-            .bg(accent_color),
-        );
+        v.push(Span::from(mode_name).fg(colors::WHITE).bg(accent_color));
         v.push(Span::raw(" "));
 
         if let Some(viewer) = &self.viewer {
@@ -192,6 +181,7 @@ pub struct ViewerWidget<'a> {
     viewer: &'a mut Instance,
     show_selection: bool,
     gutter: bool,
+    regex: Option<&'a Regex>,
 }
 
 impl ViewerWidget<'_> {
@@ -207,6 +197,7 @@ impl ViewerWidget<'_> {
                 .unwrap_or_default()
                 .max(4)
         });
+
         let mut itoa_buf = itoa::Buffer::new();
         let mut y = area.y;
         for line in view.into_iter() {
@@ -217,6 +208,7 @@ impl ViewerWidget<'_> {
                 show_selection: self.show_selection,
                 itoa_buf: &mut itoa_buf,
                 gutter_size,
+                regex: self.regex,
             }
             .render(Rect::new(area.x, y, area.width, 1), buf, handle);
             y += 1;
@@ -230,6 +222,7 @@ impl ViewerWidget<'_> {
                 show_selection: self.show_selection,
                 itoa_buf: &mut itoa_buf,
                 gutter_size,
+                regex: self.regex,
             }
             .render(Rect::new(area.x, y, area.width, 1), buf, handle);
             y += 1;
@@ -319,7 +312,7 @@ impl FilterLineWidget<'_> {
             Filter::Literal(name, _) => {
                 v.push(Span::raw("Lit ").fg(colors::TEXT_INACTIVE));
                 v.push(Span::raw(name).fg(self.inner.color));
-            },
+            }
             Filter::Regex(regex) => {
                 v.push(Span::raw("Rgx ").fg(colors::TEXT_INACTIVE));
                 v.push(Span::raw(regex.as_str()).fg(self.inner.color));
@@ -344,11 +337,13 @@ impl FilterLineWidget<'_> {
 
 struct ViewerLineWidget<'a> {
     view_index: usize,
+    line: Option<LineData<'a>>,
+
     itoa_buf: &'a mut itoa::Buffer,
     show_selection: bool,
     gutter_size: Option<u16>,
     start: usize,
-    line: Option<LineData<'a>>,
+    regex: Option<&'a Regex>,
 }
 
 impl ViewerLineWidget<'_> {
@@ -368,9 +363,8 @@ impl ViewerLineWidget<'_> {
         }
     }
 
-    fn render(self, area: Rect, buf: &mut Buffer, handle: &mut MouseHandler) {
+    fn split_line(&self, area: Rect) -> [Rect; 3] {
         const SPECIAL_SIZE: u16 = 3;
-
         let gutter_size = self.gutter_size.unwrap_or(0);
         let mut gutter_chunk = area;
         gutter_chunk.width = gutter_size;
@@ -383,50 +377,60 @@ impl ViewerLineWidget<'_> {
         data_chunk.x += gutter_size + SPECIAL_SIZE;
         data_chunk.width = data_chunk.width.saturating_sub(gutter_size + SPECIAL_SIZE);
 
+        [gutter_chunk, type_chunk, data_chunk]
+    }
+
+    fn render(self, area: Rect, buf: &mut Buffer, handle: &mut MouseHandler) {
+        let [gutter_chunk, type_chunk, data_chunk] = self.split_line(area);
+
+        let Some(line) = &self.line else {
+            let ln = Paragraph::new("~")
+                .alignment(Alignment::Right)
+                .fg(colors::GUTTER_TEXT);
+
+            ln.render(gutter_chunk, buf);
+            return;
+        };
+
         if self.gutter_size.is_some() {
-            if let Some(line) = &self.line {
-                let ln_str = self.itoa_buf.format(line.line_number + 1);
-                let ln = Paragraph::new(ln_str).alignment(Alignment::Right).fg(
-                    if line.ty.contains(LineType::Bookmarked) {
-                        colors::SELECT_ACCENT
-                    } else {
-                        colors::GUTTER_TEXT
-                    },
-                );
+            let ln_str = self.itoa_buf.format(line.line_number + 1);
+            let ln = Paragraph::new(ln_str).alignment(Alignment::Right).fg(
+                if line.ty.contains(LineType::Bookmarked) {
+                    colors::SELECT_ACCENT
+                } else {
+                    colors::GUTTER_TEXT
+                },
+            );
 
-                ln.render(gutter_chunk, buf);
-
-                if self.show_selection {
-                    Paragraph::new(Self::gutter_selection(line))
-                        .fg(colors::SELECT_ACCENT)
-                        .render(type_chunk, buf);
-                }
-
-                let mut chars = line.data.chars();
-                for _ in 0..self.start {
-                    chars.next();
-                }
-
-                let data = Paragraph::new(chars.as_str()).fg(line.color);
-                data.render(data_chunk, buf);
-            } else {
-                let ln = Paragraph::new("~")
-                    .alignment(Alignment::Right)
-                    .fg(colors::GUTTER_TEXT);
-
-                ln.render(gutter_chunk, buf);
-            }
-        } else if let Some(line) = &self.line {
-            if self.show_selection {
-                Paragraph::new(Self::gutter_selection(line))
-                    .fg(colors::SELECT_ACCENT)
-                    .render(type_chunk, buf);
-            }
-
-            let data = Paragraph::new(line.data).fg(line.color);
-
-            data.render(data_chunk, buf);
+            ln.render(gutter_chunk, buf);
         }
+
+        if self.show_selection {
+            Paragraph::new(Self::gutter_selection(line))
+                .fg(colors::SELECT_ACCENT)
+                .render(type_chunk, buf);
+        }
+
+        let mut chars = line.data.chars();
+        for _ in 0..self.start {
+            chars.next();
+        }
+        let data = chars.as_str();
+
+        if let Some(m) = self.regex.and_then(|r| r.find(line.data.as_bytes())) {
+            let start = m.start().saturating_sub(self.start);
+            let end = m.end().saturating_sub(self.start);
+            let spans = vec![
+                Span::raw(&data[..start]),
+                Span::raw(&data[start..end]).fg(colors::FILTER_ACCENT),
+                Span::raw(&data[end..]),
+            ];
+            Paragraph::new(Line::from(spans))
+        } else {
+            Paragraph::new(data)
+        }
+        .fg(line.color)
+        .render(data_chunk, buf);
 
         if let Some(line) = self.line {
             handle.on_mouse(area, |event| match event.kind {
@@ -482,6 +486,7 @@ pub struct MultiplexerWidget<'a> {
     pub status: &'a mut StatusApp,
     pub mode: InputMode,
     pub gutter: bool,
+    pub regex: Option<&'a Regex>,
 }
 
 impl MultiplexerWidget<'_> {
@@ -559,6 +564,7 @@ impl MultiplexerWidget<'_> {
                             show_selection: self.mode == InputMode::Visual,
                             viewer,
                             gutter: self.gutter,
+                            regex: self.regex,
                         }
                         .render(
                             fixup_chunk(i != 0, viewer_chunk),
@@ -603,6 +609,7 @@ impl MultiplexerWidget<'_> {
                         show_selection: self.mode == InputMode::Visual,
                         viewer,
                         gutter: self.gutter,
+                        regex: self.regex,
                     }
                     .render(viewer_chunk, buf, handler);
                     EdgeBg(true).render(viewer_chunk, buf)

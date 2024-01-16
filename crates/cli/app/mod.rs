@@ -28,6 +28,7 @@ use crossterm::terminal::{
     disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
 };
 use ratatui::{prelude::*, widgets::Widget};
+use regex::bytes::{Regex, RegexBuilder};
 use std::{
     borrow::Cow,
     collections::VecDeque,
@@ -73,6 +74,7 @@ pub struct App {
     clipboard: Option<Clipboard>,
     gutter: bool,
     action_queue: VecDeque<Action>,
+    regex_cache: Option<(String, Option<Regex>)>,
 }
 
 impl App {
@@ -86,6 +88,7 @@ impl App {
             clipboard: Clipboard::new().ok(),
             gutter: true,
             action_queue: VecDeque::new(),
+            regex_cache: None,
         }
     }
 
@@ -648,11 +651,39 @@ impl App {
     fn ui(&mut self, f: &mut Frame, handler: &mut MouseHandler) {
         let [mux_chunk, cmd_chunk] = MultiplexerWidget::split_bottom(f.size(), 1);
 
+        match self.mode {
+            InputMode::Prompt(a @ (PromptMode::NewFilter | PromptMode::NewLit)) => {
+                let pattern = self.prompt.buf();
+
+                let pattern_mismatch = self
+                    .regex_cache
+                    .as_ref()
+                    .map(|(p, _)| p != pattern)
+                    .unwrap_or(true);
+
+                if pattern_mismatch {
+                    let regex = if a == PromptMode::NewLit {
+                        RegexBuilder::new(&regex::escape(pattern))
+                            .case_insensitive(true)
+                            .build().ok()
+                    } else {
+                        RegexBuilder::new(pattern).case_insensitive(true).build().ok()
+                    };
+
+                    self.regex_cache = Some((pattern.to_owned(), regex))
+                }
+            }
+            InputMode::Prompt(_) | InputMode::Normal | InputMode::Visual | InputMode::Filter => {
+                self.regex_cache = None;
+            }
+        }
+
         MultiplexerWidget {
             mux: &mut self.mux,
             status: &mut self.status,
             mode: self.mode,
             gutter: self.gutter,
+            regex: self.regex_cache.as_ref().and_then(|(_, r)| r.as_ref()),
         }
         .render(mux_chunk, f.buffer_mut(), handler);
 
