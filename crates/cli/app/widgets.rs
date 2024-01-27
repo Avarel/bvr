@@ -422,7 +422,7 @@ impl ViewerLineWidget<'_> {
             let end = m.end().saturating_sub(self.start);
             let spans = vec![
                 Span::raw(&data[..start]),
-                Span::raw(&data[start..end]).fg(colors::FILTER_ACCENT),
+                Span::raw(&data[start..end]).bg(colors::FILTER_ACCENT),
                 Span::raw(&data[end..]),
             ];
             Paragraph::new(Line::from(spans))
@@ -547,6 +547,8 @@ impl MultiplexerWidget<'_> {
                         .render(tab_chunk, buf, handler);
 
                         let mut viewer_chunk = view_chunk;
+                        
+                        EdgeBg(i == 0).render(viewer_chunk, buf);
 
                         if self.mode == InputMode::Filter {
                             let [view_chunk, filter_chunk] =
@@ -571,7 +573,6 @@ impl MultiplexerWidget<'_> {
                             buf,
                             handler,
                         );
-                        EdgeBg(i == 0).render(viewer_chunk, buf)
                     }
                 }
                 MultiplexerMode::Tabs => {
@@ -593,6 +594,8 @@ impl MultiplexerWidget<'_> {
                     let active = self.mux.active();
                     let viewer = self.mux.active_viewer_mut().unwrap();
                     let mut viewer_chunk = view_chunk;
+                    
+                    EdgeBg(true).render(viewer_chunk, buf);
 
                     if self.mode == InputMode::Filter {
                         let [view_chunk, filter_chunk] =
@@ -612,7 +615,6 @@ impl MultiplexerWidget<'_> {
                         regex: self.regex,
                     }
                     .render(viewer_chunk, buf, handler);
-                    EdgeBg(true).render(viewer_chunk, buf)
                 }
             }
         } else {

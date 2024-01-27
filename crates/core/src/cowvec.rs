@@ -249,7 +249,8 @@ impl<T> CowVec<T> {
     /// Constructs a new, empty `CowVec<T>`.
     #[inline]
     pub fn empty() -> Self {
-        Arc::try_unwrap(Self::new().0).unwrap()
+        let buf = Self::new().0;
+        Arc::try_unwrap(buf).unwrap()
     }
 
     /// Returns the number of elements in the vector, also referred to as its ‘length’.
