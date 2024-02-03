@@ -15,6 +15,7 @@ use crate::{app::actions::VisualAction, colors, direction::Direction};
 use crossterm::event::MouseEventKind;
 use ratatui::{prelude::*, widgets::*};
 use regex::bytes::Regex;
+use std::sync::OnceLock;
 
 pub struct StatusWidget<'a> {
     input_mode: InputMode,
@@ -23,7 +24,7 @@ pub struct StatusWidget<'a> {
 }
 
 impl<'a> Widget for StatusWidget<'a> {
-    fn render(self, mut area: Rect, buf: &mut Buffer) {
+    fn render(self, area: Rect, buf: &mut Buffer) {
         const STATUS_BAR_STYLE: Style = Style::new()
             .fg(colors::STATUS_BAR_TEXT)
             .bg(colors::STATUS_BAR);
@@ -107,8 +108,10 @@ pub struct PromptWidget<'a> {
 impl Widget for PromptWidget<'_> {
     fn render(self, area: Rect, buf: &mut Buffer) {
         let InputMode::Prompt(mode) = self.mode else {
-            const WIDGET_BLOCK: Block = Block::new().style(Style::new().bg(colors::BG));
-            WIDGET_BLOCK.render(area, buf);
+            static WIDGET_BLOCK: OnceLock<Block> = OnceLock::new();
+            WIDGET_BLOCK.get_or_init(|| {
+                Block::new().style(Style::new().bg(colors::BG))
+            }).render(area, buf);
             return;
         };
 
@@ -157,9 +160,11 @@ pub struct FilterViewerWidget<'a> {
 
 impl FilterViewerWidget<'_> {
     fn render(self, area: Rect, buf: &mut Buffer, handle: &mut MouseHandler) {
-        const WIDGET_BLOCK: Block = Block::new().style(Style::new().bg(colors::STATUS_BAR));
-        WIDGET_BLOCK.render(area, buf);
-
+        static WIDGET_BLOCK: OnceLock<Block> = OnceLock::new();
+        WIDGET_BLOCK.get_or_init(|| {
+            Block::new().style(Style::new().bg(colors::STATUS_BAR))
+        }).render(area, buf);
+        
         let mut y = area.y;
         for filter in self
             .viewer
@@ -246,11 +251,14 @@ struct EdgeBg(bool);
 impl EdgeBg {
     fn render(self, area: Rect, buf: &mut Buffer) {
         if self.0 {
-            const WIDGET_BLOCK: Block = Block::new()
-                .border_style(Style::new().fg(colors::BLACK).bg(colors::GUTTER_BG))
-                .style(Style::new().bg(colors::BG));
-
-            WIDGET_BLOCK.render(area, buf);
+            static WIDGET_BLOCK: OnceLock<Block> = OnceLock::new();
+            WIDGET_BLOCK
+                .get_or_init(|| {
+                    Block::new()
+                        .border_style(Style::new().fg(colors::BLACK).bg(colors::GUTTER_BG))
+                        .style(Style::new().bg(colors::BG))
+                })
+                .render(area, buf);
         } else {
             const SET_LEFT_EDGE: symbols::border::Set = symbols::border::Set {
                 top_left: "",
@@ -263,13 +271,16 @@ impl EdgeBg {
                 horizontal_bottom: "",
             };
 
-            const LINE_WIDGET_BLOCK: Block = Block::new()
-                .border_set(SET_LEFT_EDGE)
-                .border_style(Style::new().fg(colors::BLACK).bg(colors::GUTTER_BG))
-                .borders(Borders::LEFT)
-                .style(Style::new().bg(colors::BG));
-
-            LINE_WIDGET_BLOCK.render(area, buf);
+            static LINE_WIDGET_BLOCK: OnceLock<Block> = OnceLock::new();
+            LINE_WIDGET_BLOCK
+                .get_or_init(|| {
+                    Block::new()
+                        .border_set(SET_LEFT_EDGE)
+                        .border_style(Style::new().fg(colors::BLACK).bg(colors::GUTTER_BG))
+                        .borders(Borders::LEFT)
+                        .style(Style::new().bg(colors::BG))
+                })
+                .render(area, buf);
         }
     }
 }
@@ -547,7 +558,7 @@ impl MultiplexerWidget<'_> {
                         .render(tab_chunk, buf, handler);
 
                         let mut viewer_chunk = view_chunk;
-                        
+
                         EdgeBg(i == 0).render(viewer_chunk, buf);
 
                         if self.mode == InputMode::Filter {
@@ -594,7 +605,7 @@ impl MultiplexerWidget<'_> {
                     let active = self.mux.active();
                     let viewer = self.mux.active_viewer_mut().unwrap();
                     let mut viewer_chunk = view_chunk;
-                    
+
                     EdgeBg(true).render(viewer_chunk, buf);
 
                     if self.mode == InputMode::Filter {
@@ -618,8 +629,10 @@ impl MultiplexerWidget<'_> {
                 }
             }
         } else {
-            const BG_BLOCK: Block = Block::new().style(Style::new().bg(colors::BG));
-            BG_BLOCK.render(mux_chunk, buf);
+            const BG_BLOCK: OnceLock<Block> = OnceLock::new();
+            BG_BLOCK.get_or_init(|| {
+                Block::new().style(Style::new().bg(colors::BG))
+            }).render(mux_chunk, buf);
         }
 
         StatusWidget {

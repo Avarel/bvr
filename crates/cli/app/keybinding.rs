@@ -136,9 +136,9 @@ impl Keybinding {
                             ViewDelta::Number(1)
                         },
                     })),
-                    KeyCode::Char(c @ ('p' | 'n' | 'P' | 'N')) => {
+                    KeyCode::Char(c @ ('n' | 'N')) => {
                         Some(Action::Visual(VisualAction::Move {
-                            direction: Direction::back_if(c.to_ascii_lowercase() == 'p'),
+                            direction: Direction::back_if(c.to_ascii_lowercase() == 'N'),
                             delta: ViewDelta::Match,
                             select: key.modifiers.contains(KeyModifiers::SHIFT),
                         }))

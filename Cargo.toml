@@ -33,7 +33,7 @@ bvr-core = { version = "0.0.4", path = "crates/core" }
 anyhow = "1.0"
 clap = { version = "4.4", features = ["cargo", "derive"] }
 crossterm = { version = "0.27", features = ["use-dev-tty"] }
-ratatui = "0.25"
+ratatui = "0.26"
 regex = "1.10"
 itoa = "1.0"
 bitflags = "2.4"
