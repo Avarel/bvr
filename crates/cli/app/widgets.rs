@@ -192,6 +192,7 @@ pub struct ViewerWidget<'a> {
 impl ViewerWidget<'_> {
     fn render(self, area: Rect, buf: &mut Buffer, handle: &mut MouseHandler) {
         let left = self.viewer.viewport().left();
+        let search_color = self.viewer.color_selector().peek_color();
         let (view, last_line) = self
             .viewer
             .update_and_view(area.height as usize, area.width as usize);
@@ -209,6 +210,7 @@ impl ViewerWidget<'_> {
             ViewerLineWidget {
                 view_index: self.view_index,
                 start: left,
+                search_color,
                 line: Some(line),
                 show_selection: self.show_selection,
                 itoa_buf: &mut itoa_buf,
@@ -223,6 +225,7 @@ impl ViewerWidget<'_> {
             ViewerLineWidget {
                 view_index: self.view_index,
                 start: left,
+                search_color,
                 line: None,
                 show_selection: self.show_selection,
                 itoa_buf: &mut itoa_buf,
@@ -350,6 +353,7 @@ struct ViewerLineWidget<'a> {
     view_index: usize,
     line: Option<LineData<'a>>,
 
+    search_color: Color,
     itoa_buf: &'a mut itoa::Buffer,
     show_selection: bool,
     gutter_size: Option<u16>,
@@ -433,7 +437,7 @@ impl ViewerLineWidget<'_> {
             let end = m.end().saturating_sub(self.start);
             let spans = vec![
                 Span::raw(&data[..start]),
-                Span::raw(&data[start..end]).bg(colors::FILTER_ACCENT),
+                Span::raw(&data[start..end]).bg(self.search_color),
                 Span::raw(&data[end..]),
             ];
             Paragraph::new(Line::from(spans))

@@ -492,7 +492,7 @@ impl App {
 
     fn process_search(&mut self, pat: &str, escaped: bool) -> bool {
         if let Some(viewer) = self.mux.active_viewer_mut() {
-            if let Err(err) = viewer.filter_search(pat, escaped) {
+            if let Err(err) = viewer.add_search_filter(pat, escaped) {
                 self.status.submit_message(
                     match err {
                         regex::Error::Syntax(err) => format!("{pat}: syntax ({err})"),

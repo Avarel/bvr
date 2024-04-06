@@ -4,7 +4,7 @@ use super::{
     viewer::ViewCache,
     viewport::Viewport,
 };
-use crate::{app::ViewDelta, direction::Direction};
+use crate::{app::ViewDelta, colors::ColorSelector, direction::Direction};
 use bitflags::bitflags;
 use bvr_core::SegBuffer;
 use bvr_core::{matches::CompositeStrategy, Result};
@@ -37,6 +37,7 @@ pub struct Instance {
     cursor: CursorState,
     compositor: Compositor,
     view: ViewCache,
+    color_selector: ColorSelector,
 }
 
 impl Instance {
@@ -49,6 +50,7 @@ impl Instance {
             name,
             buf,
             cursor: CursorState::new(),
+            color_selector: ColorSelector::DEFAULT,
         }
     }
 
@@ -78,6 +80,10 @@ impl Instance {
 
     pub fn compositor_mut(&mut self) -> &mut Compositor {
         &mut self.compositor
+    }
+
+    pub fn color_selector(&self) -> &ColorSelector {
+        &self.color_selector
     }
 
     pub fn nearest_index(&self, line_number: usize) -> Option<usize> {
@@ -134,8 +140,9 @@ impl Instance {
         (iter, last_line)
     }
 
-    pub fn filter_search(&mut self, pattern: &str, literal: bool)  -> Result<(), regex::Error> {
-        self.compositor.filter_search(&self.buf, pattern, literal)?;
+    pub fn add_search_filter(&mut self, pattern: &str, literal: bool) -> Result<(), regex::Error> {
+        self.compositor
+            .add_search_filter(&self.buf, pattern, literal, &mut self.color_selector)?;
         self.invalidate_cache();
         Ok(())
     }
@@ -194,7 +201,6 @@ impl Instance {
             .clamp(self.visible_line_count().saturating_sub(1));
         self.view.set_end_index(self.visible_line_count());
 
-        self.compositor.invalidate_bookmark_cache();
         if self
             .compositor
             .filters()
@@ -240,7 +246,6 @@ impl Instance {
         self.cursor
             .clamp(self.visible_line_count().saturating_sub(1));
         self.view.set_end_index(self.visible_line_count());
-        self.compositor.invalidate_bookmark_cache();
         if needs_invalidation {
             self.invalidate_cache();
         } else {
