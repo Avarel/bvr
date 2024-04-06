@@ -103,7 +103,7 @@ impl ViewCache {
         &mut self,
         buf: &SegBuffer,
         preprocess: impl FnOnce(&mut Self),
-    ) -> (impl Iterator<Item = &CachedLine>, Option<usize>) {
+    ) -> impl Iterator<Item = &CachedLine> {
         if self.follow_output {
             self.curr_viewport.jump_vertically_to(self.end_index.saturating_sub(1));
         }
@@ -144,10 +144,7 @@ impl ViewCache {
 
         preprocess(self);
 
-        (
-            self.cache.iter(),
-            self.cache.back().map(|line| line.line_number),
-        )
+        self.cache.iter()
     }
 
     pub fn color_cache(&mut self, compositor: &Compositor) {

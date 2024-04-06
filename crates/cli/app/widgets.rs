@@ -5,8 +5,8 @@ use super::{
 };
 use crate::components::{
     cursor::{Cursor, SelectionOrigin},
-    filters::{Filter, FilterData, FilterType},
-    instance::{Instance, LineData, LineType},
+    filters::{FilterRenderData, FilterType, Mask},
+    instance::{Instance, LineRenderData, LineType},
     mux::{MultiplexerApp, MultiplexerMode},
     prompt::PromptApp,
     status::StatusApp,
@@ -109,9 +109,9 @@ impl Widget for PromptWidget<'_> {
     fn render(self, area: Rect, buf: &mut Buffer) {
         let InputMode::Prompt(mode) = self.mode else {
             static WIDGET_BLOCK: OnceLock<Block> = OnceLock::new();
-            WIDGET_BLOCK.get_or_init(|| {
-                Block::new().style(Style::new().bg(colors::BG))
-            }).render(area, buf);
+            WIDGET_BLOCK
+                .get_or_init(|| Block::new().style(Style::new().bg(colors::BG)))
+                .render(area, buf);
             return;
         };
 
@@ -161,10 +161,10 @@ pub struct FilterViewerWidget<'a> {
 impl FilterViewerWidget<'_> {
     fn render(self, area: Rect, buf: &mut Buffer, handle: &mut MouseHandler) {
         static WIDGET_BLOCK: OnceLock<Block> = OnceLock::new();
-        WIDGET_BLOCK.get_or_init(|| {
-            Block::new().style(Style::new().bg(colors::STATUS_BAR))
-        }).render(area, buf);
-        
+        WIDGET_BLOCK
+            .get_or_init(|| Block::new().style(Style::new().bg(colors::STATUS_BAR)))
+            .render(area, buf);
+
         let mut y = area.y;
         for filter in self
             .viewer
@@ -193,18 +193,15 @@ impl ViewerWidget<'_> {
     fn render(self, area: Rect, buf: &mut Buffer, handle: &mut MouseHandler) {
         let left = self.viewer.viewport().left();
         let search_color = self.viewer.color_selector().peek_color();
-        let (view, last_line) = self
-            .viewer
-            .update_and_view(area.height as usize, area.width as usize);
-
-        let gutter_size = self.gutter.then(|| {
-            last_line
-                .map(|ln| ((ln + 1).ilog10() + 1) as u16)
-                .unwrap_or_default()
-                .max(4)
-        });
+        let gutter_size = self
+            .gutter
+            .then(|| ((self.viewer.visible_line_count() + 1).ilog10() as u16).max(4));
 
         let mut itoa_buf = itoa::Buffer::new();
+
+        let view = self
+            .viewer
+            .update_and_view(area.height as usize, area.width as usize);
         let mut y = area.y;
         for line in view.into_iter() {
             ViewerLineWidget {
@@ -290,11 +287,11 @@ impl EdgeBg {
 
 struct FilterLineWidget<'a> {
     view_index: usize,
-    inner: &'a FilterData<'a>,
+    inner: &'a FilterRenderData<'a>,
 }
 
 impl FilterLineWidget<'_> {
-    fn gutter_selection(line: &FilterData) -> &'static str {
+    fn gutter_selection(line: &FilterRenderData) -> &'static str {
         if line.ty.contains(FilterType::Origin) {
             if line.ty.contains(FilterType::OriginStart) {
                 " ┌"
@@ -322,12 +319,12 @@ impl FilterLineWidget<'_> {
         ];
 
         match self.inner.name {
-            Filter::Builtin(name) => v.push(Span::raw(*name).fg(self.inner.color)),
-            Filter::Literal(name, _) => {
+            Mask::Builtin(name) => v.push(Span::raw(*name).fg(self.inner.color)),
+            Mask::Literal(name, _) => {
                 v.push(Span::raw("Lit ").fg(colors::TEXT_INACTIVE));
                 v.push(Span::raw(name).fg(self.inner.color));
             }
-            Filter::Regex(regex) => {
+            Mask::Regex(regex) => {
                 v.push(Span::raw("Rgx ").fg(colors::TEXT_INACTIVE));
                 v.push(Span::raw(regex.as_str()).fg(self.inner.color));
             }
@@ -351,7 +348,7 @@ impl FilterLineWidget<'_> {
 
 struct ViewerLineWidget<'a> {
     view_index: usize,
-    line: Option<LineData<'a>>,
+    line: Option<LineRenderData<'a>>,
 
     search_color: Color,
     itoa_buf: &'a mut itoa::Buffer,
@@ -362,7 +359,7 @@ struct ViewerLineWidget<'a> {
 }
 
 impl ViewerLineWidget<'_> {
-    fn gutter_selection(line: &LineData) -> &'static str {
+    fn gutter_selection(line: &LineRenderData) -> &'static str {
         if line.ty.contains(LineType::Origin) {
             if line.ty.contains(LineType::OriginStart) {
                 "┌ "
@@ -430,11 +427,11 @@ impl ViewerLineWidget<'_> {
         for _ in 0..self.start {
             chars.next();
         }
-        let data = chars.as_str();
+        let data = &chars.as_str()[..(data_chunk.width as usize).min(line.data.len().saturating_sub(self.start))];
 
-        if let Some(m) = self.regex.and_then(|r| r.find(line.data.as_bytes())) {
-            let start = m.start().saturating_sub(self.start);
-            let end = m.end().saturating_sub(self.start);
+        if let Some(m) = self.regex.and_then(|r| r.find(data.as_bytes())) {
+            let start = m.start();
+            let end = m.end();
             let spans = vec![
                 Span::raw(&data[..start]),
                 Span::raw(&data[start..end]).bg(self.search_color),
@@ -634,9 +631,9 @@ impl MultiplexerWidget<'_> {
             }
         } else {
             const BG_BLOCK: OnceLock<Block> = OnceLock::new();
-            BG_BLOCK.get_or_init(|| {
-                Block::new().style(Style::new().bg(colors::BG))
-            }).render(mux_chunk, buf);
+            BG_BLOCK
+                .get_or_init(|| Block::new().style(Style::new().bg(colors::BG)))
+                .render(mux_chunk, buf);
         }
 
         StatusWidget {

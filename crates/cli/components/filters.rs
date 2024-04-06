@@ -9,20 +9,20 @@ use ratatui::style::Color;
 use regex::bytes::{Regex, RegexBuilder};
 
 #[derive(Clone)]
-enum FilterRepr {
+enum FilterData {
     All,
     Bookmarks(Bookmarks),
     Search(LineSet),
 }
 
 #[derive(Clone)]
-pub enum Filter {
+pub enum Mask {
     Builtin(&'static str),
     Literal(String, Regex),
     Regex(Regex),
 }
 
-impl Filter {
+impl Mask {
     pub fn build(pattern: &str, literal: bool) -> Result<(Self, Regex), regex::Error> {
         if literal {
             let regex = RegexBuilder::new(&regex::escape(pattern))
@@ -45,17 +45,17 @@ impl Filter {
 
 #[derive(Clone)]
 pub struct FilterState {
-    filter: Filter,
+    mask: Mask,
     enabled: bool,
     color: Color,
-    repr: FilterRepr,
+    data: FilterData,
 }
 
 impl FilterState {
     fn all() -> Self {
         Self {
-            filter: Filter::Builtin("All Lines"),
-            repr: FilterRepr::All,
+            mask: Mask::Builtin("All Lines"),
+            data: FilterData::All,
             enabled: true,
             color: Color::White,
         }
@@ -63,19 +63,19 @@ impl FilterState {
 
     fn bookmark() -> Self {
         Self {
-            filter: Filter::Builtin("Bookmarks"),
+            mask: Mask::Builtin("Bookmarks"),
             enabled: true,
             color: colors::SELECT_ACCENT,
-            repr: FilterRepr::Bookmarks(Bookmarks::new()),
+            data: FilterData::Bookmarks(Bookmarks::new()),
         }
     }
 
-    fn from_filter(filter: Filter, color: Color, repr: FilterRepr) -> Self {
+    fn from_filter(filter: Mask, color: Color, repr: FilterData) -> Self {
         Self {
-            filter,
+            mask: filter,
             enabled: true,
             color,
-            repr,
+            data: repr,
         }
     }
 
@@ -92,50 +92,50 @@ impl FilterState {
     }
 
     pub fn has_line(&self, line_number: usize) -> bool {
-        match &self.repr {
-            FilterRepr::All => true,
-            FilterRepr::Bookmarks(lines) => lines.has_line(line_number),
-            FilterRepr::Search(lines) => lines.has_line(line_number),
+        match &self.data {
+            FilterData::All => true,
+            FilterData::Bookmarks(lines) => lines.has_line(line_number),
+            FilterData::Search(lines) => lines.has_line(line_number),
         }
     }
 
     fn len(&self) -> Option<usize> {
-        match &self.repr {
-            FilterRepr::All => None,
-            FilterRepr::Bookmarks(lines) => Some(lines.len()),
-            FilterRepr::Search(lines) => Some(lines.len()),
+        match &self.data {
+            FilterData::All => None,
+            FilterData::Bookmarks(lines) => Some(lines.len()),
+            FilterData::Search(lines) => Some(lines.len()),
         }
     }
 
     pub fn as_line_matches(&self) -> LineSet {
-        match &self.repr {
-            FilterRepr::All => LineSet::empty(),
-            FilterRepr::Bookmarks(mask) => mask.lines.clone().into(),
-            FilterRepr::Search(mask) => mask.clone(),
+        match &self.data {
+            FilterData::All => LineSet::empty(),
+            FilterData::Bookmarks(mask) => mask.lines.clone().into(),
+            FilterData::Search(mask) => mask.clone(),
         }
     }
 
     pub fn nearest_forward(&self, line_number: usize) -> Option<usize> {
-        match &self.repr {
-            FilterRepr::All => None,
-            FilterRepr::Bookmarks(mask) => mask.nearest_forward(line_number),
-            FilterRepr::Search(mask) => mask.nearest_forward(line_number),
+        match &self.data {
+            FilterData::All => None,
+            FilterData::Bookmarks(mask) => mask.nearest_forward(line_number),
+            FilterData::Search(mask) => mask.nearest_forward(line_number),
         }
     }
 
     pub fn nearest_backward(&self, line_number: usize) -> Option<usize> {
-        match &self.repr {
-            FilterRepr::All => None,
-            FilterRepr::Bookmarks(mask) => mask.nearest_backward(line_number),
-            FilterRepr::Search(mask) => mask.nearest_backward(line_number),
+        match &self.data {
+            FilterData::All => None,
+            FilterData::Bookmarks(mask) => mask.nearest_backward(line_number),
+            FilterData::Search(mask) => mask.nearest_backward(line_number),
         }
     }
 
     pub fn is_complete(&self) -> bool {
-        match &self.repr {
-            FilterRepr::All => true,
-            FilterRepr::Bookmarks(_) => true,
-            FilterRepr::Search(lines) => lines.is_complete(),
+        match &self.data {
+            FilterData::All => true,
+            FilterData::Bookmarks(_) => true,
+            FilterData::Search(lines) => lines.is_complete(),
         }
     }
 }
@@ -261,16 +261,16 @@ impl Filters {
 
     pub fn bookmarks(&self) -> &Bookmarks {
         // Safety: by construction
-        match &self.bookmarks.repr {
-            FilterRepr::Bookmarks(bookmarks) => bookmarks,
+        match &self.bookmarks.data {
+            FilterData::Bookmarks(bookmarks) => bookmarks,
             _ => unsafe { std::hint::unreachable_unchecked() },
         }
     }
 
     pub fn bookmarks_mut(&mut self) -> &mut Bookmarks {
         // Safety: by construction
-        match &mut self.bookmarks.repr {
-            FilterRepr::Bookmarks(bookmarks) => bookmarks,
+        match &mut self.bookmarks.data {
+            FilterData::Bookmarks(bookmarks) => bookmarks,
             _ => unsafe { std::hint::unreachable_unchecked() },
         }
     }
@@ -292,36 +292,16 @@ bitflags! {
     }
 }
 
-pub struct FilterData<'a> {
+pub struct FilterRenderData<'a> {
     pub index: usize,
-    pub name: &'a Filter,
+    pub name: &'a Mask,
     pub color: Color,
     pub len: Option<usize>,
     pub ty: FilterType,
 }
 
-// #[derive(Clone, Hash, PartialEq, Eq)]
-// struct CacheKey(Box<[usize]>, CompositeStrategy);
-
-// impl CacheKey {
-//     fn new(filters: &Filters, strategy: CompositeStrategy) -> Self {
-//         let mut filter_ids = filters
-//             .iter_active()
-//             .map(|filter| filter.id)
-//             .collect::<Vec<_>>();
-//         filter_ids.sort();
-//         Self(filter_ids.into_boxed_slice(), strategy)
-//     }
-
-//     fn contains(&self, filter: &FilterState) -> bool {
-//         self.0.contains(&filter.id)
-//     }
-// }
-
 pub struct Compositor {
-    // id_source: usize,
     all_composite: LineSet,
-    // composite_cache: LruCache<CacheKey, LineSet>,
     strategy: CompositeStrategy,
     viewport: Viewport,
     cursor: CursorState,
@@ -331,9 +311,7 @@ pub struct Compositor {
 impl Compositor {
     pub fn new(buf: &SegBuffer) -> Self {
         Self {
-            // id_source: 2,
             all_composite: buf.all_line_matches(),
-            // composite_cache: LruCache::new(NonZeroUsize::new(8).unwrap()),
             viewport: Viewport::new(),
             cursor: CursorState::new(),
             filters: Filters::new(),
@@ -360,7 +338,7 @@ impl Compositor {
     pub fn update_and_filter_view(
         &mut self,
         viewport_height: usize,
-    ) -> impl Iterator<Item = FilterData> {
+    ) -> impl Iterator<Item = FilterRenderData> {
         self.viewport.fit_view(viewport_height, 0);
         self.viewport.clamp(self.filters.len());
 
@@ -369,9 +347,9 @@ impl Compositor {
             .enumerate()
             .skip(self.viewport.top())
             .take(self.viewport.height())
-            .map(|(index, filter)| FilterData {
+            .map(|(index, filter)| FilterRenderData {
                 index,
-                name: &filter.filter,
+                name: &filter.mask,
                 color: filter.color,
                 len: filter.len(),
                 ty: match self.cursor.state() {
@@ -477,12 +455,12 @@ impl Compositor {
         literal: bool,
         color_selector: &mut colors::ColorSelector,
     ) -> Result<(), regex::Error> {
-        let (filter, regex) = Filter::build(pattern, literal)?;
+        let (filter, regex) = Mask::build(pattern, literal)?;
 
         self.filters.searches.push(FilterState::from_filter(
             filter,
             color_selector.next_color(),
-            FilterRepr::Search(LineSet::search(file.segment_iter().unwrap(), regex)),
+            FilterData::Search(LineSet::search(file.segment_iter().unwrap(), regex)),
         ));
         Ok(())
     }

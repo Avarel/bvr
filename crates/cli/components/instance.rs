@@ -24,7 +24,7 @@ bitflags! {
 }
 
 #[derive(Clone)]
-pub struct LineData<'a> {
+pub struct LineRenderData<'a> {
     pub line_number: usize,
     pub data: &'a str,
     pub color: Color,
@@ -97,7 +97,7 @@ impl Instance {
         &mut self,
         viewport_height: usize,
         viewport_width: usize,
-    ) -> (impl Iterator<Item = LineData<'_>>, Option<usize>) {
+    ) -> impl Iterator<Item = LineRenderData<'_>> {
         self.view
             .viewport_mut()
             .fit_view(viewport_height, viewport_width);
@@ -105,10 +105,10 @@ impl Instance {
 
         let cursor_state = self.cursor.state();
 
-        let (cache, last_line) = self
+        let cache = self
             .view
             .cache_view(&self.buf, |cache| cache.color_cache(&self.compositor));
-        let iter = cache.map(move |line| LineData {
+        cache.map(move |line| LineRenderData {
             line_number: line.line_number,
             data: line.data.as_str(),
             color: line.color,
@@ -136,8 +136,7 @@ impl Instance {
             } else {
                 LineType::None
             },
-        });
-        (iter, last_line)
+        })
     }
 
     pub fn add_search_filter(&mut self, pattern: &str, literal: bool) -> Result<(), regex::Error> {
