@@ -2,11 +2,11 @@ use super::{
     cursor::{Cursor, CursorState, SelectionOrigin},
     viewport::Viewport,
 };
-use crate::{app::ViewDelta, colors, direction::Direction};
+use crate::{app::ViewDelta, colors, direction::Direction, regex_compile};
 use bitflags::bitflags;
 use bvr_core::{matches::CompositeStrategy, LineSet, SegBuffer};
 use ratatui::style::Color;
-use regex::bytes::{Regex, RegexBuilder};
+use regex::bytes::Regex;
 
 #[derive(Clone)]
 enum FilterData {
@@ -25,12 +25,10 @@ pub enum Mask {
 impl Mask {
     pub fn build(pattern: &str, literal: bool) -> Result<(Self, Regex), regex::Error> {
         if literal {
-            let regex = RegexBuilder::new(&regex::escape(pattern))
-                .case_insensitive(true)
-                .build()?;
+            let regex = regex_compile(&regex::escape(pattern))?;
             Ok((Self::Literal(pattern.to_owned(), regex.clone()), regex))
         } else {
-            let regex = RegexBuilder::new(pattern).case_insensitive(true).build()?;
+            let regex = regex_compile(pattern)?;
             Ok((Self::Regex(regex.clone()), regex))
         }
     }
@@ -44,14 +42,30 @@ impl Mask {
 }
 
 #[derive(Clone)]
-pub struct FilterState {
+pub struct Filter {
     mask: Mask,
     enabled: bool,
     color: Color,
     data: FilterData,
 }
 
-impl FilterState {
+#[derive(Clone, serde::Serialize, serde::Deserialize)]
+pub struct RegexExport(String);
+
+#[derive(Clone, serde::Serialize, serde::Deserialize)]
+pub enum MaskExport {
+    Literal(String, RegexExport),
+    Regex(RegexExport),
+}
+
+#[derive(Clone, serde::Serialize, serde::Deserialize)]
+pub struct FilterExport {
+    mask: MaskExport,
+    enabled: bool,
+    color: Color,
+}
+
+impl Filter {
     fn all() -> Self {
         Self {
             mask: Mask::Builtin("All Lines"),
@@ -76,6 +90,38 @@ impl FilterState {
             enabled: true,
             color,
             data: repr,
+        }
+    }
+
+    pub fn to_export(&self) -> FilterExport {
+        FilterExport {
+            mask: match &self.mask {
+                Mask::Literal(pattern, regex) => {
+                    MaskExport::Literal(pattern.clone(), RegexExport(regex.to_string()))
+                }
+                Mask::Regex(regex) => MaskExport::Regex(RegexExport(regex.to_string())),
+                Mask::Builtin(_) => panic!("cannot serialize builtin mask"),
+            },
+            enabled: self.enabled,
+            color: self.color,
+        }
+    }
+
+    pub fn from_export(file: &SegBuffer, export: FilterExport) -> Self {
+        let mask = match export.mask {
+            MaskExport::Literal(pattern, RegexExport(ref regex)) => {
+                Mask::Literal(pattern, regex_compile(regex).unwrap())
+            }
+            MaskExport::Regex(RegexExport(ref regex)) => Mask::Regex(regex_compile(regex).unwrap()),
+        };
+        Self {
+            data: FilterData::Search(LineSet::search(
+                file.segment_iter().unwrap(),
+                mask.regex().unwrap(),
+            )),
+            mask,
+            enabled: export.enabled,
+            color: export.color,
         }
     }
 
@@ -223,39 +269,39 @@ impl Bookmarks {
 
 #[derive(Clone)]
 pub struct Filters {
-    all: FilterState,
-    bookmarks: FilterState,
-    searches: Vec<FilterState>,
+    all: Filter,
+    bookmarks: Filter,
+    user_filters: Vec<Filter>,
 }
 
 impl Filters {
     fn new() -> Self {
         Self {
-            all: FilterState::all(),
-            bookmarks: FilterState::bookmark(),
-            searches: Vec::new(),
+            all: Filter::all(),
+            bookmarks: Filter::bookmark(),
+            user_filters: Vec::new(),
         }
     }
 
     pub fn len(&self) -> usize {
-        self.searches.len() + 2
+        self.user_filters.len() + 2
     }
 
-    pub fn iter(&self) -> impl Iterator<Item = &FilterState> {
+    pub fn iter(&self) -> impl Iterator<Item = &Filter> {
         std::iter::once(&self.all)
             .chain(std::iter::once(&self.bookmarks))
-            .chain(self.searches.iter())
+            .chain(self.user_filters.iter())
     }
 
-    pub fn iter_active(&self) -> impl Iterator<Item = &FilterState> {
+    pub fn iter_active(&self) -> impl Iterator<Item = &Filter> {
         self.iter().filter(|filter| filter.is_enabled())
     }
 
-    pub fn get_mut(&mut self, index: usize) -> Option<&mut FilterState> {
+    pub fn get_mut(&mut self, index: usize) -> Option<&mut Filter> {
         match index {
             0 => Some(&mut self.all),
             1 => Some(&mut self.bookmarks),
-            _ => self.searches.get_mut(index - 2),
+            _ => self.user_filters.get_mut(index - 2),
         }
     }
 
@@ -277,7 +323,7 @@ impl Filters {
 
     pub fn clear(&mut self) {
         self.bookmarks_mut().clear();
-        self.searches.clear();
+        self.user_filters.clear();
     }
 }
 
@@ -416,11 +462,11 @@ impl Compositor {
     pub fn toggle_select_filters(&mut self) {
         match self.cursor.state() {
             Cursor::Singleton(i) => {
-                self.filters.get_mut(i).map(FilterState::toggle);
+                self.filters.get_mut(i).map(Filter::toggle);
             }
             Cursor::Selection(start, end, _) => {
                 for i in start..=end {
-                    self.filters.get_mut(i).map(FilterState::toggle);
+                    self.filters.get_mut(i).map(Filter::toggle);
                 }
             }
         }
@@ -430,18 +476,13 @@ impl Compositor {
         match self.cursor.state() {
             Cursor::Singleton(i) => {
                 if i > 1 {
-                    let filter = self.filters.searches.remove(i - 2);
-                    
+                    self.filters.user_filters.remove(i - 2);
                 }
             }
             Cursor::Selection(start, end, _) => {
                 let start = start.max(2);
                 if start <= end {
-                    let filters = self
-                        .filters
-                        .searches
-                        .drain(start - 2..=end - 2)
-                        .collect::<Vec<_>>();
+                    self.filters.user_filters.drain(start - 2..=end - 2);
                 }
             }
         }
@@ -457,7 +498,7 @@ impl Compositor {
     ) -> Result<(), regex::Error> {
         let (filter, regex) = Mask::build(pattern, literal)?;
 
-        self.filters.searches.push(FilterState::from_filter(
+        self.filters.user_filters.push(Filter::from_filter(
             filter,
             color_selector.next_color(),
             FilterData::Search(LineSet::search(file.segment_iter().unwrap(), regex)),
@@ -484,5 +525,21 @@ impl Compositor {
                 .filter(|&ln| ln > i)
                 .min(),
         }
+    }
+
+    pub fn export_user_filters(&self) -> Vec<FilterExport> {
+        self.filters
+            .user_filters
+            .iter()
+            .map(Filter::to_export)
+            .collect()
+    }
+
+    pub(super) fn import_user_filters(&mut self, file: &SegBuffer, exports: Vec<FilterExport>) {
+        self.filters.user_filters.extend(
+            exports
+                .into_iter()
+                .map(|wire| Filter::from_export(file, wire)),
+        );
     }
 }

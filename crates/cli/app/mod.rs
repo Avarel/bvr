@@ -16,7 +16,7 @@ use crate::{
         prompt::{self, PromptApp, PromptMovement},
         status::StatusApp,
     },
-    direction::Direction,
+    direction::Direction, regex_compile,
 };
 use anyhow::Result;
 use arboard::Clipboard;
@@ -581,6 +581,45 @@ impl App {
                 None => self.mux.set_mode(self.mux.mode().swap()),
             },
             Some("filter" | "find" | "f") => match parts.next() {
+                Some("export") => {
+                    let Some(source) = self.mux.active_viewer_mut() else {
+                        return true;
+                    };
+                    let export = source.compositor_mut().export_user_filters();
+
+                    let Some(idx) = parts.next() else {
+                        self.status.submit_message(
+                            String::from("filter export: requires instance index"),
+                            Some(Duration::from_secs(2)),
+                        );
+                        return true;
+                    };
+
+                    let Ok(idx) = idx.parse::<usize>() else {
+                        self.status.submit_message(
+                            format!("filter export {idx}: invalid index"),
+                            Some(Duration::from_secs(2)),
+                        );
+                        return true;
+                    };
+                    let idx = idx.saturating_sub(1);
+                    if self.mux.active() == idx {
+                        self.status.submit_message(
+                            String::from("filter export: cannot export to active instance"),
+                            Some(Duration::from_secs(2)),
+                        );
+                        return true;
+                    }
+                    let Some(target) = self.mux.viewers_mut().get_mut(idx) else {
+                        self.status.submit_message(
+                            format!("filter export {idx}: invalid index"),
+                            Some(Duration::from_secs(2)),
+                        );
+                        return true;
+                    };
+                    
+                    target.import_user_filters(export);
+                }
                 Some("regex" | "r") => {
                     let pat = parts.collect::<String>();
                     return self.process_search(&pat, false);
@@ -663,11 +702,9 @@ impl App {
 
                 if pattern_mismatch {
                     let regex = if a == PromptMode::NewLit {
-                        RegexBuilder::new(&regex::escape(pattern))
-                            .case_insensitive(true)
-                            .build().ok()
+                        regex_compile(&regex::escape(pattern)).ok()
                     } else {
-                        RegexBuilder::new(pattern).case_insensitive(true).build().ok()
+                        regex_compile(pattern).ok()
                     };
 
                     self.regex_cache = Some((pattern.to_owned(), regex))

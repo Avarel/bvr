@@ -1,6 +1,6 @@
 use super::{
     cursor::{Cursor, CursorState, SelectionOrigin},
-    filters::{Compositor, FilterState},
+    filters::{Compositor, Filter, FilterExport},
     viewer::ViewCache,
     viewport::Viewport,
 };
@@ -266,7 +266,7 @@ impl Instance {
         self.compositor
             .filters_mut()
             .get_mut(filter_index)
-            .map(FilterState::toggle);
+            .map(Filter::toggle);
         self.invalidate_cache();
     }
 
@@ -297,5 +297,10 @@ impl Instance {
             self.view
                 .insert_new_line_set(self.compositor.create_composite());
         }
+    }
+
+    pub fn import_user_filters(&mut self, filters: Vec<FilterExport>) {
+        self.compositor.import_user_filters(&self.buf, filters);
+        self.invalidate_cache();
     }
 }

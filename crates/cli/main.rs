@@ -35,3 +35,7 @@ fn main() -> Result<()> {
 
     app.run_app(&mut terminal)
 }
+
+fn regex_compile(pattern: &str) -> std::result::Result<regex::bytes::Regex, regex::Error> {
+    regex::bytes::RegexBuilder::new(pattern).case_insensitive(true).build()
+}
