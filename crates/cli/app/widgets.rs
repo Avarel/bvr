@@ -1,21 +1,22 @@
 use super::{
-    actions::{Action, FilterAction, NormalAction},
+    actions::{Action, NormalAction},
     mouse::MouseHandler,
-    InputMode, PromptMode, ViewDelta,
+    InputMode, PromptMode,
 };
 use crate::components::{
     cursor::{Cursor, SelectionOrigin},
-    filters::{FilterRenderData, FilterType, Mask},
-    instance::{Instance, LineRenderData, LineType},
+    instance::Instance,
     mux::{MultiplexerApp, MultiplexerMode},
     prompt::PromptApp,
     status::StatusApp,
 };
-use crate::{app::actions::VisualAction, colors, direction::Direction};
+use crate::colors;
 use crossterm::event::MouseEventKind;
 use ratatui::{prelude::*, widgets::*};
 use regex::bytes::Regex;
 use std::sync::OnceLock;
+
+mod filters;
 
 pub struct StatusWidget<'a> {
     input_mode: InputMode,
@@ -153,98 +154,7 @@ impl Widget for PromptWidget<'_> {
     }
 }
 
-pub struct FilterViewerWidget<'a> {
-    view_index: usize,
-    viewer: &'a mut Instance,
-}
-
-impl FilterViewerWidget<'_> {
-    fn render(self, area: Rect, buf: &mut Buffer, handle: &mut MouseHandler) {
-        static WIDGET_BLOCK: OnceLock<Block> = OnceLock::new();
-        WIDGET_BLOCK
-            .get_or_init(|| Block::new().style(Style::new().bg(colors::STATUS_BAR)))
-            .render(area, buf);
-
-        let mut y = area.y;
-        for filter in self
-            .viewer
-            .compositor_mut()
-            .update_and_filter_view(area.height as usize)
-        {
-            FilterLineWidget {
-                view_index: self.view_index,
-                inner: &filter,
-            }
-            .render(Rect::new(area.x, y, area.width, 1), buf, handle);
-            y += 1;
-        }
-    }
-}
-
-pub struct ViewerWidget<'a> {
-    view_index: usize,
-    viewer: &'a mut Instance,
-    show_selection: bool,
-    gutter: bool,
-    regex: Option<&'a Regex>,
-}
-
-impl ViewerWidget<'_> {
-    fn render(self, area: Rect, buf: &mut Buffer, handle: &mut MouseHandler) {
-        let left = self.viewer.viewport().left();
-        let search_color = self.viewer.color_selector().peek_color();
-        let gutter_size = self
-            .gutter
-            .then(|| ((self.viewer.visible_line_count() + 1).ilog10() as u16).max(4));
-
-        let mut itoa_buf = itoa::Buffer::new();
-
-        let view = self
-            .viewer
-            .update_and_view(area.height as usize, area.width as usize);
-        let mut y = area.y;
-        for line in view.into_iter() {
-            ViewerLineWidget {
-                view_index: self.view_index,
-                start: left,
-                search_color,
-                line: Some(line),
-                show_selection: self.show_selection,
-                itoa_buf: &mut itoa_buf,
-                gutter_size,
-                regex: self.regex,
-            }
-            .render(Rect::new(area.x, y, area.width, 1), buf, handle);
-            y += 1;
-        }
-
-        while y < area.bottom() {
-            ViewerLineWidget {
-                view_index: self.view_index,
-                start: left,
-                search_color,
-                line: None,
-                show_selection: self.show_selection,
-                itoa_buf: &mut itoa_buf,
-                gutter_size,
-                regex: self.regex,
-            }
-            .render(Rect::new(area.x, y, area.width, 1), buf, handle);
-            y += 1;
-        }
-
-        handle.on_mouse(area, |event| match event.kind {
-            MouseEventKind::ScrollUp | MouseEventKind::ScrollDown => {
-                Some(Action::Normal(NormalAction::PanVertical {
-                    direction: Direction::back_if(event.kind == MouseEventKind::ScrollUp),
-                    delta: ViewDelta::Number(5),
-                    target_view: Some(self.view_index),
-                }))
-            }
-            _ => None,
-        });
-    }
-}
+mod viewer;
 
 struct EdgeBg(bool);
 
@@ -281,177 +191,6 @@ impl EdgeBg {
                         .style(Style::new().bg(colors::BG))
                 })
                 .render(area, buf);
-        }
-    }
-}
-
-struct FilterLineWidget<'a> {
-    view_index: usize,
-    inner: &'a FilterRenderData<'a>,
-}
-
-impl FilterLineWidget<'_> {
-    fn gutter_selection(line: &FilterRenderData) -> &'static str {
-        if line.ty.contains(FilterType::Origin) {
-            if line.ty.contains(FilterType::OriginStart) {
-                " ┌"
-            } else if line.ty.contains(FilterType::OriginEnd) {
-                " └"
-            } else {
-                " ▶"
-            }
-        } else if line.ty.contains(FilterType::Within) {
-            " │"
-        } else {
-            "  "
-        }
-    }
-
-    fn render(self, area: Rect, buf: &mut Buffer, handle: &mut MouseHandler) {
-        let mut v = vec![
-            Span::from(Self::gutter_selection(self.inner)).fg(colors::FILTER_ACCENT),
-            Span::from(if self.inner.ty.contains(FilterType::Enabled) {
-                " ● "
-            } else {
-                " ◯ "
-            })
-            .fg(self.inner.color),
-        ];
-
-        match self.inner.name {
-            Mask::Builtin(name) => v.push(Span::raw(*name).fg(self.inner.color)),
-            Mask::Literal(name, _) => {
-                v.push(Span::raw("Lit ").fg(colors::TEXT_INACTIVE));
-                v.push(Span::raw(name).fg(self.inner.color));
-            }
-            Mask::Regex(regex) => {
-                v.push(Span::raw("Rgx ").fg(colors::TEXT_INACTIVE));
-                v.push(Span::raw(regex.as_str()).fg(self.inner.color));
-            }
-        }
-
-        if let Some(len) = self.inner.len {
-            v.push(Span::from(format!(" {}", len)).fg(colors::TEXT_INACTIVE));
-        }
-
-        Paragraph::new(Line::from(v)).render(area, buf);
-
-        handle.on_mouse(area, |event| match event.kind {
-            MouseEventKind::Down(_) => Some(Action::Filter(FilterAction::ToggleFilter {
-                target_view: self.view_index,
-                filter_index: self.inner.index,
-            })),
-            _ => None,
-        });
-    }
-}
-
-struct ViewerLineWidget<'a> {
-    view_index: usize,
-    line: Option<LineRenderData<'a>>,
-
-    search_color: Color,
-    itoa_buf: &'a mut itoa::Buffer,
-    show_selection: bool,
-    gutter_size: Option<u16>,
-    start: usize,
-    regex: Option<&'a Regex>,
-}
-
-impl ViewerLineWidget<'_> {
-    fn gutter_selection(line: &LineRenderData) -> &'static str {
-        if line.ty.contains(LineType::Origin) {
-            if line.ty.contains(LineType::OriginStart) {
-                "┌ "
-            } else if line.ty.contains(LineType::OriginEnd) {
-                "└"
-            } else {
-                "▶"
-            }
-        } else if line.ty.contains(LineType::Within) {
-            "│"
-        } else {
-            ""
-        }
-    }
-
-    fn split_line(&self, area: Rect) -> [Rect; 3] {
-        const SPECIAL_SIZE: u16 = 3;
-        let gutter_size = self.gutter_size.unwrap_or(0);
-        let mut gutter_chunk = area;
-        gutter_chunk.width = gutter_size;
-
-        let mut type_chunk = area;
-        type_chunk.x += gutter_size + 1;
-        type_chunk.width = 1;
-
-        let mut data_chunk = area;
-        data_chunk.x += gutter_size + SPECIAL_SIZE;
-        data_chunk.width = data_chunk.width.saturating_sub(gutter_size + SPECIAL_SIZE);
-
-        [gutter_chunk, type_chunk, data_chunk]
-    }
-
-    fn render(self, area: Rect, buf: &mut Buffer, handle: &mut MouseHandler) {
-        let [gutter_chunk, type_chunk, data_chunk] = self.split_line(area);
-
-        let Some(line) = &self.line else {
-            let ln = Paragraph::new("~")
-                .alignment(Alignment::Right)
-                .fg(colors::GUTTER_TEXT);
-
-            ln.render(gutter_chunk, buf);
-            return;
-        };
-
-        if self.gutter_size.is_some() {
-            let ln_str = self.itoa_buf.format(line.line_number + 1);
-            let ln = Paragraph::new(ln_str).alignment(Alignment::Right).fg(
-                if line.ty.contains(LineType::Bookmarked) {
-                    colors::SELECT_ACCENT
-                } else {
-                    colors::GUTTER_TEXT
-                },
-            );
-
-            ln.render(gutter_chunk, buf);
-        }
-
-        if self.show_selection {
-            Paragraph::new(Self::gutter_selection(line))
-                .fg(colors::SELECT_ACCENT)
-                .render(type_chunk, buf);
-        }
-
-        let mut chars = line.data.chars();
-        for _ in 0..self.start {
-            chars.next();
-        }
-        let data = &chars.as_str()[..(data_chunk.width as usize).min(line.data.len().saturating_sub(self.start))];
-
-        if let Some(m) = self.regex.and_then(|r| r.find(data.as_bytes())) {
-            let start = m.start();
-            let end = m.end();
-            let spans = vec![
-                Span::raw(&data[..start]),
-                Span::raw(&data[start..end]).bg(self.search_color),
-                Span::raw(&data[end..]),
-            ];
-            Paragraph::new(Line::from(spans))
-        } else {
-            Paragraph::new(data)
-        }
-        .fg(line.color)
-        .render(data_chunk, buf);
-
-        if let Some(line) = self.line {
-            handle.on_mouse(area, |event| match event.kind {
-                MouseEventKind::Down(_) => Some(Action::Visual(VisualAction::ToggleLine {
-                    line_number: line.line_number,
-                    target_view: self.view_index,
-                })),
-                _ => None,
-            });
         }
     }
 }
@@ -565,7 +304,7 @@ impl MultiplexerWidget<'_> {
                         if self.mode == InputMode::Filter {
                             let [view_chunk, filter_chunk] =
                                 Self::split_bottom(view_chunk, Self::FILTER_MAX_HEIGHT);
-                            FilterViewerWidget {
+                            filters::FilterViewerWidget {
                                 view_index: i,
                                 viewer,
                             }
@@ -573,7 +312,7 @@ impl MultiplexerWidget<'_> {
                             viewer_chunk = view_chunk;
                         }
 
-                        ViewerWidget {
+                        viewer::ViewerWidget {
                             view_index: i,
                             show_selection: self.mode == InputMode::Visual,
                             viewer,
@@ -612,14 +351,14 @@ impl MultiplexerWidget<'_> {
                     if self.mode == InputMode::Filter {
                         let [view_chunk, filter_chunk] =
                             Self::split_bottom(view_chunk, Self::FILTER_MAX_HEIGHT);
-                        FilterViewerWidget {
+                        filters::FilterViewerWidget {
                             view_index: 0,
                             viewer,
                         }
                         .render(filter_chunk, buf, handler);
                         viewer_chunk = view_chunk;
                     }
-                    ViewerWidget {
+                    viewer::ViewerWidget {
                         view_index: active,
                         show_selection: self.mode == InputMode::Visual,
                         viewer,

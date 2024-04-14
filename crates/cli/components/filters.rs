@@ -18,25 +18,23 @@ enum FilterData {
 #[derive(Clone)]
 pub enum Mask {
     Builtin(&'static str),
-    Literal(String, Regex),
     Regex(Regex),
 }
 
 impl Mask {
     pub fn build(pattern: &str, literal: bool) -> Result<(Self, Regex), regex::Error> {
-        if literal {
-            let regex = regex_compile(&regex::escape(pattern))?;
-            Ok((Self::Literal(pattern.to_owned(), regex.clone()), regex))
+        let regex = if literal {
+            regex_compile(&regex::escape(pattern))
         } else {
-            let regex = regex_compile(pattern)?;
-            Ok((Self::Regex(regex.clone()), regex))
-        }
+            regex_compile(pattern)
+        }?;
+        Ok((Self::Regex(regex.clone()), regex))
     }
 
     pub fn regex(&self) -> Option<Regex> {
         match self {
             Self::Builtin(_) => None,
-            Self::Literal(_, regex) | Self::Regex(regex) => Some(regex.clone()),
+            Self::Regex(regex) => Some(regex.clone()),
         }
     }
 }
@@ -50,12 +48,8 @@ pub struct Filter {
 }
 
 #[derive(Clone, serde::Serialize, serde::Deserialize)]
-pub struct RegexExport(String);
-
-#[derive(Clone, serde::Serialize, serde::Deserialize)]
 pub enum MaskExport {
-    Literal(String, RegexExport),
-    Regex(RegexExport),
+    Regex(String),
 }
 
 #[derive(Clone, serde::Serialize, serde::Deserialize)]
@@ -96,10 +90,7 @@ impl Filter {
     pub fn to_export(&self) -> FilterExport {
         FilterExport {
             mask: match &self.mask {
-                Mask::Literal(pattern, regex) => {
-                    MaskExport::Literal(pattern.clone(), RegexExport(regex.to_string()))
-                }
-                Mask::Regex(regex) => MaskExport::Regex(RegexExport(regex.to_string())),
+                Mask::Regex(regex) => MaskExport::Regex(regex.to_string()),
                 Mask::Builtin(_) => panic!("cannot serialize builtin mask"),
             },
             enabled: self.enabled,
@@ -109,10 +100,7 @@ impl Filter {
 
     pub fn from_export(file: &SegBuffer, export: FilterExport) -> Self {
         let mask = match export.mask {
-            MaskExport::Literal(pattern, RegexExport(ref regex)) => {
-                Mask::Literal(pattern, regex_compile(regex).unwrap())
-            }
-            MaskExport::Regex(RegexExport(ref regex)) => Mask::Regex(regex_compile(regex).unwrap()),
+            MaskExport::Regex(ref regex) => Mask::Regex(regex_compile(regex).unwrap()),
         };
         Self {
             data: FilterData::Search(LineSet::search(
@@ -137,6 +125,10 @@ impl Filter {
         self.enabled = !self.enabled;
     }
 
+    pub fn mask(&self) -> &Mask {
+        &self.mask
+    }
+
     pub fn has_line(&self, line_number: usize) -> bool {
         match &self.data {
             FilterData::All => true,
@@ -145,7 +137,7 @@ impl Filter {
         }
     }
 
-    fn len(&self) -> Option<usize> {
+    pub fn len(&self) -> Option<usize> {
         match &self.data {
             FilterData::All => None,
             FilterData::Bookmarks(lines) => Some(lines.len()),
@@ -327,25 +319,6 @@ impl Filters {
     }
 }
 
-bitflags! {
-    pub struct FilterType: u8 {
-        const None = 0;
-        const Enabled = 1 << 0;
-        const Origin = 1 << 1;
-        const OriginStart = 1 << 2;
-        const OriginEnd = 1 << 3;
-        const Within = 1 << 4;
-    }
-}
-
-pub struct FilterRenderData<'a> {
-    pub index: usize,
-    pub name: &'a Mask,
-    pub color: Color,
-    pub len: Option<usize>,
-    pub ty: FilterType,
-}
-
 pub struct Compositor {
     all_composite: LineSet,
     strategy: CompositeStrategy,
@@ -384,7 +357,7 @@ impl Compositor {
     pub fn update_and_filter_view(
         &mut self,
         viewport_height: usize,
-    ) -> impl Iterator<Item = FilterRenderData> {
+    ) -> impl Iterator<Item = (usize, &Filter)> {
         self.viewport.fit_view(viewport_height, 0);
         self.viewport.clamp(self.filters.len());
 
@@ -393,36 +366,6 @@ impl Compositor {
             .enumerate()
             .skip(self.viewport.top())
             .take(self.viewport.height())
-            .map(|(index, filter)| FilterRenderData {
-                index,
-                name: &filter.mask,
-                color: filter.color,
-                len: filter.len(),
-                ty: match self.cursor.state() {
-                    Cursor::Singleton(i) => {
-                        if index == i {
-                            FilterType::Origin
-                        } else {
-                            FilterType::None
-                        }
-                    }
-                    Cursor::Selection(start, end, _) => {
-                        if !(start..=end).contains(&index) {
-                            FilterType::None
-                        } else if index == start {
-                            FilterType::Origin | FilterType::OriginStart
-                        } else if index == end {
-                            FilterType::Origin | FilterType::OriginEnd
-                        } else {
-                            FilterType::Within
-                        }
-                    }
-                } | if filter.enabled {
-                    FilterType::Enabled
-                } else {
-                    FilterType::None
-                },
-            })
     }
 
     pub fn create_composite(&mut self) -> LineSet {
@@ -541,5 +484,9 @@ impl Compositor {
                 .into_iter()
                 .map(|wire| Filter::from_export(file, wire)),
         );
+    }
+    
+    pub fn cursor(&self) -> &CursorState {
+        &self.cursor
     }
 }

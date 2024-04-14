@@ -1,35 +1,13 @@
 use super::{
     cursor::{Cursor, CursorState, SelectionOrigin},
     filters::{Compositor, Filter, FilterExport},
-    viewer::ViewCache,
+    viewer::{CachedLine, ViewCache},
     viewport::Viewport,
 };
 use crate::{app::ViewDelta, colors::ColorSelector, direction::Direction};
-use bitflags::bitflags;
 use bvr_core::SegBuffer;
 use bvr_core::{matches::CompositeStrategy, Result};
-use ratatui::style::Color;
 use std::fs::File;
-
-bitflags! {
-    #[derive(Clone)]
-    pub struct LineType: u8 {
-        const None = 0;
-        const Origin = 1 << 0;
-        const OriginStart = 1 << 1;
-        const OriginEnd = 1 << 2;
-        const Within = 1 << 3;
-        const Bookmarked = 1 << 4;
-    }
-}
-
-#[derive(Clone)]
-pub struct LineRenderData<'a> {
-    pub line_number: usize,
-    pub data: &'a str,
-    pub color: Color,
-    pub ty: LineType,
-}
 
 pub struct Instance {
     name: String,
@@ -86,6 +64,10 @@ impl Instance {
         &self.color_selector
     }
 
+    pub fn cursor(&self) -> &CursorState {
+        &self.cursor
+    }
+
     pub fn nearest_index(&self, line_number: usize) -> Option<usize> {
         self.view
             .composite()
@@ -97,46 +79,14 @@ impl Instance {
         &mut self,
         viewport_height: usize,
         viewport_width: usize,
-    ) -> impl Iterator<Item = LineRenderData<'_>> {
+    ) -> impl Iterator<Item = &CachedLine> {
         self.view
             .viewport_mut()
             .fit_view(viewport_height, viewport_width);
         self.view.set_end_index(self.visible_line_count());
 
-        let cursor_state = self.cursor.state();
-
-        let cache = self
-            .view
-            .cache_view(&self.buf, |cache| cache.color_cache(&self.compositor));
-        cache.map(move |line| LineRenderData {
-            line_number: line.line_number,
-            data: line.data.as_str(),
-            color: line.color,
-            ty: match cursor_state {
-                Cursor::Singleton(i) => {
-                    if line.index == i {
-                        LineType::Origin
-                    } else {
-                        LineType::None
-                    }
-                }
-                Cursor::Selection(start, end, _) => {
-                    if !(start..=end).contains(&line.index) {
-                        LineType::None
-                    } else if line.index == start {
-                        LineType::Origin | LineType::OriginStart
-                    } else if line.index == end {
-                        LineType::Origin | LineType::OriginEnd
-                    } else {
-                        LineType::Within
-                    }
-                }
-            } | if line.bookmarked {
-                LineType::Bookmarked
-            } else {
-                LineType::None
-            },
-        })
+        self.view
+            .cache_view(&self.buf, |cache| cache.color_cache(&self.compositor))
     }
 
     pub fn add_search_filter(&mut self, pattern: &str, literal: bool) -> Result<(), regex::Error> {
