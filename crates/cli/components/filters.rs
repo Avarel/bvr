@@ -4,7 +4,10 @@ use super::{
 };
 use crate::{app::ViewDelta, colors, direction::Direction, regex_compile};
 use bitflags::bitflags;
-use bvr_core::{matches::CompositeStrategy, LineSet, SegBuffer};
+use bvr_core::{
+    matches::{composite, CompositeStrategy},
+    LineSet, SegBuffer,
+};
 use ratatui::style::Color;
 use regex::bytes::Regex;
 
@@ -449,24 +452,30 @@ impl Compositor {
         Ok(())
     }
 
-    pub fn compute_jump(&self, i: usize, direction: Direction) -> Option<usize> {
-        // TODO: jump to next matching filter
+    pub fn compute_jump(
+        &self,
+        i: usize,
+        direction: Direction,
+        composite: &LineSet,
+    ) -> Option<usize> {
+        let compute = |i: usize, match_filter: bool| {
+            let active_filters = self.filters.iter_active();
+            let iter = active_filters.filter(|fitler| !match_filter || fitler.has_line(i));
+            match direction {
+                Direction::Back => iter
+                    .filter_map(|filter| filter.nearest_backward(i))
+                    .filter(|&ln| ln < i)
+                    .max(),
+                Direction::Next => iter
+                    .filter_map(|filter| filter.nearest_forward(i))
+                    .filter(|&ln| ln > i)
+                    .min(),
+            }
+        };
         if !self.filters.all.is_enabled() {
-            return match direction {
-                Direction::Back => Some(i.saturating_sub(1)),
-                Direction::Next => Some(i + 1),
-            };
-        }
-        let active_filters = self.filters.iter_active();
-        match direction {
-            Direction::Back => active_filters
-                .filter_map(|filter| filter.nearest_backward(i))
-                .filter(|&ln| ln < i)
-                .max(),
-            Direction::Next => active_filters
-                .filter_map(|filter| filter.nearest_forward(i))
-                .filter(|&ln| ln > i)
-                .min(),
+            composite.find(compute(composite.get(i)?, true)?)
+        } else {
+            compute(i, false)
         }
     }
 

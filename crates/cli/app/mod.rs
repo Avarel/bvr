@@ -202,23 +202,7 @@ impl App {
                     };
 
                     if let Some(viewer) = viewer {
-                        let delta = match delta {
-                            ViewDelta::Number(n) => usize::from(n),
-                            ViewDelta::Page => viewer.viewport().height(),
-                            ViewDelta::HalfPage => viewer.viewport().height().div_ceil(2),
-                            ViewDelta::Boundary => usize::MAX,
-                            ViewDelta::Match => {
-                                let current = viewer.viewport().top();
-                                if let Some(next) =
-                                    viewer.compositor_mut().compute_jump(current, direction)
-                                {
-                                    viewer.viewport_mut().top_to(next)
-                                }
-                                return Ok(true);
-                            }
-                        };
-                        viewer.viewport_mut().pan_vertical(direction, delta);
-                        viewer.set_follow_output(false);
+                        viewer.move_viewport_vertical(direction, delta)
                     }
                 }
                 NormalAction::PanHorizontal {
@@ -233,14 +217,7 @@ impl App {
                     };
 
                     if let Some(viewer) = viewer {
-                        let delta = match delta {
-                            ViewDelta::Number(n) => usize::from(n),
-                            ViewDelta::Page => viewer.viewport().width(),
-                            ViewDelta::HalfPage => viewer.viewport().width().div_ceil(2),
-                            _ => 0,
-                        };
-                        viewer.viewport_mut().pan_horizontal(direction, delta);
-                        viewer.set_follow_output(false);
+                        viewer.move_viewport_horizontal(direction, delta)
                     }
                 }
                 NormalAction::FollowOutput => {
@@ -273,10 +250,9 @@ impl App {
                     target_view,
                     line_number,
                 } => {
-                    let Some(viewer) = self.mux.viewers_mut().get_mut(target_view) else {
-                        return Ok(true);
-                    };
-                    viewer.toggle_bookmark_line_number(line_number)
+                    if let Some(viewer) = self.mux.viewers_mut().get_mut(target_view) {
+                        viewer.toggle_bookmark_line_number(line_number)
+                    }
                 }
             },
             Action::Filter(action) => match action {

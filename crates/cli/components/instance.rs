@@ -114,13 +114,49 @@ impl Instance {
         }
     }
 
+    pub fn move_viewport_vertical(&mut self, dir: Direction, delta: ViewDelta) {
+        let delta = match delta {
+            ViewDelta::Number(n) => usize::from(n),
+            ViewDelta::Page => self.view.viewport().height(),
+            ViewDelta::HalfPage => self.view.viewport().height().div_ceil(2),
+            ViewDelta::Boundary => usize::MAX,
+            ViewDelta::Match => {
+                let current = self.view.viewport().top();
+                if let Some(next) =
+                    self.compositor
+                        .compute_jump(current, dir, self.view.composite())
+                {
+                    self.view.viewport_mut().top_to(next)
+                }
+                return;
+            }
+        };
+        self.view.viewport_mut().pan_vertical(dir, delta);
+        self.view.set_follow_output(false);
+    }
+
+    pub fn move_viewport_horizontal(&mut self, dir: Direction, delta: ViewDelta) {
+        let delta = match delta {
+            ViewDelta::Number(n) => usize::from(n),
+            ViewDelta::Page => self.viewport().width(),
+            ViewDelta::HalfPage => self.viewport().width().div_ceil(2),
+            _ => 0,
+        };
+        self.viewport_mut().pan_horizontal(dir, delta);
+        self.set_follow_output(false);
+    }
+
     pub fn move_select(&mut self, dir: Direction, select: bool, delta: ViewDelta) {
         let compute_delta = |i: usize| match delta {
             ViewDelta::Number(n) => usize::from(n),
             ViewDelta::Page => self.view.viewport().height(),
             ViewDelta::HalfPage => self.view.viewport().height().div_ceil(2),
             ViewDelta::Boundary => usize::MAX,
-            ViewDelta::Match => i.abs_diff(self.compositor.compute_jump(i, dir).unwrap_or(i)),
+            ViewDelta::Match => i.abs_diff(
+                self.compositor
+                    .compute_jump(i, dir, self.view.composite())
+                    .unwrap_or(i),
+            ),
         };
 
         match dir {
