@@ -485,7 +485,7 @@ impl Compositor {
                 .map(|wire| Filter::from_export(file, wire)),
         );
     }
-    
+
     pub fn cursor(&self) -> &CursorState {
         &self.cursor
     }

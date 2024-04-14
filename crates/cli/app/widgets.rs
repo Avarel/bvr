@@ -3,20 +3,24 @@ use super::{
     mouse::MouseHandler,
     InputMode, PromptMode,
 };
-use crate::components::{
-    cursor::{Cursor, SelectionOrigin},
-    instance::Instance,
-    mux::{MultiplexerApp, MultiplexerMode},
-    prompt::PromptApp,
-    status::StatusApp,
+use crate::{
+    app::widgets::{filters::FilterViewerWidget, viewer::LineViewerWidget},
+    colors,
+    components::{
+        cursor::{Cursor, SelectionOrigin},
+        instance::Instance,
+        mux::{MultiplexerApp, MultiplexerMode},
+        prompt::PromptApp,
+        status::StatusApp,
+    },
 };
-use crate::colors;
 use crossterm::event::MouseEventKind;
 use ratatui::{prelude::*, widgets::*};
 use regex::bytes::Regex;
 use std::sync::OnceLock;
 
 mod filters;
+mod viewer;
 
 pub struct StatusWidget<'a> {
     input_mode: InputMode,
@@ -32,9 +36,13 @@ impl<'a> Widget for StatusWidget<'a> {
 
         let (accent_color, mode_name) = match self.input_mode {
             InputMode::Prompt(PromptMode::Command) => (colors::COMMAND_ACCENT, " COMMAND "),
-            InputMode::Prompt(PromptMode::Shell) => (colors::SHELL_ACCENT, " SHELL "),
-            InputMode::Prompt(PromptMode::NewFilter) => (colors::FILTER_ACCENT, " FILTER (RGX) "),
-            InputMode::Prompt(PromptMode::NewLit) => (colors::FILTER_ACCENT, " FILTER (LIT) "),
+            InputMode::Prompt(PromptMode::Shell { .. }) => (colors::SHELL_ACCENT, " SHELL "),
+            InputMode::Prompt(PromptMode::Search { regex: true }) => {
+                (colors::FILTER_ACCENT, " FILTER ")
+            }
+            InputMode::Prompt(PromptMode::Search { regex: false }) => {
+                (colors::FILTER_ACCENT, " FILTER (ESCAPED) ")
+            }
             InputMode::Normal => (colors::VIEWER_ACCENT, " NORMAL "),
             InputMode::Visual => (colors::SELECT_ACCENT, " VISUAL "),
             InputMode::Filter => (colors::FILTER_ACCENT, " FILTER "),
@@ -118,9 +126,9 @@ impl Widget for PromptWidget<'_> {
 
         let indicator = match mode {
             PromptMode::Command => Span::raw(":").fg(colors::COMMAND_ACCENT),
-            PromptMode::NewFilter => Span::raw("/").fg(colors::FILTER_ACCENT),
-            PromptMode::NewLit => Span::raw("?").fg(colors::FILTER_ACCENT),
-            PromptMode::Shell => Span::raw("!").fg(colors::SHELL_ACCENT),
+            PromptMode::Search { .. } => Span::raw("/").fg(colors::FILTER_ACCENT),
+            PromptMode::Shell { pipe: true } => Span::raw("|").fg(colors::SHELL_ACCENT),
+            PromptMode::Shell { pipe: false } => Span::raw("!").fg(colors::SHELL_ACCENT),
         };
 
         let cursor = self.inner.cursor();
@@ -153,8 +161,6 @@ impl Widget for PromptWidget<'_> {
         input.render(area, buf);
     }
 }
-
-mod viewer;
 
 struct EdgeBg(bool);
 
@@ -304,7 +310,7 @@ impl MultiplexerWidget<'_> {
                         if self.mode == InputMode::Filter {
                             let [view_chunk, filter_chunk] =
                                 Self::split_bottom(view_chunk, Self::FILTER_MAX_HEIGHT);
-                            filters::FilterViewerWidget {
+                            FilterViewerWidget {
                                 view_index: i,
                                 viewer,
                             }
@@ -312,7 +318,7 @@ impl MultiplexerWidget<'_> {
                             viewer_chunk = view_chunk;
                         }
 
-                        viewer::ViewerWidget {
+                        LineViewerWidget {
                             view_index: i,
                             show_selection: self.mode == InputMode::Visual,
                             viewer,
@@ -351,14 +357,14 @@ impl MultiplexerWidget<'_> {
                     if self.mode == InputMode::Filter {
                         let [view_chunk, filter_chunk] =
                             Self::split_bottom(view_chunk, Self::FILTER_MAX_HEIGHT);
-                        filters::FilterViewerWidget {
+                        FilterViewerWidget {
                             view_index: 0,
                             viewer,
                         }
                         .render(filter_chunk, buf, handler);
                         viewer_chunk = view_chunk;
                     }
-                    viewer::ViewerWidget {
+                    LineViewerWidget {
                         view_index: active,
                         show_selection: self.mode == InputMode::Visual,
                         viewer,

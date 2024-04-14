@@ -320,11 +320,7 @@ impl<T: Copy> From<Vec<T>> for CowVec<T> {
         let (ptr, len, cap) = (me.as_mut_ptr(), me.len(), me.capacity());
 
         Self {
-            buf: ArcSwap::from_pointee(RawBuf::new(
-                NonNull::new(ptr).unwrap(),
-                len,
-                cap,
-            )),
+            buf: ArcSwap::from_pointee(RawBuf::new(NonNull::new(ptr).unwrap(), len, cap)),
         }
     }
 }

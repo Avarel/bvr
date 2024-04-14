@@ -226,14 +226,14 @@ impl Instance {
     }
 
     pub fn export_file(&mut self, mut file: File) -> Result<()> {
-        self.buf
-            .write_to_file(&mut file, &self.compositor.create_composite())
+        self.buf.write_to_file(&mut file, self.view.composite())
     }
 
     pub fn export_string(&mut self) -> Result<String> {
         let mut output = String::new();
         self.buf
-            .write_to_string(&mut output, &self.compositor.create_composite())?;
+            .write_to_string(&mut output, self.view.composite())?;
+        output.truncate(output.trim_end_matches('\0').len());
         Ok(output)
     }
 

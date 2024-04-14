@@ -37,5 +37,7 @@ fn main() -> Result<()> {
 }
 
 fn regex_compile(pattern: &str) -> std::result::Result<regex::bytes::Regex, regex::Error> {
-    regex::bytes::RegexBuilder::new(pattern).case_insensitive(true).build()
+    regex::bytes::RegexBuilder::new(pattern)
+        .case_insensitive(true)
+        .build()
 }

@@ -100,13 +100,14 @@ In this mode, you can select lines to bookmark.
 ### Filter Mode
 In this mode, you can toggle filters from bookmarks or searches to omit or include certain lines in the viewer.
 
-| Keybinding          | Description                              |
-| ------------------- | ---------------------------------------- |
-| `Esc` and `Tab`     | Exit selection mode (enter viewer mode). |
-| `:`                 | Enter command mode.                      |
-| `i`                 | Enter selection mode.                    |
-| `Up` and `Down`     | Change which filter is selected.         |
-| `Space` and `Enter` | Toggle selected filter.                  |
+| Keybinding          | Description                                          |
+| ------------------- | ---------------------------------------------------- |
+| `Esc` and `Tab`     | Exit selection mode (enter viewer mode).             |
+| `:`                 | Enter command mode.                                  |
+| `i`                 | Enter selection mode.                                |
+| `Up` and `Down`     | Change which filter is selected.                     |
+| `Space` and `Enter` | Toggle selected filter.                              |
+| `^R`                | Escape the provided filter (search in literal mode). |
 
 ### Mode-Independent
 | Keybinding          | Description                                  |
@@ -115,7 +116,6 @@ In this mode, you can toggle filters from bookmarks or searches to omit or inclu
 | `Ctr;` + `C`        | Exit the program.                            |
 | `:`                 | Enter command mode.                          |
 | `/`                 | Create a new filter.                         |
-| `?`                 | Create a new filter (literal).               |
 | `v`                 | Enter visual mode.                           |
 | `f`                 | Enter filter mode.                           |
 | `Tab` and `BackTab` | Switch selected view (forward and backward). |

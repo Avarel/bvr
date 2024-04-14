@@ -37,7 +37,7 @@ impl Viewport {
         self.height = height;
         self.width = width;
     }
-    
+
     #[inline(always)]
     pub fn left(&self) -> usize {
         self.left
@@ -110,5 +110,4 @@ impl Viewport {
             Direction::Next => self.left.saturating_add(delta),
         }
     }
-
 }

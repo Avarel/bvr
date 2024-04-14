@@ -105,14 +105,14 @@ impl ViewCache {
         preprocess: impl FnOnce(&mut Self),
     ) -> impl Iterator<Item = &CachedLine> {
         if self.follow_output {
-            self.curr_viewport.jump_vertically_to(self.end_index.saturating_sub(1));
+            self.curr_viewport
+                .jump_vertically_to(self.end_index.saturating_sub(1));
         }
 
         self.curr_viewport.clamp(self.end_index);
 
         let (old_top, new_top) = (self.prev_viewport.top(), self.curr_viewport.top());
         let (old_bot, new_bot) = (self.prev_viewport.bottom(), self.curr_viewport.bottom());
-
 
         if new_top > old_bot || new_bot < old_top {
             // No overlap between old and new viewports

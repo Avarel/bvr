@@ -28,16 +28,16 @@ pub const FILTER_ACCENT: Color = Color::Indexed(178);
 pub const SHELL_ACCENT: Color = Color::Indexed(161);
 
 const SEARCH_COLOR_LIST: &[Color] = &[
-    Color::Red, // red
-    Color::Indexed(33), // blue
-    Color::Green, // green
+    Color::Red,          // red
+    Color::Indexed(33),  // blue
+    Color::Green,        // green
     Color::Indexed(135), // purple
     Color::Indexed(178), // gold
-    Color::Cyan, //cyan
-    Color::Magenta, // magenta
-    Color::Yellow, // yellow
-    Color::Indexed(21), // indigo
-    Color::Indexed(43), // torquoise
+    Color::Cyan,         //cyan
+    Color::Magenta,      // magenta
+    Color::Yellow,       // yellow
+    Color::Indexed(21),  // indigo
+    Color::Indexed(43),  // torquoise
     Color::Indexed(140),
     Color::Indexed(214),
     Color::Indexed(91),
@@ -45,13 +45,13 @@ const SEARCH_COLOR_LIST: &[Color] = &[
 
 pub struct ColorSelector {
     color_list: &'static [Color],
-    index: usize
+    index: usize,
 }
 
 impl ColorSelector {
     pub const DEFAULT: Self = Self {
         color_list: SEARCH_COLOR_LIST,
-        index: 0
+        index: 0,
     };
 
     pub fn peek_color(&self) -> Color {

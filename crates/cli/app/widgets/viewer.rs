@@ -14,7 +14,7 @@ use crossterm::event::MouseEventKind;
 use ratatui::{prelude::*, widgets::*};
 use regex::bytes::Regex;
 
-pub struct ViewerWidget<'a> {
+pub struct LineViewerWidget<'a> {
     pub(super) view_index: usize,
     pub(super) viewer: &'a mut Instance,
     pub(super) show_selection: bool,
@@ -41,7 +41,7 @@ bitflags! {
     }
 }
 
-impl ViewerWidget<'_> {
+impl LineViewerWidget<'_> {
     pub fn render(self, area: Rect, buf: &mut Buffer, handle: &mut MouseHandler) {
         let left = self.viewer.viewport().left();
         let search_color = self.viewer.color_selector().peek_color();

@@ -34,7 +34,8 @@ impl LineMatchRemote {
 
                 self.buf.push(line_number);
 
-                buf_start = segment.index.data_of_line(line_number + 1).unwrap() - segment.range.start;
+                buf_start =
+                    segment.index.data_of_line(line_number + 1).unwrap() - segment.range.start;
             }
         }
         Ok(())

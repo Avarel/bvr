@@ -16,7 +16,8 @@ use crate::{
         prompt::{self, PromptApp, PromptMovement},
         status::StatusApp,
     },
-    direction::Direction, regex_compile,
+    direction::Direction,
+    regex_compile,
 };
 use anyhow::Result;
 use arboard::Clipboard;
@@ -52,9 +53,8 @@ pub enum InputMode {
 #[derive(PartialEq, Clone, Copy)]
 pub enum PromptMode {
     Command,
-    Shell,
-    NewFilter,
-    NewLit,
+    Shell { pipe: bool },
+    Search { regex: bool },
 }
 
 pub enum ViewDelta {
@@ -339,13 +339,13 @@ impl App {
                             let command = self.prompt.submit();
                             Ok(self.process_command(&command))
                         }
-                        InputMode::Prompt(mode @ (PromptMode::NewFilter | PromptMode::NewLit)) => {
+                        InputMode::Prompt(PromptMode::Search { regex }) => {
                             let command = self.prompt.take();
-                            Ok(self.process_search(&command, matches!(mode, PromptMode::NewLit)))
+                            Ok(self.process_search(&command, !regex))
                         }
-                        InputMode::Prompt(PromptMode::Shell) => {
+                        InputMode::Prompt(PromptMode::Shell { pipe }) => {
                             let command = self.prompt.take();
-                            self.process_shell(&command, true, terminal)
+                            self.process_shell(&command, true, terminal, pipe)
                         }
                         InputMode::Normal | InputMode::Visual | InputMode::Filter => unreachable!(),
                     };
@@ -426,6 +426,7 @@ impl App {
         command: &str,
         terminate: bool,
         terminal: &mut Terminal,
+        pipe: bool,
     ) -> Result<bool> {
         let Ok(expanded) = shellexpand::env_with_context(command, |s| self.context(s)) else {
             self.status.submit_message(
@@ -466,13 +467,21 @@ impl App {
                     .submit_message(format!("shell: {err}"), Some(Duration::from_secs(2)));
                 return Ok(true);
             }
-            Ok(child) => {
-                if terminate {
-                    self.mux.clear();
-                }
-                child
-            }
+            Ok(child) => child,
         };
+
+        if pipe {
+            use std::io::Write;
+            let mut stdin = child.stdin.as_ref().unwrap();
+            if let Some(viewer) = self.mux.active_viewer_mut() {
+                let text = viewer.export_string()?;
+                stdin.write_all(text.as_bytes())?;
+            }
+        }
+
+        if terminate {
+            self.mux.clear();
+        }
 
         let status = match child.wait() {
             Err(err) => {
@@ -617,7 +626,7 @@ impl App {
                         );
                         return true;
                     };
-                    
+
                     target.import_user_filters(export);
                 }
                 Some("regex" | "r") => {
@@ -691,7 +700,7 @@ impl App {
         let [mux_chunk, cmd_chunk] = MultiplexerWidget::split_bottom(f.size(), 1);
 
         match self.mode {
-            InputMode::Prompt(a @ (PromptMode::NewFilter | PromptMode::NewLit)) => {
+            InputMode::Prompt(PromptMode::Search { regex }) => {
                 let pattern = self.prompt.buf();
 
                 let pattern_mismatch = self
@@ -701,11 +710,12 @@ impl App {
                     .unwrap_or(true);
 
                 if pattern_mismatch {
-                    let regex = if a == PromptMode::NewLit {
-                        regex_compile(&regex::escape(pattern)).ok()
+                    let regex = if regex {
+                        regex_compile(pattern)
                     } else {
-                        regex_compile(pattern).ok()
-                    };
+                        regex_compile(&regex::escape(pattern))
+                    }
+                    .ok();
 
                     self.regex_cache = Some((pattern.to_owned(), regex))
                 }

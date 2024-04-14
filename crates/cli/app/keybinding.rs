@@ -136,13 +136,11 @@ impl Keybinding {
                             ViewDelta::Number(1)
                         },
                     })),
-                    KeyCode::Char(c @ ('n' | 'N')) => {
-                        Some(Action::Visual(VisualAction::Move {
-                            direction: Direction::back_if(c.to_ascii_lowercase() == 'N'),
-                            delta: ViewDelta::Match,
-                            select: key.modifiers.contains(KeyModifiers::SHIFT),
-                        }))
-                    }
+                    KeyCode::Char(c @ ('n' | 'N')) => Some(Action::Visual(VisualAction::Move {
+                        direction: Direction::back_if(c.to_ascii_lowercase() == 'N'),
+                        delta: ViewDelta::Match,
+                        select: key.modifiers.contains(KeyModifiers::SHIFT),
+                    })),
                     KeyCode::Home | KeyCode::End => Some(Action::Visual(VisualAction::Move {
                         direction: Direction::back_if(key.code == KeyCode::Home),
                         select: key.modifiers.contains(KeyModifiers::SHIFT),
@@ -162,7 +160,7 @@ impl Keybinding {
                 },
                 _ => None,
             },
-            InputMode::Prompt(_) => match event {
+            InputMode::Prompt(prompt_mode) => match event {
                 Event::Paste(paste) => {
                     Some(Action::Command(CommandAction::Paste(std::mem::take(paste))))
                 }
@@ -185,12 +183,20 @@ impl Keybinding {
                         select: key.modifiers.contains(KeyModifiers::SHIFT),
                         jump: CommandJump::Boundary,
                     })),
-                    KeyCode::Up | KeyCode::Down => {
-                        Some(Action::Command(CommandAction::History {
-                            direction: Direction::back_if(key.code == KeyCode::Up),
-                        }))
-                    }
+                    KeyCode::Up | KeyCode::Down => Some(Action::Command(CommandAction::History {
+                        direction: Direction::back_if(key.code == KeyCode::Up),
+                    })),
                     KeyCode::Backspace => Some(Action::Command(CommandAction::Backspace)),
+                    KeyCode::Char('r') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                        match prompt_mode {
+                            PromptMode::Search { regex } => {
+                                Some(Action::SwitchMode(InputMode::Prompt(PromptMode::Search {
+                                    regex: !regex,
+                                })))
+                            }
+                            _ => None,
+                        }
+                    }
                     KeyCode::Char(to_insert) => match to_insert {
                         'b' | 'f' if key.modifiers.contains(KeyModifiers::ALT) => {
                             Some(Action::Command(CommandAction::Move {
@@ -222,24 +228,27 @@ impl Keybinding {
                 KeyCode::Char(':') => {
                     Some(Action::SwitchMode(InputMode::Prompt(PromptMode::Command)))
                 }
-                KeyCode::Char('/') => Some(Action::SwitchMode(InputMode::Prompt(
-                    PromptMode::NewFilter,
-                ))),
-                KeyCode::Char('!') => Some(Action::SwitchMode(InputMode::Prompt(
-                    PromptMode::Shell,
-                ))),
-                KeyCode::Char('?') => {
-                    Some(Action::SwitchMode(InputMode::Prompt(PromptMode::NewLit)))
+                KeyCode::Char('/') => {
+                    Some(Action::SwitchMode(InputMode::Prompt(PromptMode::Search {
+                        regex: true,
+                    })))
                 }
+                KeyCode::Char('!') => {
+                    Some(Action::SwitchMode(InputMode::Prompt(PromptMode::Shell {
+                        pipe: false,
+                    })))
+                }
+                // TODO: feature still in development
+                // KeyCode::Char('|') => {
+                //     Some(Action::SwitchMode(InputMode::Prompt(PromptMode::Shell { pipe: true })))
+                // }
                 KeyCode::Char('f') => Some(Action::SwitchMode(InputMode::Filter)),
-                KeyCode::Tab => Some(Action::Normal(NormalAction::SwitchActive(
-                    Direction::Next
-                ))),
+                KeyCode::Tab => Some(Action::Normal(NormalAction::SwitchActive(Direction::Next))),
                 KeyCode::Esc => Some(Action::SwitchMode(InputMode::Normal)),
                 KeyCode::Char('v') => Some(Action::SwitchMode(InputMode::Visual)),
-                KeyCode::BackTab => Some(Action::Normal(NormalAction::SwitchActive(
-                    Direction::Back
-                ))),
+                KeyCode::BackTab => {
+                    Some(Action::Normal(NormalAction::SwitchActive(Direction::Back)))
+                }
                 KeyCode::Char(c @ '1'..='9') => {
                     Some(Action::Normal(NormalAction::SwitchActiveIndex {
                         target_view: c as usize - '1' as usize,
