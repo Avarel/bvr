@@ -11,6 +11,7 @@ use self::{
 };
 use crate::{
     components::{
+        config::FilterSaveData,
         instance::Instance,
         mux::{MultiplexerApp, MultiplexerMode},
         prompt::{self, PromptApp, PromptMovement},
@@ -72,6 +73,7 @@ pub struct App {
     prompt: PromptApp,
     keybinds: Keybinding,
     clipboard: Option<Clipboard>,
+    filter_export_set: FilterSaveData,
     gutter: bool,
     action_queue: VecDeque<Action>,
     regex_cache: Option<(String, Option<Regex>)>,
@@ -84,6 +86,7 @@ impl App {
             prompt: PromptApp::new(),
             mux: MultiplexerApp::new(),
             status: StatusApp::new(),
+            filter_export_set: FilterSaveData::new(),
             keybinds: Keybinding::Hardcoded,
             clipboard: Clipboard::new().ok(),
             gutter: true,
@@ -566,7 +569,7 @@ impl App {
                 None => self.mux.set_mode(self.mux.mode().swap()),
             },
             Some("filter" | "find" | "f") => match parts.next() {
-                Some("export") => {
+                Some("copy" | "c") => {
                     let Some(source) = self.mux.active_viewer_mut() else {
                         return true;
                     };
@@ -604,6 +607,58 @@ impl App {
                     };
 
                     target.import_user_filters(export);
+                }
+                Some("save") => {
+                    let Some(source) = self.mux.active_viewer_mut() else {
+                        return true;
+                    };
+                    let export = source.compositor_mut().export_user_filters();
+                    
+                    if let Err(err) = self.filter_export_set.add_filter(export) {
+                        self.status.submit_message(
+                            format!("filter save: {err}"),
+                            Some(Duration::from_secs(2)),
+                        );
+                    }
+
+                    if let Err(err) = self.filter_export_set.save() {
+                        self.status.submit_message(
+                            format!("filter save: {err}"),
+                            Some(Duration::from_secs(2)),
+                        );
+                    }
+
+                    self.status.submit_message(
+                        "filter save: saved filters".to_string(),
+                        Some(Duration::from_secs(2)),
+                    );
+                }
+
+                Some("load") => {
+                    let Some(viewer) = self.mux.active_viewer_mut() else {
+                        return true;
+                    };
+
+                    let filter_sets = match self.filter_export_set.filters() {
+                        Ok(filters) => filters,
+                        Err(err) => {
+                            self.status.submit_message(
+                                format!("filter save: {err}"),
+                                Some(Duration::from_secs(2)),
+                            );
+                            return true;
+                        }
+                    };
+
+                    match filter_sets.first() {
+                        Some(export) => viewer.import_user_filters(export.clone()),
+                        None => {
+                            self.status.submit_message(
+                                "filter load: no saved filters".to_string(),
+                                Some(Duration::from_secs(2)),
+                            );
+                        }
+                    }
                 }
                 Some("regex" | "r") => {
                     let pat = parts.collect::<String>();

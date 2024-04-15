@@ -1,15 +1,18 @@
+use std::str::FromStr;
+
 use super::{
     cursor::{Cursor, CursorState, SelectionOrigin},
     viewport::Viewport,
 };
 use crate::{app::ViewDelta, colors, direction::Direction, regex_compile};
-use bitflags::bitflags;
 use bvr_core::{
-    matches::{composite, CompositeStrategy},
+    matches::CompositeStrategy,
     LineSet, SegBuffer,
 };
 use ratatui::style::Color;
 use regex::bytes::Regex;
+
+pub type FilterExportSet = Vec<FilterExport>;
 
 #[derive(Clone)]
 enum FilterData {
@@ -51,15 +54,19 @@ pub struct Filter {
 }
 
 #[derive(Clone, serde::Serialize, serde::Deserialize)]
+#[serde(tag = "type")]
 pub enum MaskExport {
-    Regex(String),
+    #[serde(rename = "regex")]
+    Regex {
+        regex: String
+    },
 }
 
 #[derive(Clone, serde::Serialize, serde::Deserialize)]
 pub struct FilterExport {
     mask: MaskExport,
     enabled: bool,
-    color: Color,
+    color: String,
 }
 
 impl Filter {
@@ -93,17 +100,17 @@ impl Filter {
     pub fn to_export(&self) -> FilterExport {
         FilterExport {
             mask: match &self.mask {
-                Mask::Regex(regex) => MaskExport::Regex(regex.to_string()),
+                Mask::Regex(regex) => MaskExport::Regex { regex: regex.to_string() },
                 Mask::Builtin(_) => panic!("cannot serialize builtin mask"),
             },
             enabled: self.enabled,
-            color: self.color,
+            color: self.color.to_string(),
         }
     }
 
     pub fn from_export(file: &SegBuffer, export: FilterExport) -> Self {
         let mask = match export.mask {
-            MaskExport::Regex(ref regex) => Mask::Regex(regex_compile(regex).unwrap()),
+            MaskExport::Regex { ref regex } => Mask::Regex(regex_compile(regex).unwrap()),
         };
         Self {
             data: FilterData::Search(LineSet::search(
@@ -112,7 +119,7 @@ impl Filter {
             )),
             mask,
             enabled: export.enabled,
-            color: export.color,
+            color: ratatui::style::Color::from_str(&export.color).unwrap(),
         }
     }
 
@@ -479,7 +486,7 @@ impl Compositor {
         }
     }
 
-    pub fn export_user_filters(&self) -> Vec<FilterExport> {
+    pub fn export_user_filters(&self) -> FilterExportSet {
         self.filters
             .user_filters
             .iter()
@@ -487,7 +494,7 @@ impl Compositor {
             .collect()
     }
 
-    pub(super) fn import_user_filters(&mut self, file: &SegBuffer, exports: Vec<FilterExport>) {
+    pub(super) fn import_user_filters(&mut self, file: &SegBuffer, exports: FilterExportSet) {
         self.filters.user_filters.extend(
             exports
                 .into_iter()
