@@ -104,7 +104,7 @@ impl Filter {
                 Mask::Builtin(_) => panic!("cannot serialize builtin mask"),
             },
             enabled: self.enabled,
-            color: self.color.to_string(),
+            color: self.color.to_string().to_ascii_lowercase(),
         }
     }
 

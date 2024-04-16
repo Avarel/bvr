@@ -1,5 +1,4 @@
 use super::filters::FilterExportSet;
-use crate::components::filters::FilterExport;
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
@@ -39,24 +38,15 @@ impl FilterSaveData {
     pub fn load(&mut self) -> Result<&mut LoadedFilterSaveData> {
         let path = storage_dir_create(APP_ID)?.join(FILTER_SAVE_FILE);
 
-        match std::fs::File::open(path) {
-            Ok(file) => {
-                let reader = std::io::BufReader::new(file);
-                match serde_json::from_reader::<_, LoadedFilterSaveData>(reader) {
-                    Ok(data) => *self = Self::Loaded(data),
-                    Err(_) => {
-                        *self = Self::Loaded(LoadedFilterSaveData {
-                            filters: Vec::new(),
-                        })
-                    }
-                }
-            }
-            Err(_) => {
-                *self = Self::Loaded(LoadedFilterSaveData {
+        *self = FilterSaveData::Loaded(
+            std::fs::File::open(path)
+                .ok()
+                .map(std::io::BufReader::new)
+                .and_then(|reader| serde_json::from_reader::<_, LoadedFilterSaveData>(reader).ok())
+                .unwrap_or_else(|| LoadedFilterSaveData {
                     filters: Vec::new(),
-                })
-            }
-        }
+                }),
+        );
         match self {
             FilterSaveData::Loaded(data) => Ok(data),
             FilterSaveData::Unloaded => unsafe { std::hint::unreachable_unchecked() },

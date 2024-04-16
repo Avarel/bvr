@@ -1,8 +1,12 @@
 use std::path::PathBuf;
 
+use serde::{Deserialize, Serialize};
+
 use super::{InputMode, ViewDelta};
 use crate::direction::Direction;
 
+#[derive(Serialize, Deserialize)]
+#[serde(tag = "action")]
 pub enum Action {
     Exit,
     SwitchMode(InputMode),
@@ -13,6 +17,8 @@ pub enum Action {
     ExportFile(PathBuf),
 }
 
+#[derive(Serialize, Deserialize)]
+#[serde(tag = "type")]
 pub enum NormalAction {
     PanVertical {
         direction: Direction,
@@ -31,6 +37,8 @@ pub enum NormalAction {
     },
 }
 
+#[derive(Serialize, Deserialize)]
+#[serde(tag = "type")]
 pub enum VisualAction {
     Move {
         direction: Direction,
@@ -44,6 +52,8 @@ pub enum VisualAction {
     },
 }
 
+#[derive(Serialize, Deserialize)]
+#[serde(tag = "type")]
 pub enum FilterAction {
     Move {
         direction: Direction,
@@ -58,6 +68,8 @@ pub enum FilterAction {
     },
 }
 
+#[derive(Serialize, Deserialize)]
+#[serde(tag = "type")]
 pub enum CommandAction {
     Move {
         direction: Direction,
@@ -74,7 +86,8 @@ pub enum CommandAction {
     Complete,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Serialize, Deserialize, Clone, Copy)]
+#[serde(tag = "type")]
 pub enum CommandJump {
     Word,
     Boundary,

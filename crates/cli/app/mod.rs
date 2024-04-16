@@ -31,6 +31,7 @@ use crossterm::terminal::{
 };
 use ratatui::{prelude::*, widgets::Widget};
 use regex::bytes::Regex;
+use serde::{Deserialize, Serialize};
 use std::{
     borrow::Cow,
     collections::VecDeque,
@@ -43,7 +44,8 @@ use std::{
 pub type Backend<'a> = ratatui::backend::CrosstermBackend<std::io::StdoutLock<'a>>;
 pub type Terminal<'a> = ratatui::Terminal<Backend<'a>>;
 
-#[derive(PartialEq, Clone, Copy)]
+#[derive(PartialEq, Clone, Copy, Serialize, Deserialize)]
+#[serde(tag = "mode")]
 pub enum InputMode {
     Prompt(PromptMode),
     Normal,
@@ -51,13 +53,16 @@ pub enum InputMode {
     Filter,
 }
 
-#[derive(PartialEq, Clone, Copy)]
+#[derive(PartialEq, Clone, Copy, Serialize, Deserialize)]
+#[serde(tag = "prompt")]
 pub enum PromptMode {
     Command,
     Shell { pipe: bool },
     Search { regex: bool },
 }
 
+#[derive(Serialize, Deserialize)]
+#[serde(tag = "delta")]
 pub enum ViewDelta {
     Number(u16),
     Page,
@@ -613,7 +618,7 @@ impl App {
                         return true;
                     };
                     let export = source.compositor_mut().export_user_filters();
-                    
+
                     if let Err(err) = self.filter_export_set.add_filter(export) {
                         self.status.submit_message(
                             format!("filter save: {err}"),
