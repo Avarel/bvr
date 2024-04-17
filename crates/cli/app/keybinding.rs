@@ -161,9 +161,9 @@ impl Keybinding {
                 _ => None,
             },
             InputMode::Prompt(prompt_mode) => match event {
-                Event::Paste(paste) => {
-                    Some(Action::Command(CommandAction::Paste(std::mem::take(paste))))
-                }
+                Event::Paste(input) => Some(Action::Command(CommandAction::Paste {
+                    input: std::mem::take(input),
+                })),
                 Event::Key(key) => match key.code {
                     KeyCode::Enter => Some(Action::Command(CommandAction::Submit)),
                     KeyCode::Left | KeyCode::Right => Some(Action::Command(CommandAction::Move {
@@ -212,7 +212,9 @@ impl Keybinding {
                                 jump: CommandJump::Boundary,
                             }))
                         }
-                        c => Some(Action::Command(CommandAction::Type(c))),
+                        input => Some(Action::Command(CommandAction::Type {
+                            input
+                        })),
                     },
                     KeyCode::Tab => Some(Action::Command(CommandAction::Complete)),
                     _ => None,

@@ -79,8 +79,12 @@ pub enum CommandAction {
     History {
         direction: Direction,
     },
-    Type(char),
-    Paste(String),
+    Type {
+        input: char
+    },
+    Paste {
+        input: String,
+    },
     Backspace,
     Submit,
     Complete,

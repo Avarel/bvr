@@ -310,8 +310,8 @@ impl App {
                         },
                     ),
                 ),
-                CommandAction::Type(c) => self.prompt.enter_char(c),
-                CommandAction::Paste(s) => self.prompt.enter_str(&s),
+                CommandAction::Type { input } => self.prompt.enter_char(input),
+                CommandAction::Paste { input } => self.prompt.enter_str(&input),
                 CommandAction::Backspace => {
                     if !self.prompt.delete() {
                         self.mode = InputMode::Normal;

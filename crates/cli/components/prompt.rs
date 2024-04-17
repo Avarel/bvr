@@ -210,20 +210,6 @@ impl PromptApp {
         true
     }
 
-    #[allow(dead_code)]
-    pub fn replace_last_word(&mut self, word: &str) {
-        let buf = if self.index < self.history.len() {
-            &mut self.history[self.index]
-        } else {
-            &mut self.buf
-        };
-        if let Some(i) = buf.rfind(' ') {
-            buf.replace_range(i + 1.., word);
-        } else {
-            *buf = word.to_owned();
-        }
-    }
-
     pub fn backward(&mut self) {
         self.index = self.index.saturating_sub(1);
         self.cursor.place(self.buf().len());
