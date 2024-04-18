@@ -261,8 +261,8 @@ impl Instance {
         self.invalidate_cache();
     }
 
-    pub fn export_file(&mut self, mut file: File) -> Result<()> {
-        self.buf.write_to_file(&mut file, self.view.composite())
+    pub fn write_bytes(&mut self, mut file: &mut impl std::io::Write) -> Result<()> {
+        self.buf.write_bytes(&mut file, self.view.composite())
     }
 
     pub fn export_string(&mut self) -> Result<String> {

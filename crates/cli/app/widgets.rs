@@ -114,8 +114,19 @@ pub struct PromptWidget<'a> {
     pub cursor: &'a mut Option<(u16, u16)>,
 }
 
-impl Widget for PromptWidget<'_> {
-    fn render(self, area: Rect, buf: &mut Buffer) {
+impl PromptWidget<'_> {
+    pub fn split_prompt(area: Rect) -> [Rect; 2] {
+        let mut indicator_chunk = area;
+        indicator_chunk.width = 1;
+
+        let mut data_chunk = area;
+        data_chunk.width -= 1;
+        data_chunk.x += 1;
+
+        [indicator_chunk, data_chunk]
+    }
+
+    pub fn render(self, area: Rect, buf: &mut Buffer) {
         let InputMode::Prompt(mode) = self.mode else {
             static WIDGET_BLOCK: OnceLock<Block> = OnceLock::new();
             WIDGET_BLOCK
@@ -124,12 +135,15 @@ impl Widget for PromptWidget<'_> {
             return;
         };
 
-        let indicator = match mode {
+        let [indicator_area, data_area] = Self::split_prompt(area);
+
+        match mode {
             PromptMode::Command => Span::raw(":").fg(colors::COMMAND_ACCENT),
             PromptMode::Search { .. } => Span::raw("/").fg(colors::FILTER_ACCENT),
             PromptMode::Shell { pipe: true } => Span::raw("|").fg(colors::SHELL_ACCENT),
             PromptMode::Shell { pipe: false } => Span::raw("!").fg(colors::SHELL_ACCENT),
-        };
+        }
+        .render(indicator_area, buf);
 
         let cursor = self.inner.cursor();
         let left = self.inner.viewport().left();
@@ -137,17 +151,16 @@ impl Widget for PromptWidget<'_> {
 
         let input = Paragraph::new(Line::from(match cursor {
             Cursor::Singleton(_) => {
-                vec![indicator, Span::raw(cmd_buf)]
+                vec![Span::raw(cmd_buf)]
             }
             Cursor::Selection(start, end, _) => vec![
-                indicator,
-                Span::raw(&cmd_buf[..start.saturating_sub(left)]),
-                Span::raw(&cmd_buf[start.saturating_sub(left)..end.saturating_sub(left)])
-                    .bg(colors::COMMAND_BAR_SELECT),
-                Span::raw(&cmd_buf[end.saturating_sub(left)..]),
+                Span::raw(&cmd_buf[..start]),
+                Span::raw(&cmd_buf[start..end]).bg(colors::COMMAND_BAR_SELECT),
+                Span::raw(&cmd_buf[end..]),
             ],
         }))
-        .bg(colors::BG);
+        .bg(colors::BG)
+        .scroll((0, left as u16));
 
         let i = match cursor {
             Cursor::Singleton(i)
@@ -156,9 +169,9 @@ impl Widget for PromptWidget<'_> {
                 cmd_buf[..i.saturating_sub(left)].chars().count()
             }
         };
-        *self.cursor = Some((area.x + i as u16 + 1, area.y));
+        *self.cursor = Some((data_area.x + i as u16, data_area.y));
 
-        input.render(area, buf);
+        input.render(data_area, buf);
     }
 }
 

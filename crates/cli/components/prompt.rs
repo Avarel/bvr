@@ -67,12 +67,12 @@ impl PromptApp {
         self.viewport.fit_view(1, viewport_width);
         match self.cursor.state() {
             Cursor::Singleton(i)
-            | Cursor::Selection(_, i, super::cursor::SelectionOrigin::Left)
-            | Cursor::Selection(i, _, super::cursor::SelectionOrigin::Right) => {
+            | Cursor::Selection(i, _, super::cursor::SelectionOrigin::Left)
+            | Cursor::Selection(_, i, super::cursor::SelectionOrigin::Right) => {
                 self.viewport.jump_horizontally_to(i);
             }
         }
-        &self.buf()[self.viewport.left()..]
+        self.buf()
     }
 
     pub fn move_cursor(&mut self, direction: Direction, movement: PromptMovement) {

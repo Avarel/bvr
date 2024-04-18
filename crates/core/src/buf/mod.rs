@@ -200,7 +200,7 @@ impl SegBuffer {
         LineSet::all(self.index.clone())
     }
 
-    pub fn write_to_file<W>(&mut self, output: &mut W, lines: &LineSet) -> Result<()>
+    pub fn write_bytes<W>(&mut self, output: &mut W, lines: &LineSet) -> Result<()>
     where
         W: Write,
     {

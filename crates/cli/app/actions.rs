@@ -6,7 +6,6 @@ use super::{InputMode, ViewDelta};
 use crate::direction::Direction;
 
 #[derive(Serialize, Deserialize)]
-#[serde(tag = "action")]
 pub enum Action {
     Exit,
     SwitchMode(InputMode),

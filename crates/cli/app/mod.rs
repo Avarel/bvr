@@ -355,7 +355,7 @@ impl App {
                         .truncate(true)
                         .open(&path)
                         .map_err(Error::from)
-                        .and_then(|file| viewer.export_file(file))
+                        .and_then(|mut file| viewer.write_bytes(&mut file))
                     {
                         self.status.submit_message(
                             format!("{}: {err}", path.display()),
@@ -455,11 +455,9 @@ impl App {
         };
 
         if pipe {
-            use std::io::Write;
-            let mut stdin = child.stdin.as_ref().unwrap();
+            let mut stdin = child.stdin.take().unwrap();
             if let Some(viewer) = self.mux.active_viewer_mut() {
-                let text = viewer.export_string()?;
-                stdin.write_all(text.as_bytes())?;
+                viewer.write_bytes(&mut stdin)?;
             }
         }
 
