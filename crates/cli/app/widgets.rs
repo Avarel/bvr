@@ -149,18 +149,29 @@ impl PromptWidget<'_> {
         let left = self.inner.viewport().left();
         let cmd_buf = self.inner.view_and_update(usize::from(area.width));
 
-        let input = Paragraph::new(Line::from(match cursor {
-            Cursor::Singleton(_) => {
-                vec![Span::raw(cmd_buf)]
-            }
-            Cursor::Selection(start, end, _) => vec![
-                Span::raw(&cmd_buf[..start]),
-                Span::raw(&cmd_buf[start..end]).bg(colors::COMMAND_BAR_SELECT),
-                Span::raw(&cmd_buf[end..]),
-            ],
-        }))
-        .bg(colors::BG)
-        .scroll((0, left as u16));
+        Paragraph::new(cmd_buf)
+            .bg(colors::BG)
+            .scroll((0, left as u16))
+            .render(data_area, buf);
+
+        match cursor {
+            Cursor::Selection(start, end, _) => {
+                let start = start.saturating_sub(left);
+                let end = end.saturating_sub(left);
+                let mut span_area = data_area;
+                span_area.x += start as u16;
+                span_area.width = (end - start) as u16;
+
+                static HIGHLIGHT_BLOCK: OnceLock<Block> = OnceLock::new();
+                HIGHLIGHT_BLOCK
+                    .get_or_init(|| {
+                        Block::new()
+                            .style(Style::new().bg(colors::COMMAND_BAR_SELECT))
+                    })
+                    .render(span_area, buf);
+            },
+            _ => {}
+        }
 
         let i = match cursor {
             Cursor::Singleton(i)
@@ -170,8 +181,6 @@ impl PromptWidget<'_> {
             }
         };
         *self.cursor = Some((data_area.x + i as u16, data_area.y));
-
-        input.render(data_area, buf);
     }
 }
 
