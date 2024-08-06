@@ -78,7 +78,7 @@ pub struct App {
     prompt: PromptApp,
     keybinds: Keybinding,
     clipboard: Option<Clipboard>,
-    filter_export_set: FilterData,
+    filter_data: FilterData,
     gutter: bool,
     action_queue: VecDeque<Action>,
     regex_cache: Option<(String, Option<Regex>)>,
@@ -91,7 +91,7 @@ impl App {
             prompt: PromptApp::new(),
             mux: MultiplexerApp::new(),
             status: StatusApp::new(),
-            filter_export_set: FilterData::new(),
+            filter_data: FilterData::new(),
             keybinds: Keybinding::Hardcoded,
             clipboard: Clipboard::new().ok(),
             gutter: true,
@@ -101,6 +101,8 @@ impl App {
     }
 
     pub fn open_file(&mut self, path: &Path) -> Result<()> {
+        let load_filters = self.mux.is_empty() && self.filter_data.is_persistent().unwrap_or(false);
+
         let file = std::fs::File::open(path)?;
         let name = path
             .file_name()
@@ -110,6 +112,25 @@ impl App {
             name,
             SegBuffer::read_file(file, NonZeroUsize::new(25).unwrap(), false)?,
         );
+
+        if load_filters {
+            let filter_sets = match self.filter_data.filters() {
+                Ok(filters) => filters,
+                Err(err) => {
+                    self.status.submit_message(
+                        format!("filter persist/load: {err}"),
+                        Some(Duration::from_secs(2)),
+                    );
+                    return Ok(());
+                }
+            };
+            let viewer = self.mux.active_viewer_mut().unwrap();
+            match filter_sets.first() {
+                Some(export) => viewer.import_user_filters(export.clone()),
+                None => {}
+            }
+        }
+
         Ok(())
     }
 
@@ -148,6 +169,25 @@ impl App {
     pub fn run_app(&mut self, terminal: &mut Terminal) -> Result<()> {
         Self::enter_terminal(terminal)?;
         let result = self.event_loop(terminal);
+
+        if self.filter_data.is_persistent().unwrap_or(false) {
+            if let Some(source) = self.mux.active_viewer_mut() {
+                let export = source.compositor_mut().export_user_filters();
+
+                if let Err(err) = self.filter_data.add_filter(export) {
+                    self.status.submit_message(
+                        format!("filter save: {err}"),
+                        Some(Duration::from_secs(2)),
+                    );
+                }
+
+                self.status.submit_message(
+                    "filter save: saved filters".to_string(),
+                    Some(Duration::from_secs(2)),
+                );
+            }
+        }
+
         Self::exit_terminal(terminal)?;
         result
     }
@@ -573,7 +613,7 @@ impl App {
             },
             Some("filter" | "find" | "f") => match parts.next() {
                 Some("persist") => {
-                    let new_persistence = match self.filter_export_set.is_persistent() {
+                    let new_persistence = match self.filter_data.is_persistent() {
                         Ok(persistence) => !persistence,
                         Err(err) => {
                             self.status.submit_message(
@@ -584,7 +624,7 @@ impl App {
                         }
                     };
 
-                    if let Err(err) = self.filter_export_set.set_persistent(new_persistence) {
+                    if let Err(err) = self.filter_data.set_persistent(new_persistence) {
                         self.status.submit_message(
                             format!("filter persist: {err}"),
                             Some(Duration::from_secs(2)),
@@ -642,7 +682,7 @@ impl App {
                     };
                     let export = source.compositor_mut().export_user_filters();
 
-                    if let Err(err) = self.filter_export_set.add_filter(export) {
+                    if let Err(err) = self.filter_data.add_filter(export) {
                         self.status.submit_message(
                             format!("filter save: {err}"),
                             Some(Duration::from_secs(2)),
@@ -660,7 +700,7 @@ impl App {
                         return true;
                     };
 
-                    let filter_sets = match self.filter_export_set.filters() {
+                    let filter_sets = match self.filter_data.filters() {
                         Ok(filters) => filters,
                         Err(err) => {
                             self.status.submit_message(

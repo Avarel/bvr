@@ -178,7 +178,7 @@ impl SegBuffer {
         match &self.repr {
             BufferRepr::File { file, len, .. } => Ok(ContiguousSegmentIterator::new(
                 self.index.clone(),
-                0..self.index.line_count(),
+                0..usize::MAX,
                 BufferRepr::File {
                     file: file.try_clone()?,
                     len: *len,
@@ -187,7 +187,7 @@ impl SegBuffer {
             )),
             BufferRepr::Stream(inner) => Ok(ContiguousSegmentIterator::new(
                 self.index.clone(),
-                0..self.index.line_count(),
+                0..usize::MAX,
                 BufferRepr::Stream(RefCell::new(StreamInner {
                     pending_segs: None,
                     segments: inner.borrow().segments.clone(),
