@@ -11,7 +11,7 @@ use self::{
 };
 use crate::{
     components::{
-        config::FilterSaveData,
+        config::filter::FilterData,
         instance::Instance,
         mux::{MultiplexerApp, MultiplexerMode},
         prompt::{self, PromptApp, PromptMovement},
@@ -29,7 +29,7 @@ use crossterm::event::{
 use crossterm::terminal::{
     disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
 };
-use ratatui::{prelude::*, widgets::Widget};
+use ratatui::prelude::*;
 use regex::bytes::Regex;
 use serde::{Deserialize, Serialize};
 use std::{
@@ -78,7 +78,7 @@ pub struct App {
     prompt: PromptApp,
     keybinds: Keybinding,
     clipboard: Option<Clipboard>,
-    filter_export_set: FilterSaveData,
+    filter_export_set: FilterData,
     gutter: bool,
     action_queue: VecDeque<Action>,
     regex_cache: Option<(String, Option<Regex>)>,
@@ -91,7 +91,7 @@ impl App {
             prompt: PromptApp::new(),
             mux: MultiplexerApp::new(),
             status: StatusApp::new(),
-            filter_export_set: FilterSaveData::new(),
+            filter_export_set: FilterData::new(),
             keybinds: Keybinding::Hardcoded,
             clipboard: Clipboard::new().ok(),
             gutter: true,
@@ -572,6 +572,31 @@ impl App {
                 None => self.mux.set_mode(self.mux.mode().swap()),
             },
             Some("filter" | "find" | "f") => match parts.next() {
+                Some("persist") => {
+                    let new_persistence = match self.filter_export_set.is_persistent() {
+                        Ok(persistence) => !persistence,
+                        Err(err) => {
+                            self.status.submit_message(
+                                format!("filter persist: {err}"),
+                                Some(Duration::from_secs(2)),
+                            );
+                            return true;
+                        }
+                    };
+
+                    if let Err(err) = self.filter_export_set.set_persistent(new_persistence) {
+                        self.status.submit_message(
+                            format!("filter persist: {err}"),
+                            Some(Duration::from_secs(2)),
+                        );
+                        return true;
+                    }
+                    
+                    self.status.submit_message(
+                        format!("filter persist: persistence = {new_persistence}"),
+                        Some(Duration::from_secs(2)),
+                    );
+                }
                 Some("copy" | "c") => {
                     let Some(source) = self.mux.active_viewer_mut() else {
                         return true;
@@ -618,13 +643,6 @@ impl App {
                     let export = source.compositor_mut().export_user_filters();
 
                     if let Err(err) = self.filter_export_set.add_filter(export) {
-                        self.status.submit_message(
-                            format!("filter save: {err}"),
-                            Some(Duration::from_secs(2)),
-                        );
-                    }
-
-                    if let Err(err) = self.filter_export_set.save() {
                         self.status.submit_message(
                             format!("filter save: {err}"),
                             Some(Duration::from_secs(2)),

@@ -15,7 +15,7 @@ use regex::bytes::Regex;
 pub type FilterExportSet = Vec<FilterExport>;
 
 #[derive(Clone)]
-enum FilterData {
+enum FilterSet {
     All,
     Bookmarks(Bookmarks),
     Search(LineSet),
@@ -50,7 +50,7 @@ pub struct Filter {
     mask: Mask,
     enabled: bool,
     color: Color,
-    data: FilterData,
+    data: FilterSet,
 }
 
 #[derive(Clone, serde::Serialize, serde::Deserialize)]
@@ -73,7 +73,7 @@ impl Filter {
     fn all() -> Self {
         Self {
             mask: Mask::Builtin("All Lines"),
-            data: FilterData::All,
+            data: FilterSet::All,
             enabled: true,
             color: Color::White,
         }
@@ -84,11 +84,11 @@ impl Filter {
             mask: Mask::Builtin("Bookmarks"),
             enabled: true,
             color: colors::SELECT_ACCENT,
-            data: FilterData::Bookmarks(Bookmarks::new()),
+            data: FilterSet::Bookmarks(Bookmarks::new()),
         }
     }
 
-    fn from_filter(filter: Mask, color: Color, repr: FilterData) -> Self {
+    fn from_filter(filter: Mask, color: Color, repr: FilterSet) -> Self {
         Self {
             mask: filter,
             enabled: true,
@@ -113,7 +113,7 @@ impl Filter {
             MaskExport::Regex { ref regex } => Mask::Regex(regex_compile(regex).unwrap()),
         };
         Self {
-            data: FilterData::Search(LineSet::search(
+            data: FilterSet::Search(LineSet::search(
                 file.segment_iter().unwrap(),
                 mask.regex().unwrap(),
             )),
@@ -141,49 +141,49 @@ impl Filter {
 
     pub fn has_line(&self, line_number: usize) -> bool {
         match &self.data {
-            FilterData::All => true,
-            FilterData::Bookmarks(lines) => lines.has_line(line_number),
-            FilterData::Search(lines) => lines.has_line(line_number),
+            FilterSet::All => true,
+            FilterSet::Bookmarks(lines) => lines.has_line(line_number),
+            FilterSet::Search(lines) => lines.has_line(line_number),
         }
     }
 
     pub fn len(&self) -> Option<usize> {
         match &self.data {
-            FilterData::All => None,
-            FilterData::Bookmarks(lines) => Some(lines.len()),
-            FilterData::Search(lines) => Some(lines.len()),
+            FilterSet::All => None,
+            FilterSet::Bookmarks(lines) => Some(lines.len()),
+            FilterSet::Search(lines) => Some(lines.len()),
         }
     }
 
     pub fn as_line_matches(&self) -> LineSet {
         match &self.data {
-            FilterData::All => LineSet::empty(),
-            FilterData::Bookmarks(mask) => mask.lines.clone().into(),
-            FilterData::Search(mask) => mask.clone(),
+            FilterSet::All => LineSet::empty(),
+            FilterSet::Bookmarks(mask) => mask.lines.clone().into(),
+            FilterSet::Search(mask) => mask.clone(),
         }
     }
 
     pub fn nearest_forward(&self, line_number: usize) -> Option<usize> {
         match &self.data {
-            FilterData::All => None,
-            FilterData::Bookmarks(mask) => mask.nearest_forward(line_number),
-            FilterData::Search(mask) => mask.nearest_forward(line_number),
+            FilterSet::All => None,
+            FilterSet::Bookmarks(mask) => mask.nearest_forward(line_number),
+            FilterSet::Search(mask) => mask.nearest_forward(line_number),
         }
     }
 
     pub fn nearest_backward(&self, line_number: usize) -> Option<usize> {
         match &self.data {
-            FilterData::All => None,
-            FilterData::Bookmarks(mask) => mask.nearest_backward(line_number),
-            FilterData::Search(mask) => mask.nearest_backward(line_number),
+            FilterSet::All => None,
+            FilterSet::Bookmarks(mask) => mask.nearest_backward(line_number),
+            FilterSet::Search(mask) => mask.nearest_backward(line_number),
         }
     }
 
     pub fn is_complete(&self) -> bool {
         match &self.data {
-            FilterData::All => true,
-            FilterData::Bookmarks(_) => true,
-            FilterData::Search(lines) => lines.is_complete(),
+            FilterSet::All => true,
+            FilterSet::Bookmarks(_) => true,
+            FilterSet::Search(lines) => lines.is_complete(),
         }
     }
 }
@@ -310,7 +310,7 @@ impl Filters {
     pub fn bookmarks(&self) -> &Bookmarks {
         // Safety: by construction
         match &self.bookmarks.data {
-            FilterData::Bookmarks(bookmarks) => bookmarks,
+            FilterSet::Bookmarks(bookmarks) => bookmarks,
             _ => unsafe { std::hint::unreachable_unchecked() },
         }
     }
@@ -318,7 +318,7 @@ impl Filters {
     pub fn bookmarks_mut(&mut self) -> &mut Bookmarks {
         // Safety: by construction
         match &mut self.bookmarks.data {
-            FilterData::Bookmarks(bookmarks) => bookmarks,
+            FilterSet::Bookmarks(bookmarks) => bookmarks,
             _ => unsafe { std::hint::unreachable_unchecked() },
         }
     }
@@ -454,7 +454,7 @@ impl Compositor {
         self.filters.user_filters.push(Filter::from_filter(
             filter,
             color_selector.next_color(),
-            FilterData::Search(LineSet::search(file.segment_iter().unwrap(), regex)),
+            FilterSet::Search(LineSet::search(file.segment_iter().unwrap(), regex)),
         ));
         Ok(())
     }
