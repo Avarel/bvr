@@ -178,7 +178,7 @@ impl SegBuffer {
         match &self.repr {
             BufferRepr::File { file, len, .. } => Ok(ContiguousSegmentIterator::new(
                 self.index.clone(),
-                0..usize::MAX,
+                0..usize::MAX, // ..self.index.line_count() if nondynamic
                 BufferRepr::File {
                     file: file.try_clone()?,
                     len: *len,
