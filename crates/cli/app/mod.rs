@@ -729,7 +729,7 @@ impl App {
                     let pat = parts.collect::<String>();
                     return self.process_search(&pat, true);
                 }
-                Some("clear" | "c") => {
+                Some("clear") => {
                     if let Some(viewer) = self.mux.active_viewer_mut() {
                         viewer.compositor_mut().filters_mut().clear();
                     }
@@ -789,7 +789,7 @@ impl App {
     }
 
     fn ui(&mut self, f: &mut Frame, handler: &mut MouseHandler) {
-        let [mux_chunk, cmd_chunk] = MultiplexerWidget::split_bottom(f.size(), 1);
+        let [mux_chunk, cmd_chunk] = MultiplexerWidget::split_bottom(f.area(), 1);
 
         match self.mode {
             InputMode::Prompt(PromptMode::Search { regex }) => {
@@ -835,7 +835,7 @@ impl App {
         .render(cmd_chunk, f.buffer_mut());
 
         if let Some((x, y)) = cursor {
-            f.set_cursor(x, y);
+            f.set_cursor_position((x, y));
         }
     }
 }

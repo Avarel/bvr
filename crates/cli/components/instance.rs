@@ -7,7 +7,6 @@ use super::{
 use crate::{app::ViewDelta, colors::ColorSelector, direction::Direction};
 use bvr_core::SegBuffer;
 use bvr_core::{matches::CompositeStrategy, Result};
-use std::fs::File;
 
 pub struct Instance {
     name: String,

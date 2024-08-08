@@ -1,4 +1,4 @@
-use super::{super::filters::FilterExportSet, storage_dir_create, APP_ID, FILTER_SAVE_FILE};
+use super::{super::filters::FilterExportSet, storage_dir_create, APP_ID, FILTER_FILE};
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::cell::RefCell;
@@ -33,7 +33,7 @@ impl FilterData {
     where
         F: FnOnce(&mut LoadedFilterData),
     {
-        let path = storage_dir_create(APP_ID)?.join(FILTER_SAVE_FILE);
+        let path = storage_dir_create(APP_ID)?.join(FILTER_FILE);
 
         let mut state = self.state.borrow_mut();
         *state = FilterDataState::Loaded(
@@ -65,7 +65,7 @@ impl FilterData {
         F: FnOnce(&LoadedFilterData) -> R,
     {
         if !self.is_loaded() {
-            let path = storage_dir_create(APP_ID)?.join(FILTER_SAVE_FILE);
+            let path = storage_dir_create(APP_ID)?.join(FILTER_FILE);
             let mut state = self.state.borrow_mut();
             *state = std::fs::File::open(path)
                 .ok()

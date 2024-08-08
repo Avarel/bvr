@@ -1,6 +1,5 @@
 use std::ops::{AddAssign, SubAssign};
 
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[derive(Debug, Clone, PartialEq)]
 pub struct FenwickTree<T> {
     inner: Vec<T>,
