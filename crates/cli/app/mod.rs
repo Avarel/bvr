@@ -82,6 +82,7 @@ pub struct App {
     gutter: bool,
     action_queue: VecDeque<Action>,
     regex_cache: Option<(String, Option<Regex>)>,
+    mouse_capture: bool,
 }
 
 impl App {
@@ -97,6 +98,7 @@ impl App {
             gutter: true,
             action_queue: VecDeque::new(),
             regex_cache: None,
+            mouse_capture: true,
         }
     }
 
@@ -117,10 +119,8 @@ impl App {
             let filter_sets = match self.filter_data.filters() {
                 Ok(filters) => filters,
                 Err(err) => {
-                    self.status.submit_message(
-                        format!("filter persist/load: {err}"),
-                        Some(Duration::from_secs(2)),
-                    );
+                    self.status
+                        .submit_message(format!("filter persist/load: {err}"));
                     return Ok(());
                 }
             };
@@ -155,13 +155,32 @@ impl App {
         Ok(())
     }
 
+    fn enable_mouse_capture(terminal: &mut Terminal) -> Result<()> {
+        crossterm::execute!(terminal.backend_mut(), EnterAlternateScreen,)?;
+        Ok(())
+    }
+
+    fn disable_mouse_capture(terminal: &mut Terminal) -> Result<()> {
+        crossterm::execute!(terminal.backend_mut(), DisableMouseCapture,)?;
+        Ok(())
+    }
+
+    fn toggle_mouse_capture(&mut self, terminal: &mut Terminal) -> Result<()> {
+        self.mouse_capture = !self.mouse_capture;
+        if self.mouse_capture {
+            Self::enable_mouse_capture(terminal)
+        } else {
+            Self::disable_mouse_capture(terminal)
+        }
+    }
+
     fn exit_terminal(terminal: &mut Terminal) -> Result<()> {
         disable_raw_mode()?;
         crossterm::execute!(
             terminal.backend_mut(),
-            LeaveAlternateScreen,
-            DisableBracketedPaste,
             DisableMouseCapture,
+            DisableBracketedPaste,
+            LeaveAlternateScreen,
         )?;
         Ok(())
     }
@@ -175,16 +194,11 @@ impl App {
                 let export = source.compositor_mut().export_user_filters();
 
                 if let Err(err) = self.filter_data.add_filter(export) {
-                    self.status.submit_message(
-                        format!("filter save: {err}"),
-                        Some(Duration::from_secs(2)),
-                    );
+                    self.status.submit_message(format!("filter save: {err}"));
                 }
 
-                self.status.submit_message(
-                    "filter save: saved filters".to_string(),
-                    Some(Duration::from_secs(2)),
-                );
+                self.status
+                    .submit_message("filter save: saved filters".to_string());
             }
         }
 
@@ -361,7 +375,7 @@ impl App {
                     let result = match self.mode {
                         InputMode::Prompt(PromptMode::Command) => {
                             let command = self.prompt.submit();
-                            Ok(self.process_command(&command))
+                            Ok(self.process_command(&command, terminal))
                         }
                         InputMode::Prompt(PromptMode::Search { regex }) => {
                             let command = self.prompt.take();
@@ -397,21 +411,14 @@ impl App {
                         .map_err(Error::from)
                         .and_then(|mut file| viewer.write_bytes(&mut file))
                     {
-                        self.status.submit_message(
-                            format!("{}: {err}", path.display()),
-                            Some(Duration::from_secs(2)),
-                        );
+                        self.status
+                            .submit_message(format!("{}: {err}", path.display()));
                     } else {
-                        self.status.submit_message(
-                            format!("{}: export complete", path.display()),
-                            Some(Duration::from_secs(2)),
-                        );
+                        self.status
+                            .submit_message(format!("{}: export complete", path.display()));
                     }
                 } else {
-                    self.status.submit_message(
-                        String::from("No active viewer"),
-                        Some(Duration::from_secs(2)),
-                    );
+                    self.status.submit_message(String::from("No active viewer"));
                 }
             }
         };
@@ -426,10 +433,8 @@ impl App {
                     match viewer.export_string() {
                         Ok(text) => Ok(Some(text.into())),
                         Err(err) => {
-                            self.status.submit_message(
-                                format!("selection expansion: {err}"),
-                                Some(Duration::from_secs(2)),
-                            );
+                            self.status
+                                .submit_message(format!("selection expansion: {err}"));
                             Ok(Some("".into()))
                         }
                     }
@@ -453,29 +458,23 @@ impl App {
         pipe: bool,
     ) -> Result<bool> {
         let Ok(expanded) = shellexpand::env_with_context(command, |s| self.context(s)) else {
-            self.status.submit_message(
-                "shell: expansion failed".to_string(),
-                Some(Duration::from_secs(2)),
-            );
+            self.status
+                .submit_message("shell: expansion failed".to_string());
             return Ok(true);
         };
 
         let mut shl = shlex::Shlex::new(&expanded);
         let Some(cmd) = shl.next() else {
-            self.status.submit_message(
-                "shell: no command provided".to_string(),
-                Some(Duration::from_secs(2)),
-            );
+            self.status
+                .submit_message("shell: no command provided".to_string());
             return Ok(true);
         };
 
         let args = shl.by_ref().collect::<Vec<_>>();
 
         if shl.had_error {
-            self.status.submit_message(
-                "shell: lexing failed".to_string(),
-                Some(Duration::from_secs(2)),
-            );
+            self.status
+                .submit_message("shell: lexing failed".to_string());
             return Ok(true);
         }
 
@@ -487,8 +486,7 @@ impl App {
             Err(err) => {
                 terminal.clear()?;
                 Self::enter_terminal(terminal)?;
-                self.status
-                    .submit_message(format!("shell: {err}"), Some(Duration::from_secs(2)));
+                self.status.submit_message(format!("shell: {err}"));
                 return Ok(true);
             }
             Ok(child) => child,
@@ -507,8 +505,7 @@ impl App {
 
         let status = match child.wait() {
             Err(err) => {
-                self.status
-                    .submit_message(format!("shell: {err}"), Some(Duration::from_secs(2)));
+                self.status.submit_message(format!("shell: {err}"));
                 return Ok(true);
             }
             Ok(status) => status,
@@ -524,65 +521,57 @@ impl App {
     fn process_search(&mut self, pat: &str, escaped: bool) -> bool {
         if let Some(viewer) = self.mux.active_viewer_mut() {
             if let Err(err) = viewer.add_search_filter(pat, escaped) {
-                self.status.submit_message(
-                    match err {
-                        regex::Error::Syntax(err) => format!("{pat}: syntax ({err})"),
-                        regex::Error::CompiledTooBig(sz) => {
-                            format!("{pat}: regex surpassed size limit ({sz} bytes)")
-                        }
-                        _ => format!("{pat}: {err}"),
-                    },
-                    Some(Duration::from_secs(2)),
-                );
+                self.status.submit_message(match err {
+                    regex::Error::Syntax(err) => format!("{pat}: syntax ({err})"),
+                    regex::Error::CompiledTooBig(sz) => {
+                        format!("{pat}: regex surpassed size limit ({sz} bytes)")
+                    }
+                    _ => format!("{pat}: {err}"),
+                });
             };
         }
 
         true
     }
 
-    fn process_command(&mut self, command: &str) -> bool {
+    fn process_command(&mut self, command: &str, terminal: &mut Terminal) -> bool {
         let mut parts = command.split_whitespace();
 
         match parts.next() {
             Some("quit" | "q") => return false,
+            Some("mcap") => {
+                if let Err(err) = self.toggle_mouse_capture(terminal) {
+                    self.status
+                        .submit_message("mouse capture toggle failed: ".to_string());
+                }
+                return true;
+            }
             Some("open" | "o") => {
                 let path = parts.collect::<PathBuf>();
                 if let Err(err) = self.open_file(path.as_ref()) {
-                    self.status.submit_message(
-                        format!("{}: {err}", path.display()),
-                        Some(Duration::from_secs(2)),
-                    );
+                    self.status
+                        .submit_message(format!("{}: {err}", path.display()));
                 }
             }
             Some("pb" | "pbcopy") => {
                 let Some(clipboard) = self.clipboard.as_mut() else {
-                    self.status.submit_message(
-                        "pbcopy: clipboard not available".to_string(),
-                        Some(Duration::from_secs(2)),
-                    );
+                    self.status
+                        .submit_message("pbcopy: clipboard not available".to_string());
                     return true;
                 };
                 if let Some(viewer) = self.mux.active_viewer_mut() {
                     match viewer.export_string() {
                         Ok(text) => match clipboard.set_text(text) {
                             Ok(_) => {
-                                self.status.submit_message(
-                                    "pbcopy: copied to clipboard".to_string(),
-                                    Some(Duration::from_secs(2)),
-                                );
+                                self.status
+                                    .submit_message("pbcopy: copied to clipboard".to_string());
                             }
                             Err(err) => {
-                                self.status.submit_message(
-                                    format!("pbcopy: {err}"),
-                                    Some(Duration::from_secs(2)),
-                                );
+                                self.status.submit_message(format!("pbcopy: {err}"));
                             }
                         },
                         Err(err) => {
-                            self.status.submit_message(
-                                format!("pbcopy: {err}"),
-                                Some(Duration::from_secs(2)),
-                            );
+                            self.status.submit_message(format!("pbcopy: {err}"));
                         }
                     }
                 }
@@ -591,10 +580,7 @@ impl App {
                 if self.mux.active_viewer_mut().is_some() {
                     self.mux.close_active_viewer()
                 } else {
-                    self.status.submit_message(
-                        String::from("No active viewer"),
-                        Some(Duration::from_secs(2)),
-                    );
+                    self.status.submit_message(String::from("No active viewer"));
                 }
             }
             Some("gutter" | "g") => {
@@ -604,10 +590,9 @@ impl App {
                 Some("tabs" | "t" | "none") => self.mux.set_mode(MultiplexerMode::Tabs),
                 Some("split" | "s" | "win") => self.mux.set_mode(MultiplexerMode::Panes),
                 Some(style) => {
-                    self.status.submit_message(
-                        format!("mux {style}: invalid style, one of `tabs`, `split`"),
-                        Some(Duration::from_secs(2)),
-                    );
+                    self.status.submit_message(format!(
+                        "mux {style}: invalid style, one of `tabs`, `split`"
+                    ));
                 }
                 None => self.mux.set_mode(self.mux.mode().swap()),
             },
@@ -616,26 +601,18 @@ impl App {
                     let new_persistence = match self.filter_data.is_persistent() {
                         Ok(persistence) => !persistence,
                         Err(err) => {
-                            self.status.submit_message(
-                                format!("filter persist: {err}"),
-                                Some(Duration::from_secs(2)),
-                            );
+                            self.status.submit_message(format!("filter persist: {err}"));
                             return true;
                         }
                     };
 
                     if let Err(err) = self.filter_data.set_persistent(new_persistence) {
-                        self.status.submit_message(
-                            format!("filter persist: {err}"),
-                            Some(Duration::from_secs(2)),
-                        );
+                        self.status.submit_message(format!("filter persist: {err}"));
                         return true;
                     }
-                    
-                    self.status.submit_message(
-                        format!("filter persist: persistence = {new_persistence}"),
-                        Some(Duration::from_secs(2)),
-                    );
+
+                    self.status
+                        .submit_message(format!("filter persist: persistence = {new_persistence}"));
                 }
                 Some("copy" | "c") => {
                     let Some(source) = self.mux.active_viewer_mut() else {
@@ -644,33 +621,26 @@ impl App {
                     let export = source.compositor_mut().export_user_filters();
 
                     let Some(idx) = parts.next() else {
-                        self.status.submit_message(
-                            String::from("filter export: requires instance index"),
-                            Some(Duration::from_secs(2)),
-                        );
+                        self.status
+                            .submit_message(String::from("filter export: requires instance index"));
                         return true;
                     };
 
                     let Ok(idx) = idx.parse::<usize>() else {
-                        self.status.submit_message(
-                            format!("filter export {idx}: invalid index"),
-                            Some(Duration::from_secs(2)),
-                        );
+                        self.status
+                            .submit_message(format!("filter export {idx}: invalid index"));
                         return true;
                     };
                     let idx = idx.saturating_sub(1);
                     if self.mux.active() == idx {
-                        self.status.submit_message(
-                            String::from("filter export: cannot export to active instance"),
-                            Some(Duration::from_secs(2)),
-                        );
+                        self.status.submit_message(String::from(
+                            "filter export: cannot export to active instance",
+                        ));
                         return true;
                     }
                     let Some(target) = self.mux.viewers_mut().get_mut(idx) else {
-                        self.status.submit_message(
-                            format!("filter export {idx}: invalid index"),
-                            Some(Duration::from_secs(2)),
-                        );
+                        self.status
+                            .submit_message(format!("filter export {idx}: invalid index"));
                         return true;
                     };
 
@@ -683,16 +653,11 @@ impl App {
                     let export = source.compositor_mut().export_user_filters();
 
                     if let Err(err) = self.filter_data.add_filter(export) {
-                        self.status.submit_message(
-                            format!("filter save: {err}"),
-                            Some(Duration::from_secs(2)),
-                        );
+                        self.status.submit_message(format!("filter save: {err}"));
                     }
 
-                    self.status.submit_message(
-                        "filter save: saved filters".to_string(),
-                        Some(Duration::from_secs(2)),
-                    );
+                    self.status
+                        .submit_message("filter save: saved filters".to_string());
                 }
 
                 Some("load") => {
@@ -703,10 +668,7 @@ impl App {
                     let filter_sets = match self.filter_data.filters() {
                         Ok(filters) => filters,
                         Err(err) => {
-                            self.status.submit_message(
-                                format!("filter save: {err}"),
-                                Some(Duration::from_secs(2)),
-                            );
+                            self.status.submit_message(format!("filter save: {err}"));
                             return true;
                         }
                     };
@@ -714,10 +676,8 @@ impl App {
                     match filter_sets.first() {
                         Some(export) => viewer.import_user_filters(export.clone()),
                         None => {
-                            self.status.submit_message(
-                                "filter load: no saved filters".to_string(),
-                                Some(Duration::from_secs(2)),
-                            );
+                            self.status
+                                .submit_message("filter load: no saved filters".to_string());
                         }
                     }
                 }
@@ -745,27 +705,21 @@ impl App {
                     }
                 }
                 Some(cmd) => {
-                    self.status.submit_message(
-                        format!("filter {cmd}: invalid subcommand"),
-                        Some(Duration::from_secs(2)),
-                    );
+                    self.status
+                        .submit_message(format!("filter {cmd}: invalid subcommand"));
                 }
                 None => {
                     self.status.submit_message(
-                        String::from("filter: requires subcommand, one of `r[egex]`, `l[it]`, `clear`, `union`, `intersect`"),
-                        Some(Duration::from_secs(2)),
+                        String::from("filter: requires subcommand, one of `r[egex]`, `l[it]`, `clear`, `union`, `intersect`")
                     );
                 }
             },
             Some("export") => {
                 let path = parts.collect::<PathBuf>();
-                self.status.submit_message(
-                    format!(
-                        "{}: export starting (this may take a while...)",
-                        path.display()
-                    ),
-                    Some(Duration::from_secs(2)),
-                );
+                self.status.submit_message(format!(
+                    "{}: export starting (this may take a while...)",
+                    path.display()
+                ));
                 self.action_queue.push_back(Action::ExportFile(path));
             }
             Some(cmd) => {
@@ -776,10 +730,8 @@ impl App {
                         }
                     }
                 } else {
-                    self.status.submit_message(
-                        format!("{cmd}: Invalid command"),
-                        Some(Duration::from_secs(2)),
-                    )
+                    self.status
+                        .submit_message(format!("{cmd}: Invalid command"))
                 }
             }
             None => return true,

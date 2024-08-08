@@ -212,9 +212,7 @@ impl Keybinding {
                                 jump: CommandJump::Boundary,
                             }))
                         }
-                        input => Some(Action::Command(CommandAction::Type {
-                            input
-                        })),
+                        input => Some(Action::Command(CommandAction::Type { input })),
                     },
                     KeyCode::Tab => Some(Action::Command(CommandAction::Complete)),
                     _ => None,

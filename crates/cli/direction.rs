@@ -1,7 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Copy)]
-#[derive(Serialize, Deserialize)]
+#[derive(Clone, Copy, Serialize, Deserialize)]
 pub enum Direction {
     Back,
     Next,

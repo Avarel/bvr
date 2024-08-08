@@ -1,7 +1,7 @@
 pub mod filter;
 
-use std::path::PathBuf;
 use anyhow::Result;
+use std::path::PathBuf;
 
 const APP_ID: &str = "bvr";
 

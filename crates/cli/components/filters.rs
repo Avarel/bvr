@@ -5,10 +5,7 @@ use super::{
     viewport::Viewport,
 };
 use crate::{app::ViewDelta, colors, direction::Direction, regex_compile};
-use bvr_core::{
-    matches::CompositeStrategy,
-    LineSet, SegBuffer,
-};
+use bvr_core::{matches::CompositeStrategy, LineSet, SegBuffer};
 use ratatui::style::Color;
 use regex::bytes::Regex;
 
@@ -57,9 +54,7 @@ pub struct Filter {
 #[serde(tag = "type")]
 pub enum MaskExport {
     #[serde(rename = "regex")]
-    Regex {
-        regex: String
-    },
+    Regex { regex: String },
 }
 
 #[derive(Clone, serde::Serialize, serde::Deserialize)]
@@ -100,7 +95,9 @@ impl Filter {
     pub fn to_export(&self) -> FilterExport {
         FilterExport {
             mask: match &self.mask {
-                Mask::Regex(regex) => MaskExport::Regex { regex: regex.to_string() },
+                Mask::Regex(regex) => MaskExport::Regex {
+                    regex: regex.to_string(),
+                },
                 Mask::Builtin(_) => panic!("cannot serialize builtin mask"),
             },
             enabled: self.enabled,

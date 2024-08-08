@@ -79,7 +79,7 @@ pub enum CommandAction {
         direction: Direction,
     },
     Type {
-        input: char
+        input: char,
     },
     Paste {
         input: String,

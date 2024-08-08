@@ -164,12 +164,9 @@ impl PromptWidget<'_> {
 
                 static HIGHLIGHT_BLOCK: OnceLock<Block> = OnceLock::new();
                 HIGHLIGHT_BLOCK
-                    .get_or_init(|| {
-                        Block::new()
-                            .style(Style::new().bg(colors::COMMAND_BAR_SELECT))
-                    })
+                    .get_or_init(|| Block::new().style(Style::new().bg(colors::COMMAND_BAR_SELECT)))
                     .render(span_area, buf);
-            },
+            }
             _ => {}
         }
 
