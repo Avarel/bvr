@@ -17,11 +17,11 @@ impl StatusApp {
         }
     }
 
-    pub fn submit_message(&mut self, message: String) {
-        self.submit_message_with_duration(message, Some(Duration::from_secs(2)))
+    pub fn msg(&mut self, message: String) {
+        self.msg_with_duration(message, Some(Duration::from_secs(2)))
     }
 
-    pub fn submit_message_with_duration(&mut self, message: String, duration: Option<Duration>) {
+    pub fn msg_with_duration(&mut self, message: String, duration: Option<Duration>) {
         if message.is_empty() {
             self.message.clear();
             self.timestamp = None;

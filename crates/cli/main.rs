@@ -21,9 +21,9 @@ fn main() -> Result<()> {
 
     let stdout = std::io::stdout().lock();
     let backend = CrosstermBackend::new(stdout);
-    let mut terminal = Terminal::new(backend)?;
+    let terminal = Terminal::new(backend)?;
 
-    let mut app = App::new();
+    let mut app = App::new(terminal);
 
     for path in args.files {
         app.open_file(&path)?;
@@ -33,7 +33,7 @@ fn main() -> Result<()> {
         app.open_stream(String::from("Pipe Stream"), Box::new(std::io::stdin()))?;
     }
 
-    app.run_app(&mut terminal)
+    app.run_app()
 }
 
 fn regex_compile(pattern: &str) -> std::result::Result<regex::bytes::Regex, regex::Error> {

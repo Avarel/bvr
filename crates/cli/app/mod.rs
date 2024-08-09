@@ -29,7 +29,6 @@ use crossterm::event::{
 use crossterm::terminal::{
     disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
 };
-use ratatui::prelude::*;
 use regex::bytes::Regex;
 use serde::{Deserialize, Serialize};
 use std::{
@@ -71,7 +70,8 @@ pub enum ViewDelta {
     Match,
 }
 
-pub struct App {
+pub struct App<'term> {
+    term: Terminal<'term>,
     mode: InputMode,
     mux: MultiplexerApp,
     status: StatusApp,
@@ -85,9 +85,17 @@ pub struct App {
     mouse_capture: bool,
 }
 
-impl App {
-    pub fn new() -> Self {
+impl Drop for App<'_> {
+    fn drop(&mut self) {
+        self.exit_terminal()
+            .expect("exiting terminal should not error")
+    }
+}
+
+impl<'term> App<'term> {
+    pub fn new(term: Terminal<'term>) -> Self {
         Self {
+            term,
             mode: InputMode::Normal,
             prompt: PromptApp::new(),
             mux: MultiplexerApp::new(),
@@ -119,8 +127,7 @@ impl App {
             let filter_sets = match self.filter_data.filters() {
                 Ok(filters) => filters,
                 Err(err) => {
-                    self.status
-                        .submit_message(format!("filter persist/load: {err}"));
+                    self.status.msg(format!("filter persist/load: {err}"));
                     return Ok(());
                 }
             };
@@ -144,10 +151,10 @@ impl App {
         self.mux.push_viewer(viewer);
     }
 
-    fn enter_terminal(terminal: &mut Terminal) -> Result<()> {
+    fn enter_terminal(&mut self) -> Result<()> {
         enable_raw_mode()?;
         crossterm::execute!(
-            terminal.backend_mut(),
+            self.term.backend_mut(),
             EnterAlternateScreen,
             EnableBracketedPaste,
             EnableMouseCapture,
@@ -155,62 +162,64 @@ impl App {
         Ok(())
     }
 
-    fn enable_mouse_capture(terminal: &mut Terminal) -> Result<()> {
-        crossterm::execute!(terminal.backend_mut(), EnterAlternateScreen,)?;
+    fn exit_terminal(&mut self) -> Result<()> {
+        disable_raw_mode()?;
+        if self.mouse_capture {
+            crossterm::execute!(
+                self.term.backend_mut(),
+                DisableMouseCapture,
+                DisableBracketedPaste,
+                LeaveAlternateScreen,
+            )?;
+        } else {
+            crossterm::execute!(
+                self.term.backend_mut(),
+                DisableBracketedPaste,
+                LeaveAlternateScreen,
+            )?;
+        }
         Ok(())
     }
 
-    fn disable_mouse_capture(terminal: &mut Terminal) -> Result<()> {
-        crossterm::execute!(terminal.backend_mut(), DisableMouseCapture,)?;
-        Ok(())
-    }
-
-    fn toggle_mouse_capture(&mut self, terminal: &mut Terminal) -> Result<()> {
+    fn toggle_mouse_capture(&mut self) -> Result<()> {
         self.mouse_capture = !self.mouse_capture;
         if self.mouse_capture {
-            Self::enable_mouse_capture(terminal)
+            crossterm::execute!(self.term.backend_mut(), EnableMouseCapture)?;
         } else {
-            Self::disable_mouse_capture(terminal)
+            crossterm::execute!(self.term.backend_mut(), DisableMouseCapture)?;
         }
-    }
-
-    fn exit_terminal(terminal: &mut Terminal) -> Result<()> {
-        disable_raw_mode()?;
-        crossterm::execute!(
-            terminal.backend_mut(),
-            DisableMouseCapture,
-            DisableBracketedPaste,
-            LeaveAlternateScreen,
-        )?;
         Ok(())
     }
 
-    pub fn run_app(&mut self, terminal: &mut Terminal) -> Result<()> {
-        Self::enter_terminal(terminal)?;
-        let result = self.event_loop(terminal);
+    pub fn run_app(mut self) -> Result<()> {
+        self.enter_terminal()?;
+        let result = self.event_loop();
 
         if self.filter_data.is_persistent().unwrap_or(false) {
             if let Some(source) = self.mux.active_viewer_mut() {
                 let export = source.compositor_mut().export_user_filters();
 
                 if let Err(err) = self.filter_data.add_filter(export) {
-                    self.status.submit_message(format!("filter save: {err}"));
+                    self.status.msg(format!("filter save: {err}"));
                 }
 
-                self.status
-                    .submit_message("filter save: saved filters".to_string());
+                self.status.msg("filter save: saved filters".to_string());
             }
         }
 
-        Self::exit_terminal(terminal)?;
         result
     }
 
-    fn event_loop(&mut self, terminal: &mut Terminal) -> Result<()> {
+    fn event_loop(&mut self) -> Result<()> {
         let mut mouse_handler = MouseHandler::new();
 
         loop {
-            terminal.draw(|f| self.ui(f, &mut mouse_handler))?;
+            let cursor = self.ui(&mut mouse_handler);
+            self.term.draw(|f| {
+                if let Some(cursor) = cursor {
+                    f.set_cursor_position(cursor);
+                }
+            })?;
 
             let action = match self.action_queue.pop_front() {
                 Some(action) => action,
@@ -230,14 +239,14 @@ impl App {
                 },
             };
 
-            if !self.process_action(action, terminal)? {
+            if !self.process_action(action)? {
                 break;
             }
         }
         Ok(())
     }
 
-    fn process_action(&mut self, action: Action, terminal: &mut Terminal) -> Result<bool> {
+    fn process_action(&mut self, action: Action) -> Result<bool> {
         match action {
             Action::Exit => return Ok(false),
             Action::SwitchMode(new_mode) => {
@@ -375,7 +384,7 @@ impl App {
                     let result = match self.mode {
                         InputMode::Prompt(PromptMode::Command) => {
                             let command = self.prompt.submit();
-                            Ok(self.process_command(&command, terminal))
+                            Ok(self.process_command(&command))
                         }
                         InputMode::Prompt(PromptMode::Search { regex }) => {
                             let command = self.prompt.take();
@@ -383,7 +392,7 @@ impl App {
                         }
                         InputMode::Prompt(PromptMode::Shell { pipe }) => {
                             let command = self.prompt.take();
-                            self.process_shell(&command, true, terminal, pipe)
+                            self.process_shell(&command, true, pipe)
                         }
                         InputMode::Normal | InputMode::Visual | InputMode::Filter => unreachable!(),
                     };
@@ -411,14 +420,13 @@ impl App {
                         .map_err(Error::from)
                         .and_then(|mut file| viewer.write_bytes(&mut file))
                     {
-                        self.status
-                            .submit_message(format!("{}: {err}", path.display()));
+                        self.status.msg(format!("{}: {err}", path.display()));
                     } else {
                         self.status
-                            .submit_message(format!("{}: export complete", path.display()));
+                            .msg(format!("{}: export complete", path.display()));
                     }
                 } else {
-                    self.status.submit_message(String::from("No active viewer"));
+                    self.status.msg(String::from("No active viewer"));
                 }
             }
         };
@@ -433,8 +441,7 @@ impl App {
                     match viewer.export_string() {
                         Ok(text) => Ok(Some(text.into())),
                         Err(err) => {
-                            self.status
-                                .submit_message(format!("selection expansion: {err}"));
+                            self.status.msg(format!("selection expansion: {err}"));
                             Ok(Some("".into()))
                         }
                     }
@@ -450,43 +457,34 @@ impl App {
         }
     }
 
-    fn process_shell(
-        &mut self,
-        command: &str,
-        terminate: bool,
-        terminal: &mut Terminal,
-        pipe: bool,
-    ) -> Result<bool> {
+    fn process_shell(&mut self, command: &str, terminate: bool, pipe: bool) -> Result<bool> {
         let Ok(expanded) = shellexpand::env_with_context(command, |s| self.context(s)) else {
-            self.status
-                .submit_message("shell: expansion failed".to_string());
+            self.status.msg("shell: expansion failed".to_string());
             return Ok(true);
         };
 
         let mut shl = shlex::Shlex::new(&expanded);
         let Some(cmd) = shl.next() else {
-            self.status
-                .submit_message("shell: no command provided".to_string());
+            self.status.msg("shell: no command provided".to_string());
             return Ok(true);
         };
 
         let args = shl.by_ref().collect::<Vec<_>>();
 
         if shl.had_error {
-            self.status
-                .submit_message("shell: lexing failed".to_string());
+            self.status.msg("shell: lexing failed".to_string());
             return Ok(true);
         }
 
         let mut command = std::process::Command::new(cmd);
         command.args(args);
 
-        Self::exit_terminal(terminal)?;
+        self.exit_terminal()?;
         let mut child = match command.spawn() {
             Err(err) => {
-                terminal.clear()?;
-                Self::enter_terminal(terminal)?;
-                self.status.submit_message(format!("shell: {err}"));
+                self.term.clear()?;
+                self.enter_terminal()?;
+                self.status.msg(format!("shell: {err}"));
                 return Ok(true);
             }
             Ok(child) => child,
@@ -505,7 +503,7 @@ impl App {
 
         let status = match child.wait() {
             Err(err) => {
-                self.status.submit_message(format!("shell: {err}"));
+                self.status.msg(format!("shell: {err}"));
                 return Ok(true);
             }
             Ok(status) => status,
@@ -521,7 +519,7 @@ impl App {
     fn process_search(&mut self, pat: &str, escaped: bool) -> bool {
         if let Some(viewer) = self.mux.active_viewer_mut() {
             if let Err(err) = viewer.add_search_filter(pat, escaped) {
-                self.status.submit_message(match err {
+                self.status.msg(match err {
                     regex::Error::Syntax(err) => format!("{pat}: syntax ({err})"),
                     regex::Error::CompiledTooBig(sz) => {
                         format!("{pat}: regex surpassed size limit ({sz} bytes)")
@@ -534,44 +532,41 @@ impl App {
         true
     }
 
-    fn process_command(&mut self, command: &str, terminal: &mut Terminal) -> bool {
+    fn process_command(&mut self, command: &str) -> bool {
         let mut parts = command.split_whitespace();
 
         match parts.next() {
             Some("quit" | "q") => return false,
             Some("mcap") => {
-                if let Err(err) = self.toggle_mouse_capture(terminal) {
-                    self.status
-                        .submit_message("mouse capture toggle failed: ".to_string());
+                if let Err(_) = self.toggle_mouse_capture() {
+                    self.status.msg("mouse capture toggle failed".to_string());
                 }
                 return true;
             }
             Some("open" | "o") => {
                 let path = parts.collect::<PathBuf>();
                 if let Err(err) = self.open_file(path.as_ref()) {
-                    self.status
-                        .submit_message(format!("{}: {err}", path.display()));
+                    self.status.msg(format!("{}: {err}", path.display()));
                 }
             }
             Some("pb" | "pbcopy") => {
                 let Some(clipboard) = self.clipboard.as_mut() else {
                     self.status
-                        .submit_message("pbcopy: clipboard not available".to_string());
+                        .msg("pbcopy: clipboard not available".to_string());
                     return true;
                 };
                 if let Some(viewer) = self.mux.active_viewer_mut() {
                     match viewer.export_string() {
                         Ok(text) => match clipboard.set_text(text) {
                             Ok(_) => {
-                                self.status
-                                    .submit_message("pbcopy: copied to clipboard".to_string());
+                                self.status.msg("pbcopy: copied to clipboard".to_string());
                             }
                             Err(err) => {
-                                self.status.submit_message(format!("pbcopy: {err}"));
+                                self.status.msg(format!("pbcopy: {err}"));
                             }
                         },
                         Err(err) => {
-                            self.status.submit_message(format!("pbcopy: {err}"));
+                            self.status.msg(format!("pbcopy: {err}"));
                         }
                     }
                 }
@@ -580,7 +575,7 @@ impl App {
                 if self.mux.active_viewer_mut().is_some() {
                     self.mux.close_active_viewer()
                 } else {
-                    self.status.submit_message(String::from("No active viewer"));
+                    self.status.msg(String::from("No active viewer"));
                 }
             }
             Some("gutter" | "g") => {
@@ -590,7 +585,7 @@ impl App {
                 Some("tabs" | "t" | "none") => self.mux.set_mode(MultiplexerMode::Tabs),
                 Some("split" | "s" | "win") => self.mux.set_mode(MultiplexerMode::Panes),
                 Some(style) => {
-                    self.status.submit_message(format!(
+                    self.status.msg(format!(
                         "mux {style}: invalid style, one of `tabs`, `split`"
                     ));
                 }
@@ -601,18 +596,18 @@ impl App {
                     let new_persistence = match self.filter_data.is_persistent() {
                         Ok(persistence) => !persistence,
                         Err(err) => {
-                            self.status.submit_message(format!("filter persist: {err}"));
+                            self.status.msg(format!("filter persist: {err}"));
                             return true;
                         }
                     };
 
                     if let Err(err) = self.filter_data.set_persistent(new_persistence) {
-                        self.status.submit_message(format!("filter persist: {err}"));
+                        self.status.msg(format!("filter persist: {err}"));
                         return true;
                     }
 
                     self.status
-                        .submit_message(format!("filter persist: persistence = {new_persistence}"));
+                        .msg(format!("filter persist: persistence = {new_persistence}"));
                 }
                 Some("copy" | "c") => {
                     let Some(source) = self.mux.active_viewer_mut() else {
@@ -622,25 +617,25 @@ impl App {
 
                     let Some(idx) = parts.next() else {
                         self.status
-                            .submit_message(String::from("filter export: requires instance index"));
+                            .msg(String::from("filter export: requires instance index"));
                         return true;
                     };
 
                     let Ok(idx) = idx.parse::<usize>() else {
                         self.status
-                            .submit_message(format!("filter export {idx}: invalid index"));
+                            .msg(format!("filter export {idx}: invalid index"));
                         return true;
                     };
                     let idx = idx.saturating_sub(1);
                     if self.mux.active() == idx {
-                        self.status.submit_message(String::from(
+                        self.status.msg(String::from(
                             "filter export: cannot export to active instance",
                         ));
                         return true;
                     }
                     let Some(target) = self.mux.viewers_mut().get_mut(idx) else {
                         self.status
-                            .submit_message(format!("filter export {idx}: invalid index"));
+                            .msg(format!("filter export {idx}: invalid index"));
                         return true;
                     };
 
@@ -653,11 +648,10 @@ impl App {
                     let export = source.compositor_mut().export_user_filters();
 
                     if let Err(err) = self.filter_data.add_filter(export) {
-                        self.status.submit_message(format!("filter save: {err}"));
+                        self.status.msg(format!("filter save: {err}"));
                     }
 
-                    self.status
-                        .submit_message("filter save: saved filters".to_string());
+                    self.status.msg("filter save: saved filters".to_string());
                 }
 
                 Some("load") => {
@@ -668,7 +662,7 @@ impl App {
                     let filter_sets = match self.filter_data.filters() {
                         Ok(filters) => filters,
                         Err(err) => {
-                            self.status.submit_message(format!("filter save: {err}"));
+                            self.status.msg(format!("filter save: {err}"));
                             return true;
                         }
                     };
@@ -676,8 +670,7 @@ impl App {
                     match filter_sets.first() {
                         Some(export) => viewer.import_user_filters(export.clone()),
                         None => {
-                            self.status
-                                .submit_message("filter load: no saved filters".to_string());
+                            self.status.msg("filter load: no saved filters".to_string());
                         }
                     }
                 }
@@ -705,18 +698,17 @@ impl App {
                     }
                 }
                 Some(cmd) => {
-                    self.status
-                        .submit_message(format!("filter {cmd}: invalid subcommand"));
+                    self.status.msg(format!("filter {cmd}: invalid subcommand"));
                 }
                 None => {
-                    self.status.submit_message(
+                    self.status.msg(
                         String::from("filter: requires subcommand, one of `r[egex]`, `l[it]`, `clear`, `union`, `intersect`")
                     );
                 }
             },
             Some("export") => {
                 let path = parts.collect::<PathBuf>();
-                self.status.submit_message(format!(
+                self.status.msg(format!(
                     "{}: export starting (this may take a while...)",
                     path.display()
                 ));
@@ -730,8 +722,7 @@ impl App {
                         }
                     }
                 } else {
-                    self.status
-                        .submit_message(format!("{cmd}: Invalid command"))
+                    self.status.msg(format!("{cmd}: Invalid command"))
                 }
             }
             None => return true,
@@ -740,7 +731,8 @@ impl App {
         true
     }
 
-    fn ui(&mut self, f: &mut Frame, handler: &mut MouseHandler) {
+    fn ui(&mut self, handler: &mut MouseHandler) -> Option<(u16, u16)> {
+        let mut f = self.term.get_frame();
         let [mux_chunk, cmd_chunk] = MultiplexerWidget::split_bottom(f.area(), 1);
 
         match self.mode {
@@ -786,8 +778,6 @@ impl App {
         }
         .render(cmd_chunk, f.buffer_mut());
 
-        if let Some((x, y)) = cursor {
-            f.set_cursor_position((x, y));
-        }
+        cursor
     }
 }
