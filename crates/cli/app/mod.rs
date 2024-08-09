@@ -76,6 +76,12 @@ pub enum ViewDelta {
     Match,
 }
 
+struct RegexCache {
+    pattern: String,
+    escaped: bool,
+    regex: Option<Regex>,
+}
+
 pub struct App<'term> {
     term: Terminal<'term>,
     mode: InputMode,
@@ -87,7 +93,7 @@ pub struct App<'term> {
     filter_data: FilterData,
     gutter: bool,
     action_queue: VecDeque<Action>,
-    regex_cache: Option<(String, bool, Option<Regex>)>,
+    regex_cache: Option<RegexCache>,
     mouse_capture: bool,
     linked_filters: bool,
 }
@@ -756,7 +762,7 @@ impl<'term> App<'term> {
                 let pattern_mismatch = self
                     .regex_cache
                     .as_ref()
-                    .map(|(p, e, _)| *e != escaped || p != pattern)
+                    .map(|cache| cache.escaped != escaped || cache.pattern != pattern)
                     .unwrap_or(true);
 
                 if pattern_mismatch {
@@ -767,7 +773,11 @@ impl<'term> App<'term> {
                     }
                     .ok();
 
-                    self.regex_cache = Some((pattern.to_owned(), escaped, regex))
+                    self.regex_cache = Some(RegexCache {
+                        pattern: pattern.to_owned(),
+                        escaped,
+                        regex,
+                    })
                 }
             }
             InputMode::Prompt(_) | InputMode::Normal | InputMode::Visual | InputMode::Filter => {
@@ -781,7 +791,7 @@ impl<'term> App<'term> {
             mode: self.mode,
             gutter: self.gutter,
             linked_filters: self.linked_filters,
-            regex: self.regex_cache.as_ref().and_then(|(_, _, r)| r.as_ref()),
+            regex: self.regex_cache.as_ref().and_then(|cache| cache.regex.as_ref()),
         }
         .render(mux_chunk, f.buffer_mut(), handler);
 
