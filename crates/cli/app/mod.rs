@@ -83,6 +83,7 @@ pub struct App<'term> {
     action_queue: VecDeque<Action>,
     regex_cache: Option<(String, Option<Regex>)>,
     mouse_capture: bool,
+    linked_filters: bool,
 }
 
 impl Drop for App<'_> {
@@ -107,6 +108,7 @@ impl<'term> App<'term> {
             action_queue: VecDeque::new(),
             regex_cache: None,
             mouse_capture: true,
+            linked_filters: false,
         }
     }
 
@@ -181,6 +183,10 @@ impl<'term> App<'term> {
         Ok(())
     }
 
+    fn toggle_linked_filters(&mut self) {
+        self.linked_filters = !self.linked_filters;
+    }
+
     fn toggle_mouse_capture(&mut self) -> Result<()> {
         self.mouse_capture = !self.mouse_capture;
         if self.mouse_capture {
@@ -246,6 +252,14 @@ impl<'term> App<'term> {
         Ok(())
     }
 
+    fn get_target_view(&mut self, target_view: Option<usize>) -> Option<&mut Instance> {
+        if let Some(index) = target_view {
+            self.mux.viewers_mut().get_mut(index)
+        } else {
+            self.mux.active_viewer_mut()
+        }
+    }
+
     fn process_action(&mut self, action: Action) -> Result<bool> {
         match action {
             Action::Exit => return Ok(false),
@@ -266,13 +280,7 @@ impl<'term> App<'term> {
                     delta,
                     target_view,
                 } => {
-                    let viewer = if let Some(index) = target_view {
-                        self.mux.viewers_mut().get_mut(index)
-                    } else {
-                        self.mux.active_viewer_mut()
-                    };
-
-                    if let Some(viewer) = viewer {
+                    if let Some(viewer) = self.get_target_view(target_view) {
                         viewer.move_viewport_vertical(direction, delta)
                     }
                 }
@@ -281,13 +289,7 @@ impl<'term> App<'term> {
                     delta,
                     target_view,
                 } => {
-                    let viewer = if let Some(index) = target_view {
-                        self.mux.viewers_mut().get_mut(index)
-                    } else {
-                        self.mux.active_viewer_mut()
-                    };
-
-                    if let Some(viewer) = viewer {
+                    if let Some(viewer) = self.get_target_view(target_view) {
                         viewer.move_viewport_horizontal(direction, delta)
                     }
                 }
@@ -592,6 +594,10 @@ impl<'term> App<'term> {
                 None => self.mux.set_mode(self.mux.mode().swap()),
             },
             Some("filter" | "find" | "f") => match parts.next() {
+                Some("link") => {
+                    self.toggle_linked_filters();
+                    return true;
+                }
                 Some("persist") => {
                     let new_persistence = match self.filter_data.is_persistent() {
                         Ok(persistence) => !persistence,
@@ -766,6 +772,7 @@ impl<'term> App<'term> {
             status: &mut self.status,
             mode: self.mode,
             gutter: self.gutter,
+            linked_filters: self.linked_filters,
             regex: self.regex_cache.as_ref().and_then(|(_, r)| r.as_ref()),
         }
         .render(mux_chunk, f.buffer_mut(), handler);

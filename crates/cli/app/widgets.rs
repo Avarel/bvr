@@ -181,45 +181,6 @@ impl PromptWidget<'_> {
     }
 }
 
-struct EdgeBg(bool);
-
-impl EdgeBg {
-    fn render(self, area: Rect, buf: &mut Buffer) {
-        if self.0 {
-            static WIDGET_BLOCK: OnceLock<Block> = OnceLock::new();
-            WIDGET_BLOCK
-                .get_or_init(|| {
-                    Block::new()
-                        .border_style(Style::new().fg(colors::BLACK).bg(colors::GUTTER_BG))
-                        .style(Style::new().bg(colors::BG))
-                })
-                .render(area, buf);
-        } else {
-            const SET_LEFT_EDGE: symbols::border::Set = symbols::border::Set {
-                top_left: "",
-                top_right: "",
-                bottom_left: "",
-                bottom_right: "",
-                vertical_left: "▏",
-                vertical_right: "",
-                horizontal_top: "",
-                horizontal_bottom: "",
-            };
-
-            static LINE_WIDGET_BLOCK: OnceLock<Block> = OnceLock::new();
-            LINE_WIDGET_BLOCK
-                .get_or_init(|| {
-                    Block::new()
-                        .border_set(SET_LEFT_EDGE)
-                        .border_style(Style::new().fg(colors::BLACK).bg(colors::GUTTER_BG))
-                        .borders(Borders::LEFT)
-                        .style(Style::new().bg(colors::BG))
-                })
-                .render(area, buf);
-        }
-    }
-}
-
 pub struct TabWidget<'a> {
     view_index: usize,
     name: &'a str,
@@ -257,12 +218,48 @@ impl TabWidget<'_> {
     }
 }
 
+pub struct MultiplexerPane<'a> {
+    view_index: usize,
+    viewer: &'a mut Instance,
+    show_filter_on_pane: bool,
+    show_selection: bool,
+    gutter: bool,
+    regex: Option<&'a Regex>,
+}
+
+impl MultiplexerPane<'_> {
+    const FILTER_MAX_HEIGHT: u16 = 10;
+
+    pub fn render(self, mut area: Rect, buf: &mut Buffer, handler: &mut MouseHandler) {
+        if self.show_filter_on_pane {
+            let [view_chunk, filter_chunk] =
+                MultiplexerWidget::split_bottom(area, Self::FILTER_MAX_HEIGHT);
+            FilterViewerWidget {
+                view_index: self.view_index,
+                viewer: self.viewer,
+            }
+            .render(filter_chunk, buf, handler);
+            area = view_chunk;
+        }
+
+        LineViewerWidget {
+            view_index: self.view_index,
+            show_selection: self.show_selection,
+            viewer: self.viewer,
+            gutter: self.gutter,
+            regex: self.regex,
+        }
+        .render(area, buf, handler);
+    }
+}
+
 pub struct MultiplexerWidget<'a> {
     pub mux: &'a mut MultiplexerApp,
     pub status: &'a mut StatusApp,
     pub mode: InputMode,
     pub gutter: bool,
     pub regex: Option<&'a Regex>,
+    pub linked_filters: bool,
 }
 
 impl MultiplexerWidget<'_> {
@@ -271,7 +268,7 @@ impl MultiplexerWidget<'_> {
         Layout::new(ratatui::prelude::Direction::Horizontal, constraints).split(area)
     }
 
-    pub fn split_top(area: Rect, top_height: u16) -> [Rect; 2] {
+    fn split_top(area: Rect, top_height: u16) -> [Rect; 2] {
         let mut tab_chunk = area;
         tab_chunk.height = top_height;
 
@@ -293,104 +290,63 @@ impl MultiplexerWidget<'_> {
         [view_chunk, filter_chunk]
     }
 
-    const FILTER_MAX_HEIGHT: u16 = 10;
     pub fn render(self, area: Rect, buf: &mut Buffer, handler: &mut MouseHandler) {
         let [mux_chunk, status_chunk] = Self::split_bottom(area, 1);
 
-        fn fixup_chunk(fix: bool, mut chunk: Rect) -> Rect {
-            if fix {
-                chunk.x += 1;
-                chunk.width -= 1;
-            }
-            chunk
-        }
-
         if !self.mux.is_empty() {
             let active = self.mux.active();
+
+            let show_filter_on_pane = self.mode == InputMode::Filter && !self.linked_filters;
+
+            let [tab_chunk, view_chunk] = Self::split_top(mux_chunk, 1);
+            let split_chunks = Self::split_horizontal(mux_chunk, self.mux.len());
+
+            for (view_index, (chunk, viewer)) in split_chunks
+                .iter()
+                .map(|&chunk| tab_chunk.intersection(chunk))
+                .zip(self.mux.viewers_mut())
+                .enumerate()
+            {
+                TabWidget {
+                    view_index,
+                    name: viewer.name(),
+                    active: active == view_index,
+                }
+                .render(chunk, buf, handler);
+            }
+
             match self.mux.mode() {
                 MultiplexerMode::Panes => {
-                    for (i, (&chunk, viewer)) in Self::split_horizontal(mux_chunk, self.mux.len())
+                    for (view_index, (pane_chunk, viewer)) in split_chunks
                         .iter()
+                        .map(|&chunk| view_chunk.intersection(chunk))
                         .zip(self.mux.viewers_mut())
                         .enumerate()
                     {
-                        let [tab_chunk, view_chunk] = Self::split_top(chunk, 1);
-                        TabWidget {
-                            view_index: i,
-                            name: viewer.name(),
-                            active: active == i,
-                        }
-                        .render(tab_chunk, buf, handler);
-
-                        let mut viewer_chunk = view_chunk;
-
-                        EdgeBg(i == 0).render(viewer_chunk, buf);
-
-                        if self.mode == InputMode::Filter {
-                            let [view_chunk, filter_chunk] =
-                                Self::split_bottom(view_chunk, Self::FILTER_MAX_HEIGHT);
-                            FilterViewerWidget {
-                                view_index: i,
-                                viewer,
-                            }
-                            .render(filter_chunk, buf, handler);
-                            viewer_chunk = view_chunk;
-                        }
-
-                        LineViewerWidget {
-                            view_index: i,
-                            show_selection: self.mode == InputMode::Visual,
+                        MultiplexerPane {
+                            view_index,
                             viewer,
+                            show_filter_on_pane,
+                            show_selection: self.mode == InputMode::Visual,
                             gutter: self.gutter,
                             regex: self.regex,
                         }
-                        .render(
-                            fixup_chunk(i != 0, viewer_chunk),
-                            buf,
-                            handler,
-                        );
+                        .render(pane_chunk, buf, handler);
                     }
                 }
                 MultiplexerMode::Tabs => {
-                    let [tab_chunk, view_chunk] = Self::split_top(mux_chunk, 1);
-
-                    for (i, (&chunk, viewer)) in Self::split_horizontal(tab_chunk, self.mux.len())
-                        .iter()
-                        .zip(self.mux.viewers_mut())
-                        .enumerate()
-                    {
-                        TabWidget {
-                            view_index: i,
-                            name: viewer.name(),
-                            active: active == i,
-                        }
-                        .render(chunk, buf, handler);
-                    }
-
-                    let active = self.mux.active();
                     let viewer = self.mux.active_viewer_mut().unwrap();
-                    let mut viewer_chunk = view_chunk;
+                    let pane_chunk = view_chunk;
 
-                    EdgeBg(true).render(viewer_chunk, buf);
-
-                    if self.mode == InputMode::Filter {
-                        let [view_chunk, filter_chunk] =
-                            Self::split_bottom(view_chunk, Self::FILTER_MAX_HEIGHT);
-                        FilterViewerWidget {
-                            view_index: 0,
-                            viewer,
-                        }
-                        .render(filter_chunk, buf, handler);
-                        viewer_chunk = view_chunk;
-                    }
-                    LineViewerWidget {
+                    MultiplexerPane {
                         view_index: active,
-                        show_selection: self.mode == InputMode::Visual,
                         viewer,
+                        show_filter_on_pane,
+                        show_selection: self.mode == InputMode::Visual,
                         gutter: self.gutter,
                         regex: self.regex,
                     }
-                    .render(viewer_chunk, buf, handler);
+                    .render(pane_chunk, buf, handler);
                 }
             }
         } else {

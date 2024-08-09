@@ -14,8 +14,8 @@ enum FilterDataState {
 
 #[derive(Clone, Serialize, Deserialize, Default)]
 struct LoadedFilterData {
-    pub persistent: bool,
-    pub filters: Vec<FilterExportSet>,
+    persistent: bool,
+    filters: Vec<FilterExportSet>,
 }
 
 impl FilterData {
