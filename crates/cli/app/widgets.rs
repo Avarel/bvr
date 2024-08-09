@@ -37,10 +37,10 @@ impl<'a> Widget for StatusWidget<'a> {
         let (accent_color, mode_name) = match self.input_mode {
             InputMode::Prompt(PromptMode::Command) => (colors::COMMAND_ACCENT, " COMMAND "),
             InputMode::Prompt(PromptMode::Shell { .. }) => (colors::SHELL_ACCENT, " SHELL "),
-            InputMode::Prompt(PromptMode::Search { regex: true }) => {
+            InputMode::Prompt(PromptMode::Search { escaped: false }) => {
                 (colors::FILTER_ACCENT, " FILTER ")
             }
-            InputMode::Prompt(PromptMode::Search { regex: false }) => {
+            InputMode::Prompt(PromptMode::Search { escaped: true }) => {
                 (colors::FILTER_ACCENT, " FILTER (ESCAPED) ")
             }
             InputMode::Normal => (colors::VIEWER_ACCENT, " NORMAL "),

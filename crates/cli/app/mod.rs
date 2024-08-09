@@ -52,12 +52,18 @@ pub enum InputMode {
     Filter,
 }
 
+impl InputMode {
+    pub fn is_prompt_search(&self) -> bool {
+        matches!(self, InputMode::Prompt(PromptMode::Search { .. }))
+    }
+}
+
 #[derive(PartialEq, Clone, Copy, Serialize, Deserialize)]
 #[serde(tag = "prompt")]
 pub enum PromptMode {
     Command,
     Shell { pipe: bool },
-    Search { regex: bool },
+    Search { escaped: bool },
 }
 
 #[derive(Serialize, Deserialize)]
@@ -81,7 +87,7 @@ pub struct App<'term> {
     filter_data: FilterData,
     gutter: bool,
     action_queue: VecDeque<Action>,
-    regex_cache: Option<(String, Option<Regex>)>,
+    regex_cache: Option<(String, bool, Option<Regex>)>,
     mouse_capture: bool,
     linked_filters: bool,
 }
@@ -264,7 +270,9 @@ impl<'term> App<'term> {
         match action {
             Action::Exit => return Ok(false),
             Action::SwitchMode(new_mode) => {
-                self.prompt.take();
+                if !self.mode.is_prompt_search() || !new_mode.is_prompt_search() {
+                    self.prompt.take();
+                }
                 self.mode = new_mode;
 
                 if new_mode == InputMode::Visual {
@@ -388,9 +396,9 @@ impl<'term> App<'term> {
                             let command = self.prompt.submit();
                             Ok(self.process_command(&command))
                         }
-                        InputMode::Prompt(PromptMode::Search { regex }) => {
+                        InputMode::Prompt(PromptMode::Search { escaped }) => {
                             let command = self.prompt.take();
-                            Ok(self.process_search(&command, !regex))
+                            Ok(self.process_search(&command, escaped))
                         }
                         InputMode::Prompt(PromptMode::Shell { pipe }) => {
                             let command = self.prompt.take();
@@ -742,24 +750,24 @@ impl<'term> App<'term> {
         let [mux_chunk, cmd_chunk] = MultiplexerWidget::split_bottom(f.area(), 1);
 
         match self.mode {
-            InputMode::Prompt(PromptMode::Search { regex }) => {
+            InputMode::Prompt(PromptMode::Search { escaped }) => {
                 let pattern = self.prompt.buf();
 
                 let pattern_mismatch = self
                     .regex_cache
                     .as_ref()
-                    .map(|(p, _)| p != pattern)
+                    .map(|(p, e, _)| *e != escaped || p != pattern)
                     .unwrap_or(true);
 
                 if pattern_mismatch {
-                    let regex = if regex {
+                    let regex = if !escaped {
                         regex_compile(pattern)
                     } else {
                         regex_compile(&regex::escape(pattern))
                     }
                     .ok();
 
-                    self.regex_cache = Some((pattern.to_owned(), regex))
+                    self.regex_cache = Some((pattern.to_owned(), escaped, regex))
                 }
             }
             InputMode::Prompt(_) | InputMode::Normal | InputMode::Visual | InputMode::Filter => {
@@ -773,7 +781,7 @@ impl<'term> App<'term> {
             mode: self.mode,
             gutter: self.gutter,
             linked_filters: self.linked_filters,
-            regex: self.regex_cache.as_ref().and_then(|(_, r)| r.as_ref()),
+            regex: self.regex_cache.as_ref().and_then(|(_, _, r)| r.as_ref()),
         }
         .render(mux_chunk, f.buffer_mut(), handler);
 

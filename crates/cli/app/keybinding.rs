@@ -189,9 +189,9 @@ impl Keybinding {
                     KeyCode::Backspace => Some(Action::Command(CommandAction::Backspace)),
                     KeyCode::Char('r') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                         match prompt_mode {
-                            PromptMode::Search { regex } => {
+                            PromptMode::Search { escaped } => {
                                 Some(Action::SwitchMode(InputMode::Prompt(PromptMode::Search {
-                                    regex: !regex,
+                                    escaped: !escaped,
                                 })))
                             }
                             _ => None,
@@ -230,7 +230,7 @@ impl Keybinding {
                 }
                 KeyCode::Char('/') => {
                     Some(Action::SwitchMode(InputMode::Prompt(PromptMode::Search {
-                        regex: true,
+                        escaped: false,
                     })))
                 }
                 KeyCode::Char('!') => {
