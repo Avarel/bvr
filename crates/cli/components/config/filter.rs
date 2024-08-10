@@ -1,15 +1,11 @@
 use super::{super::filters::FilterExportSet, storage_dir_create, APP_ID, FILTER_FILE};
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
-use std::cell::RefCell;
+use std::{cell::OnceCell, path::PathBuf};
 
 pub struct FilterData {
-    state: RefCell<FilterDataState>,
-}
-
-enum FilterDataState {
-    Unloaded,
-    Loaded(LoadedFilterData),
+    path: Option<PathBuf>,
+    state: OnceCell<LoadedFilterData>,
 }
 
 #[derive(Clone, Serialize, Deserialize, Default)]
@@ -21,64 +17,53 @@ struct LoadedFilterData {
 impl FilterData {
     pub fn new() -> Self {
         Self {
-            state: RefCell::new(FilterDataState::Unloaded),
+            path: storage_dir_create(APP_ID)
+                .map(|path| path.join(FILTER_FILE))
+                .ok(),
+            state: OnceCell::new(),
         }
     }
 
-    fn is_loaded(&self) -> bool {
-        matches!(&*self.state.borrow(), FilterDataState::Loaded(_))
+    fn init(&self) {
+        self.state.get_or_init(|| {
+            self.path
+                .as_ref()
+                .and_then(|path| std::fs::File::open(path).ok())
+                .map(std::io::BufReader::new)
+                .and_then(|reader| serde_json::from_reader::<_, LoadedFilterData>(reader).ok())
+                .unwrap_or_else(LoadedFilterData::default)
+        });
     }
 
     fn load_and_save<F>(&mut self, f: F) -> Result<()>
     where
         F: FnOnce(&mut LoadedFilterData),
     {
-        let path = storage_dir_create(APP_ID)?.join(FILTER_FILE);
+        self.init();
+        let data = self.state.get_mut().unwrap();
 
-        let mut state = self.state.borrow_mut();
-        *state = FilterDataState::Loaded(
-            std::fs::File::open(&path)
-                .ok()
-                .map(std::io::BufReader::new)
-                .and_then(|reader| serde_json::from_reader::<_, LoadedFilterData>(reader).ok())
-                .unwrap_or_else(LoadedFilterData::default),
-        );
-        match &mut *state {
-            FilterDataState::Loaded(data) => {
-                f(data);
+        f(data);
 
-                let file = std::fs::OpenOptions::new()
-                    .create(true)
-                    .write(true)
-                    .truncate(true)
-                    .open(path)?;
-                let writer = std::io::BufWriter::new(file);
-                serde_json::to_writer(writer, data)?;
-            }
-            FilterDataState::Unloaded => unsafe { std::hint::unreachable_unchecked() },
-        }
+        let Some(path) = self.path.as_ref() else {
+            return Ok(());
+        };
+        let file = std::fs::OpenOptions::new()
+            .create(true)
+            .write(true)
+            .truncate(true)
+            .open(path)?;
+        let writer = std::io::BufWriter::new(file);
+        serde_json::to_writer(writer, data)?;
         Ok(())
     }
 
-    fn read<F, R>(&self, f: F) -> Result<R>
+    fn read<'a, F, R>(&'a self, f: F) -> Result<R>
     where
-        F: FnOnce(&LoadedFilterData) -> R,
+        F: FnOnce(&'a LoadedFilterData) -> R,
     {
-        if !self.is_loaded() {
-            let path = storage_dir_create(APP_ID)?.join(FILTER_FILE);
-            let mut state = self.state.borrow_mut();
-            *state = std::fs::File::open(path)
-                .ok()
-                .map(std::io::BufReader::new)
-                .and_then(|reader| serde_json::from_reader::<_, LoadedFilterData>(reader).ok())
-                .map(FilterDataState::Loaded)
-                .unwrap_or(FilterDataState::Unloaded);
-        }
-
-        Ok(match &*self.state.borrow() {
-            FilterDataState::Unloaded => f(&LoadedFilterData::default()),
-            FilterDataState::Loaded(data) => f(data),
-        })
+        self.init();
+        let data = self.state.get().unwrap();
+        Ok(f(data))
     }
 
     pub fn set_persistent(&mut self, persistent: bool) -> Result<()> {
@@ -91,8 +76,8 @@ impl FilterData {
         self.read(|data| data.persistent)
     }
 
-    pub fn filters(&self) -> Result<Vec<FilterExportSet>> {
-        self.read(|data| data.filters.clone())
+    pub fn filters(&self) -> Result<&[FilterExportSet]> {
+        self.read(|data| data.filters.as_ref())
     }
 
     pub fn add_filter(&mut self, filter: FilterExportSet) -> Result<()> {
