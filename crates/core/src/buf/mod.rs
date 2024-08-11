@@ -270,7 +270,7 @@ impl SegBuffer {
 }
 
 pub struct ContiguousSegmentIterator {
-    pub index: LineIndex,
+    index: LineIndex,
     repr: BufferRepr,
     line_range: Range<usize>,
     // Intermediate buffer for the iterator to borrow from
@@ -303,6 +303,10 @@ impl ContiguousSegmentIterator {
         self.line_range.clone()
     }
 
+    pub fn index(&self) -> &LineIndex {
+        &self.index
+    }
+
     /// Get the next buffer from the [ContiguousSegmentIterator].
     ///
     /// This function retrieves the next buffer from the `ContiguousSegmentIterator` and returns it as an `Option`.
@@ -313,7 +317,7 @@ impl ContiguousSegmentIterator {
     /// - `Some((&Idx, u64, &[u8]))`: A tuple containing the index, starting data
     ///                               position, and a slice of the buffer data.
     /// - `None`: If there are no more buffers available.
-    pub fn next_buf(&mut self) -> Option<ContiguousSegment> {
+    pub fn next(&mut self) -> Option<ContiguousSegment> {
         if self.line_range.is_empty() {
             return None;
         }
@@ -451,7 +455,7 @@ mod test {
 
         let mut total_bytes = 0;
         let mut validate_buf = Vec::new();
-        while let Some(segment) = buffers.next_buf() {
+        while let Some(segment) = buffers.next() {
             // Validate that the specialized slice reader and normal sequential reads are consistent
             assert_eq!(segment.range.start, total_bytes);
             total_bytes += segment.data.len() as u64;

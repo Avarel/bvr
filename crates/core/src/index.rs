@@ -133,7 +133,7 @@ impl LineIndexRemote {
     }
 }
 
-impl Drop for LineIndex {
+impl Drop for LineIndexRemote {
     fn drop(&mut self) {
         self.completed
             .store(true, std::sync::atomic::Ordering::Relaxed);

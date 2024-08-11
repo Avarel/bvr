@@ -15,27 +15,31 @@ struct LineMatchRemote {
 
 impl LineMatchRemote {
     pub fn search(mut self, mut iter: ContiguousSegmentIterator, regex: Regex) -> Result<()> {
-        while let Some(segment) = iter.next_buf() {
+        loop {
             if !self.has_readers() {
                 break;
-            }
+            } else if let Some(segment) = iter.next() {
+                let mut buf_start = 0;
+                while let Some(res) = regex.find_at(segment.data, buf_start as usize) {
+                    let match_start = res.start() as u64 + segment.range.start;
+                    let line_number = segment.index.line_of_data(match_start).unwrap();
 
-            let mut buf_start = 0;
-            while let Some(res) = regex.find_at(segment.data, buf_start as usize) {
-                let match_start = res.start() as u64 + segment.range.start;
-                let line_number = segment.index.line_of_data(match_start).unwrap();
-
-                if let Some(&last) = self.buf.last() {
-                    if last == line_number {
-                        continue;
+                    if let Some(&last) = self.buf.last() {
+                        if last == line_number {
+                            continue;
+                        }
+                        debug_assert!(line_number > last);
                     }
-                    debug_assert!(line_number > last);
+
+                    self.buf.push(line_number);
+
+                    buf_start =
+                        segment.index.data_of_line(line_number + 1).unwrap() - segment.range.start;
                 }
-
-                self.buf.push(line_number);
-
-                buf_start =
-                    segment.index.data_of_line(line_number + 1).unwrap() - segment.range.start;
+            } else if iter.index().is_complete() {
+                break;
+            } else {
+                std::hint::spin_loop()
             }
         }
         Ok(())
@@ -58,7 +62,7 @@ pub enum LineSet {
     All {
         buf: LineIndex,
     },
-    Subset {
+    Dynamic {
         buf: Arc<CowVec<usize>>,
         completed: Arc<AtomicBool>,
         // Optimization field for composite filters
@@ -70,7 +74,7 @@ pub enum LineSet {
 impl LineSet {
     #[inline]
     pub fn empty() -> Self {
-        Self::Subset {
+        Self::Dynamic {
             buf: Arc::new(CowVec::empty()),
             completed: Arc::new(AtomicBool::new(true)),
             min_len: 0,
@@ -99,7 +103,7 @@ impl LineSet {
                 .search(iter, regex)
             }
         });
-        Self::Subset {
+        Self::Dynamic {
             buf,
             completed: complete,
             min_len: 0,
@@ -138,7 +142,7 @@ impl LineSet {
                 } else {
                     std::thread::spawn(task);
                 }
-                Ok(Self::Subset {
+                Ok(Self::Dynamic {
                     buf,
                     completed,
                     min_len,
@@ -151,7 +155,7 @@ impl LineSet {
     pub(crate) fn into_inner(self) -> CowVec<usize> {
         match self {
             Self::All { .. } => unimplemented!(),
-            Self::Subset { buf, .. } => Arc::try_unwrap(buf).unwrap(),
+            Self::Dynamic { buf, .. } => Arc::try_unwrap(buf).unwrap(),
         }
     }
 
@@ -159,7 +163,7 @@ impl LineSet {
     pub fn is_complete(&self) -> bool {
         match self {
             LineSet::All { buf } => buf.is_complete(),
-            LineSet::Subset { completed, .. } => {
+            LineSet::Dynamic { completed, .. } => {
                 completed.load(std::sync::atomic::Ordering::Relaxed)
             }
         }
@@ -174,7 +178,7 @@ impl LineSet {
                     None
                 }
             }
-            LineSet::Subset { buf, .. } => buf.get(idx),
+            LineSet::Dynamic { buf, .. } => buf.get(idx),
         }
     }
 
@@ -187,7 +191,7 @@ impl LineSet {
                     None
                 }
             }
-            LineSet::Subset { buf, .. } => {
+            LineSet::Dynamic { buf, .. } => {
                 let slice = buf.snapshot();
                 match *slice.as_slice() {
                     [first, .., last] if (first..=last).contains(&line_number) => {
@@ -213,7 +217,7 @@ impl LineSet {
                     None
                 }
             }
-            LineSet::Subset { buf, .. } => {
+            LineSet::Dynamic { buf, .. } => {
                 let snap = buf.snapshot();
                 let slice = snap.as_slice();
                 match *slice {
@@ -233,7 +237,7 @@ impl LineSet {
     pub fn nearest_backward(&self, line_number: usize) -> Option<usize> {
         match self {
             LineSet::All { .. } => line_number.checked_sub(1),
-            LineSet::Subset { buf, .. } => {
+            LineSet::Dynamic { buf, .. } => {
                 let snap = buf.snapshot();
                 let slice = snap.as_slice();
                 match *slice {
@@ -253,7 +257,7 @@ impl LineSet {
     pub fn len(&self) -> usize {
         match self {
             LineSet::All { buf } => buf.line_count(),
-            LineSet::Subset { buf, min_len, .. } => buf.len().max(*min_len),
+            LineSet::Dynamic { buf, min_len, .. } => buf.len().max(*min_len),
         }
     }
 
@@ -264,14 +268,14 @@ impl LineSet {
     pub(crate) fn snapshot(&self) -> Option<CowVecSnapshot<usize>> {
         match self {
             LineSet::All { .. } => None,
-            LineSet::Subset { buf, .. } => Some(buf.snapshot()),
+            LineSet::Dynamic { buf, .. } => Some(buf.snapshot()),
         }
     }
 }
 
 impl From<Vec<usize>> for LineSet {
     fn from(vec: Vec<usize>) -> Self {
-        Self::Subset {
+        Self::Dynamic {
             min_len: vec.len(),
             buf: Arc::new(CowVec::from(vec)),
             completed: Arc::new(AtomicBool::new(true)),
