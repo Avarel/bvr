@@ -4,12 +4,13 @@ use super::{
     cursor::{Cursor, CursorState, SelectionOrigin},
     viewport::Viewport,
 };
-use crate::{app::ViewDelta, colors, direction::Direction, regex_compile};
+use crate::{app::ViewDelta, colors::{self, ColorSelector}, direction::Direction, regex_compile};
 use bvr_core::{matches::CompositeStrategy, LineSet, SegBuffer};
 use ratatui::style::Color;
 use regex::bytes::Regex;
 
 pub type FilterExportSet = Vec<FilterExport>;
+pub type FilterImportSet<'a> = &'a [FilterExport];
 
 #[derive(Clone)]
 enum FilterSet {
@@ -105,7 +106,7 @@ impl Filter {
         }
     }
 
-    pub fn from_export(file: &SegBuffer, export: FilterExport) -> Self {
+    pub fn from_export(file: &SegBuffer, export: &FilterExport) -> Self {
         let mask = match export.mask {
             MaskExport::Regex { ref regex } => Mask::Regex(regex_compile(regex).unwrap()),
         };
@@ -332,6 +333,7 @@ pub struct Compositor {
     viewport: Viewport,
     cursor: CursorState,
     filters: Filters,
+    pub(super) color_selector: ColorSelector,
 }
 
 impl Compositor {
@@ -342,6 +344,7 @@ impl Compositor {
             cursor: CursorState::new(),
             filters: Filters::new(),
             strategy: CompositeStrategy::Union,
+            color_selector: ColorSelector::DEFAULT
         }
     }
 
@@ -409,33 +412,38 @@ impl Compositor {
         self.viewport.jump_vertically_to(i);
     }
 
-    pub fn toggle_select_filters(&mut self) {
+    pub fn clear_filters(&mut self) {
+        self.cursor = CursorState::new();
+        self.color_selector = ColorSelector::DEFAULT;
+        self.filters.clear();
+    }
+
+    pub fn selected_filters(&self) -> std::ops::Range<usize> {
         match self.cursor.state() {
-            Cursor::Singleton(i) => {
-                self.filters.get_mut(i).map(Filter::toggle);
-            }
+            Cursor::Singleton(i) => i..i + 1,
             Cursor::Selection(start, end, _) => {
-                for i in start..=end {
-                    self.filters.get_mut(i).map(Filter::toggle);
-                }
+                start..end + 1
             }
         }
     }
 
-    pub fn remove_select_filters(&mut self) {
-        match self.cursor.state() {
-            Cursor::Singleton(i) => {
-                if i > 1 {
-                    self.filters.user_filters.remove(i - 2);
-                }
-            }
-            Cursor::Selection(start, end, _) => {
-                let start = start.max(2);
-                if start <= end {
-                    self.filters.user_filters.drain(start - 2..=end - 2);
-                }
-            }
+    pub fn toggle_filters(&mut self, range: std::ops::Range<usize>) {
+        for i in range {
+            self.filters.get_mut(i).map(Filter::toggle);
         }
+    }
+
+    pub fn remove_filters(&mut self, mut range: std::ops::Range<usize>) {
+        if range.start < 2 {
+            if range.end < 2 {
+                return;
+            }
+            range.start = 2;
+        }
+        // fixup because the first 2 is pseudo
+        range.start -= 2;
+        range.end -= 2;
+        self.filters.user_filters.drain(range);
         self.cursor.clamp(self.filters.len().saturating_sub(1));
     }
 
@@ -444,13 +452,12 @@ impl Compositor {
         file: &SegBuffer,
         pattern: &str,
         literal: bool,
-        color_selector: &mut colors::ColorSelector,
     ) -> Result<(), regex::Error> {
         let (filter, regex) = Mask::build(pattern, literal)?;
 
         self.filters.user_filters.push(Filter::from_filter(
             filter,
-            color_selector.next_color(),
+            self.color_selector.next_color(),
             FilterSet::Search(LineSet::search(file.segment_iter().unwrap(), regex)),
         ));
         Ok(())
@@ -491,9 +498,9 @@ impl Compositor {
             .collect()
     }
 
-    pub(super) fn import_user_filters(&mut self, file: &SegBuffer, exports: FilterExportSet) {
+    pub(super) fn import_user_filters(&mut self, file: &SegBuffer, imports: FilterImportSet) {
         self.filters.user_filters.extend(
-            exports
+            imports
                 .into_iter()
                 .map(|wire| Filter::from_export(file, wire)),
         );
@@ -501,5 +508,9 @@ impl Compositor {
 
     pub fn cursor(&self) -> &CursorState {
         &self.cursor
+    }
+
+    pub fn set_cursor(&mut self, cursor: CursorState) {
+        self.cursor = cursor
     }
 }

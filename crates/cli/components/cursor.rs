@@ -30,6 +30,7 @@ impl Cursor {
     }
 }
 
+#[derive(Clone, Copy)]
 pub struct CursorState {
     state: Cursor,
 }

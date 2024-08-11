@@ -1,6 +1,6 @@
 use super::{
     cursor::{Cursor, CursorState, SelectionOrigin},
-    filters::{Compositor, Filter, FilterExport},
+    filters::{Compositor, Filter, FilterExport, FilterImportSet},
     viewer::{CachedLine, ViewCache},
     viewport::Viewport,
 };
@@ -14,7 +14,6 @@ pub struct Instance {
     cursor: CursorState,
     compositor: Compositor,
     view: ViewCache,
-    color_selector: ColorSelector,
 }
 
 impl Instance {
@@ -27,7 +26,6 @@ impl Instance {
             name,
             buf,
             cursor: CursorState::new(),
-            color_selector: ColorSelector::DEFAULT,
         }
     }
 
@@ -60,7 +58,7 @@ impl Instance {
     }
 
     pub fn color_selector(&self) -> &ColorSelector {
-        &self.color_selector
+        &self.compositor.color_selector
     }
 
     pub fn cursor(&self) -> &CursorState {
@@ -90,7 +88,7 @@ impl Instance {
 
     pub fn add_search_filter(&mut self, pattern: &str, literal: bool) -> Result<(), regex::Error> {
         self.compositor
-            .add_search_filter(&self.buf, pattern, literal, &mut self.color_selector)?;
+            .add_search_filter(&self.buf, pattern, literal)?;
         self.invalidate_cache();
         Ok(())
     }
@@ -237,13 +235,22 @@ impl Instance {
         }
     }
 
-    pub fn toggle_select_filters(&mut self) {
-        self.compositor.toggle_select_filters();
+    pub fn selected_filters(&self) -> std::ops::Range<usize> {
+        self.compositor.selected_filters()
+    }
+
+    pub fn clear_filters(&mut self) {
+        self.compositor.clear_filters();
         self.invalidate_cache();
     }
 
-    pub fn remove_select_filter(&mut self) {
-        self.compositor.remove_select_filters();
+    pub fn toggle_filters(&mut self, range: std::ops::Range<usize>) {
+        self.compositor.toggle_filters(range);
+        self.invalidate_cache();
+    }
+
+    pub fn remove_filters(&mut self, range: std::ops::Range<usize>) {
+        self.compositor.remove_filters(range);
         self.invalidate_cache();
     }
 
@@ -284,7 +291,7 @@ impl Instance {
         }
     }
 
-    pub fn import_user_filters(&mut self, filters: Vec<FilterExport>) {
+    pub fn import_user_filters(&mut self, filters: FilterImportSet) {
         self.compositor.import_user_filters(&self.buf, filters);
         self.invalidate_cache();
     }

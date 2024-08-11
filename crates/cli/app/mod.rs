@@ -66,7 +66,7 @@ pub enum PromptMode {
     Search { escaped: bool },
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone, Copy)]
 #[serde(tag = "delta")]
 pub enum ViewDelta {
     Number(u16),
@@ -147,8 +147,18 @@ impl<'term> App<'term> {
             };
             let viewer = self.mux.active_viewer_mut().unwrap();
             match filter_sets.first() {
-                Some(export) => viewer.import_user_filters(export.clone()),
+                Some(export) => viewer.import_user_filters(export),
                 None => {}
+            }
+        }
+        if self.linked_filters {
+            if let Some(source) = self.mux.active_viewer_mut() {
+                let export = source.compositor_mut().export_user_filters();
+                let cursor = *source.compositor_mut().cursor();
+                
+                let viewer = self.mux.viewers_mut().last_mut().unwrap();
+                viewer.import_user_filters(&export);
+                viewer.compositor_mut().set_cursor(cursor)
             }
         }
 
@@ -193,10 +203,6 @@ impl<'term> App<'term> {
             )?;
         }
         Ok(())
-    }
-
-    fn toggle_linked_filters(&mut self) {
-        self.linked_filters = !self.linked_filters;
     }
 
     fn toggle_mouse_capture(&mut self) -> Result<()> {
@@ -269,6 +275,17 @@ impl<'term> App<'term> {
             self.mux.viewers_mut().get_mut(index)
         } else {
             self.mux.active_viewer_mut()
+        }
+    }
+
+    fn process_filter_action<F>(&mut self, mut f: F)
+    where
+        F: FnMut(&mut Instance),
+    {
+        if self.linked_filters {
+            self.mux.viewers_mut().iter_mut().for_each(f);
+        } else if let Some(viewer) = self.mux.active_viewer_mut() {
+            f(viewer);
         }
     }
 
@@ -348,26 +365,32 @@ impl<'term> App<'term> {
                     select,
                     delta,
                 } => {
-                    if let Some(viewer) = self.mux.active_viewer_mut() {
+                    self.process_filter_action(|viewer| {
                         viewer
                             .compositor_mut()
                             .move_select(direction, select, delta)
-                    }
+                    });
                 }
                 actions::FilterAction::ToggleSelectedFilter => {
-                    if let Some(viewer) = self.mux.active_viewer_mut() {
-                        viewer.toggle_select_filters();
-                    }
+                    self.process_filter_action(|viewer| {
+                        let selected_filters = viewer.selected_filters();
+                        viewer.toggle_filters(selected_filters);
+                    });
                 }
                 actions::FilterAction::RemoveSelectedFilter => {
-                    if let Some(viewer) = self.mux.active_viewer_mut() {
-                        viewer.remove_select_filter();
-                    }
+                    self.process_filter_action(|viewer| {
+                        let selected_filters = viewer.selected_filters();
+                        viewer.remove_filters(selected_filters);
+                    });
                 }
                 actions::FilterAction::ToggleFilter {
                     target_view,
                     filter_index,
                 } => {
+                    if self.linked_filters {
+                        // TODO: handle this
+                        return Ok(true);
+                    }
                     if let Some(viewer) = self.mux.viewers_mut().get_mut(target_view) {
                         viewer.toggle_filter(filter_index)
                     }
@@ -473,6 +496,23 @@ impl<'term> App<'term> {
         }
     }
 
+    fn replicate_filters_on_all_viewers(&mut self) {
+        if let Some(source) = self.mux.active_viewer_mut() {
+            let export = source.compositor_mut().export_user_filters();
+            let cursor = *source.compositor_mut().cursor();
+            let active = self.mux.active();
+            self.mux
+                .viewers_mut()
+                .iter_mut()
+                .enumerate()
+                .filter(|(i, _)| *i != active)
+                .for_each(|(_, viewer)| {
+                    viewer.import_user_filters(&export);
+                    viewer.compositor_mut().set_cursor(cursor)
+                });
+        }
+    }
+
     fn process_shell(&mut self, command: &str, terminate: bool, pipe: bool) -> Result<bool> {
         let Ok(expanded) = shellexpand::env_with_context(command, |s| self.context(s)) else {
             self.status.msg("shell: expansion failed".to_string());
@@ -533,16 +573,21 @@ impl<'term> App<'term> {
     }
 
     fn process_search(&mut self, pat: &str, escaped: bool) -> bool {
-        if let Some(viewer) = self.mux.active_viewer_mut() {
+        let mut e = None;
+        self.process_filter_action(|viewer: &mut Instance| {
             if let Err(err) = viewer.add_search_filter(pat, escaped) {
-                self.status.msg(match err {
-                    regex::Error::Syntax(err) => format!("{pat}: syntax ({err})"),
-                    regex::Error::CompiledTooBig(sz) => {
-                        format!("{pat}: regex surpassed size limit ({sz} bytes)")
-                    }
-                    _ => format!("{pat}: {err}"),
-                });
+                e.get_or_insert(err);
             };
+        });
+
+        if let Some(err) = e {
+            self.status.msg(match err {
+                regex::Error::Syntax(err) => format!("{pat}: syntax ({err})"),
+                regex::Error::CompiledTooBig(sz) => {
+                    format!("{pat}: regex surpassed size limit ({sz} bytes)")
+                }
+                _ => format!("{pat}: {err}"),
+            });
         }
 
         true
@@ -609,7 +654,10 @@ impl<'term> App<'term> {
             },
             Some("filter" | "find" | "f") => match parts.next() {
                 Some("link") => {
-                    self.toggle_linked_filters();
+                    self.linked_filters = !self.linked_filters;
+                    if self.linked_filters {
+                        self.replicate_filters_on_all_viewers();
+                    }
                     return true;
                 }
                 Some("persist") => {
@@ -659,7 +707,7 @@ impl<'term> App<'term> {
                         return true;
                     };
 
-                    target.import_user_filters(export);
+                    target.import_user_filters(&export);
                 }
                 Some("save") => {
                     let Some(source) = self.mux.active_viewer_mut() else {
@@ -675,10 +723,6 @@ impl<'term> App<'term> {
                 }
 
                 Some("load") => {
-                    let Some(viewer) = self.mux.active_viewer_mut() else {
-                        return true;
-                    };
-
                     let filter_sets = match self.filter_data.filters() {
                         Ok(filters) => filters,
                         Err(err) => {
@@ -688,7 +732,14 @@ impl<'term> App<'term> {
                     };
 
                     match filter_sets.first() {
-                        Some(export) => viewer.import_user_filters(export.clone()),
+                        Some(export) => {
+                            // Can get rid of this clone if process_filter_actions was part of mux
+                            let export = export.clone();
+                            self.process_filter_action(|viewer| {
+                                viewer.clear_filters();
+                                viewer.import_user_filters(&export);
+                            });
+                        }
                         None => {
                             self.status.msg("filter load: no saved filters".to_string());
                         }
@@ -703,19 +754,19 @@ impl<'term> App<'term> {
                     return self.process_search(&pat, true);
                 }
                 Some("clear") => {
-                    if let Some(viewer) = self.mux.active_viewer_mut() {
-                        viewer.compositor_mut().filters_mut().clear();
-                    }
+                    self.process_filter_action(|viewer| {
+                        viewer.clear_filters();
+                    });
                 }
                 Some("union" | "u" | "||" | "|") => {
-                    if let Some(viewer) = self.mux.active_viewer_mut() {
+                    self.process_filter_action(|viewer| {
                         viewer.set_composite_strategy(CompositeStrategy::Union);
-                    }
+                    });
                 }
                 Some("intersect" | "i" | "&&" | "&") => {
-                    if let Some(viewer) = self.mux.active_viewer_mut() {
+                    self.process_filter_action(|viewer| {
                         viewer.set_composite_strategy(CompositeStrategy::Intersection);
-                    }
+                    });
                 }
                 Some(cmd) => {
                     self.status.msg(format!("filter {cmd}: invalid subcommand"));
@@ -791,7 +842,10 @@ impl<'term> App<'term> {
             mode: self.mode,
             gutter: self.gutter,
             linked_filters: self.linked_filters,
-            regex: self.regex_cache.as_ref().and_then(|cache| cache.regex.as_ref()),
+            regex: self
+                .regex_cache
+                .as_ref()
+                .and_then(|cache| cache.regex.as_ref()),
         }
         .render(mux_chunk, f.buffer_mut(), handler);
 

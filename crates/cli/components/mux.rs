@@ -84,6 +84,16 @@ impl MultiplexerApp {
         }
     }
 
+    #[allow(dead_code)]
+    pub fn active_viewer_action<F>(&mut self, mut f: F)
+    where
+        F: FnMut(&mut Instance),
+    {
+        if let Some(viewer) = self.active_viewer_mut() {
+            f(viewer);
+        }
+    }
+
     pub fn mode(&self) -> MultiplexerMode {
         self.mode
     }
