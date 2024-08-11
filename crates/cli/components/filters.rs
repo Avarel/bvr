@@ -4,7 +4,12 @@ use super::{
     cursor::{Cursor, CursorState, SelectionOrigin},
     viewport::Viewport,
 };
-use crate::{app::ViewDelta, colors::{self, ColorSelector}, direction::Direction, regex_compile};
+use crate::{
+    app::ViewDelta,
+    colors::{self, ColorSelector},
+    direction::Direction,
+    regex_compile,
+};
 use bvr_core::{matches::CompositeStrategy, LineSet, SegBuffer};
 use ratatui::style::Color;
 use regex::bytes::Regex;
@@ -344,7 +349,7 @@ impl Compositor {
             cursor: CursorState::new(),
             filters: Filters::new(),
             strategy: CompositeStrategy::Union,
-            color_selector: ColorSelector::DEFAULT
+            color_selector: ColorSelector::DEFAULT,
         }
     }
 
@@ -421,9 +426,7 @@ impl Compositor {
     pub fn selected_filters(&self) -> std::ops::Range<usize> {
         match self.cursor.state() {
             Cursor::Singleton(i) => i..i + 1,
-            Cursor::Selection(start, end, _) => {
-                start..end + 1
-            }
+            Cursor::Selection(start, end, _) => start..end + 1,
         }
     }
 

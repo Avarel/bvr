@@ -230,14 +230,16 @@ pub struct MultiplexerPane<'a> {
 impl MultiplexerPane<'_> {
     const FILTER_MAX_HEIGHT: u16 = 10;
 
-    fn render_filter_pane(area: &mut Rect, buf: &mut Buffer, view_index: usize, viewer: &mut Instance, handler: &mut MouseHandler) {
+    fn render_filter_pane(
+        area: &mut Rect,
+        buf: &mut Buffer,
+        view_index: usize,
+        viewer: &mut Instance,
+        handler: &mut MouseHandler,
+    ) {
         let [view_chunk, filter_chunk] =
-                MultiplexerWidget::split_bottom(*area, Self::FILTER_MAX_HEIGHT);
-        FilterViewerWidget {
-            view_index,
-            viewer,
-        }
-        .render(filter_chunk, buf, handler);
+            MultiplexerWidget::split_bottom(*area, Self::FILTER_MAX_HEIGHT);
+        FilterViewerWidget { view_index, viewer }.render(filter_chunk, buf, handler);
         *area = view_chunk;
     }
 
@@ -301,7 +303,13 @@ impl MultiplexerWidget<'_> {
         let show_filter_on_mux = self.mode == InputMode::Filter && self.linked_filters;
 
         if show_filter_on_mux {
-            MultiplexerPane::render_filter_pane(&mut area, buf, active, self.mux.active_viewer_mut().unwrap(), handler);
+            MultiplexerPane::render_filter_pane(
+                &mut area,
+                buf,
+                active,
+                self.mux.active_viewer_mut().unwrap(),
+                handler,
+            );
         }
 
         let [tab_chunk, view_chunk] = Self::split_top(area, 1);

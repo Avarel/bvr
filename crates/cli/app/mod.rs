@@ -155,7 +155,7 @@ impl<'term> App<'term> {
             if let Some(source) = self.mux.active_viewer_mut() {
                 let export = source.compositor_mut().export_user_filters();
                 let cursor = *source.compositor_mut().cursor();
-                
+
                 let viewer = self.mux.viewers_mut().last_mut().unwrap();
                 viewer.import_user_filters(&export);
                 viewer.compositor_mut().set_cursor(cursor)
