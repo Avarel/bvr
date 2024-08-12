@@ -451,7 +451,7 @@ impl Compositor {
 
     pub fn clear_filters(&mut self) {
         self.cursor = CursorState::new();
-        self.color_selector = ColorSelector::DEFAULT;
+        self.color_selector.reset();
         self.filters.clear();
     }
 

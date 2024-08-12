@@ -27,40 +27,27 @@ pub const FILTER_ACCENT: Color = Color::Indexed(178);
 
 pub const SHELL_ACCENT: Color = Color::Indexed(161);
 
-const SEARCH_COLOR_LIST: &[Color] = &[
-    Color::Red,          // red
-    Color::Indexed(33),  // blue
-    Color::Green,        // green
-    Color::Indexed(135), // purple
-    Color::Indexed(178), // gold
-    Color::Cyan,         //cyan
-    Color::Magenta,      // magenta
-    Color::Yellow,       // yellow
-    Color::Indexed(21),  // indigo
-    Color::Indexed(43),  // torquoise
-    Color::Indexed(140),
-    Color::Indexed(214),
-    Color::Indexed(91),
-];
-
 pub struct ColorSelector {
-    color_list: &'static [Color],
-    index: usize,
+    hue: f64
 }
 
 impl ColorSelector {
     pub const DEFAULT: Self = Self {
-        color_list: SEARCH_COLOR_LIST,
-        index: 0,
+        hue: 0.0
     };
 
+    pub fn reset(&mut self) {
+        *self = Self::DEFAULT
+    }
+
     pub fn peek_color(&self) -> Color {
-        self.color_list[self.index]
+        Color::from_hsl(self.hue, 80.0, 50.0)
     }
 
     pub fn next_color(&mut self) -> Color {
-        let color = self.color_list[self.index];
-        self.index = (self.index + 1) % self.color_list.len();
+        let color = self.peek_color();
+        self.hue += 208.3;
+        self.hue %= 360.0;
         color
     }
 }
