@@ -292,7 +292,7 @@ impl Instance {
     }
 
     pub fn import_user_filters(&mut self, filters: FilterImportSet) {
-        self.compositor.import_user_filters(&self.buf, filters);
+        self.compositor.filters_mut().import_user_filters(&self.buf, filters);
         self.invalidate_cache();
     }
 }

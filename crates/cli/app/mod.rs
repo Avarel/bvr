@@ -153,7 +153,7 @@ impl<'term> App<'term> {
         }
         if self.linked_filters {
             if let Some(source) = self.mux.active_viewer_mut() {
-                let export = source.compositor_mut().export_user_filters();
+                let export = source.compositor_mut().filters().export();
                 let cursor = *source.compositor_mut().cursor();
 
                 let viewer = self.mux.viewers_mut().last_mut().unwrap();
@@ -221,7 +221,7 @@ impl<'term> App<'term> {
 
         if self.filter_data.is_persistent().unwrap_or(false) {
             if let Some(source) = self.mux.active_viewer_mut() {
-                let export = source.compositor_mut().export_user_filters();
+                let export = source.compositor_mut().filters().export();
 
                 if let Err(err) = self.filter_data.add_filter(export) {
                     self.status.msg(format!("filter save: {err}"));
@@ -498,7 +498,7 @@ impl<'term> App<'term> {
 
     fn replicate_filters_on_all_viewers(&mut self) {
         if let Some(source) = self.mux.active_viewer_mut() {
-            let export = source.compositor_mut().export_user_filters();
+            let export = source.compositor_mut().filters().export();
             let cursor = *source.compositor_mut().cursor();
             let active = self.mux.active();
             self.mux
@@ -681,7 +681,7 @@ impl<'term> App<'term> {
                     let Some(source) = self.mux.active_viewer_mut() else {
                         return true;
                     };
-                    let export = source.compositor_mut().export_user_filters();
+                    let export = source.compositor_mut().filters().export();
 
                     let Some(idx) = parts.next() else {
                         self.status
@@ -713,7 +713,7 @@ impl<'term> App<'term> {
                     let Some(source) = self.mux.active_viewer_mut() else {
                         return true;
                     };
-                    let export = source.compositor_mut().export_user_filters();
+                    let export = source.compositor_mut().filters().export();
 
                     if let Err(err) = self.filter_data.add_filter(export) {
                         self.status.msg(format!("filter save: {err}"));

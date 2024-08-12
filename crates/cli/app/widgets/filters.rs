@@ -117,13 +117,7 @@ impl FilterLineWidget<'_> {
             .fg(self.color),
         ];
 
-        v.push(
-            match self.name {
-                Mask::Builtin(name) => Span::raw(*name),
-                Mask::Regex(regex) => Span::raw(regex.as_str()),
-            }
-            .fg(self.color),
-        );
+        v.push(Span::raw(self.name.name()).fg(self.color));
 
         if let Some(len) = self.len {
             v.push(Span::from(format!(" {}", len)).fg(colors::TEXT_INACTIVE));

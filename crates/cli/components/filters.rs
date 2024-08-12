@@ -26,7 +26,8 @@ enum FilterSet {
 
 #[derive(Clone)]
 pub enum Mask {
-    Builtin(&'static str),
+    All,
+    Bookmarks,
     Regex(Regex),
 }
 
@@ -42,8 +43,16 @@ impl Mask {
 
     pub fn regex(&self) -> Option<Regex> {
         match self {
-            Self::Builtin(_) => None,
+            Self::All | Self::Bookmarks => None,
             Self::Regex(regex) => Some(regex.clone()),
+        }
+    }
+
+    pub fn name(&self) -> &str {
+        match self {
+            Mask::All => "All Lines",
+            Mask::Bookmarks => "Bookmarks",
+            Mask::Regex(regex) => regex.as_str(),
         }
     }
 }
@@ -59,6 +68,8 @@ pub struct Filter {
 #[derive(Clone, serde::Serialize, serde::Deserialize)]
 #[serde(tag = "type")]
 pub enum MaskExport {
+    All,
+    Bookmarks,
     #[serde(rename = "regex")]
     Regex { regex: String },
 }
@@ -73,7 +84,7 @@ pub struct FilterExport {
 impl Filter {
     fn all() -> Self {
         Self {
-            mask: Mask::Builtin("All Lines"),
+            mask: Mask::All,
             data: FilterSet::All,
             enabled: true,
             color: Color::White,
@@ -82,7 +93,7 @@ impl Filter {
 
     fn bookmark() -> Self {
         Self {
-            mask: Mask::Builtin("Bookmarks"),
+            mask: Mask::Bookmarks,
             enabled: true,
             color: colors::SELECT_ACCENT,
             data: FilterSet::Bookmarks(Bookmarks::new()),
@@ -101,10 +112,11 @@ impl Filter {
     pub fn to_export(&self) -> FilterExport {
         FilterExport {
             mask: match &self.mask {
+                Mask::All => MaskExport::All,
+                Mask::Bookmarks => MaskExport::Bookmarks,
                 Mask::Regex(regex) => MaskExport::Regex {
                     regex: regex.to_string(),
-                },
-                Mask::Builtin(_) => panic!("cannot serialize builtin mask"),
+                }
             },
             enabled: self.enabled,
             color: self.color.to_string().to_ascii_lowercase(),
@@ -113,6 +125,7 @@ impl Filter {
 
     pub fn from_export(file: &SegBuffer, export: &FilterExport) -> Self {
         let mask = match export.mask {
+            MaskExport::All | MaskExport::Bookmarks => unreachable!("should have been processed before"),
             MaskExport::Regex { ref regex } => Mask::Regex(regex_compile(regex).unwrap()),
         };
         Self {
@@ -326,6 +339,25 @@ impl Filters {
         }
     }
 
+    pub fn export(&self) -> FilterExportSet {
+        self.iter()
+            .map(Filter::to_export)
+            .collect()
+    }
+
+    pub fn import_user_filters(&mut self, file: &SegBuffer, imports: FilterImportSet) {
+        self.user_filters.clear();
+        
+        for filter in imports {
+            // Special handling for All and Bookmarks, we want to just inherit their enablement state
+            match filter.mask {
+                MaskExport::All => self.all.enabled = filter.enabled,
+                MaskExport::Bookmarks => self.bookmarks.enabled = filter.enabled,
+                MaskExport::Regex { .. } => self.user_filters.push(Filter::from_export(file, filter)),
+            }
+        }
+    }
+
     pub fn clear(&mut self) {
         self.bookmarks_mut().clear();
         self.user_filters.clear();
@@ -491,22 +523,6 @@ impl Compositor {
         } else {
             compute(i, false)
         }
-    }
-
-    pub fn export_user_filters(&self) -> FilterExportSet {
-        self.filters
-            .user_filters
-            .iter()
-            .map(Filter::to_export)
-            .collect()
-    }
-
-    pub(super) fn import_user_filters(&mut self, file: &SegBuffer, imports: FilterImportSet) {
-        self.filters.user_filters.extend(
-            imports
-                .into_iter()
-                .map(|wire| Filter::from_export(file, wire)),
-        );
     }
 
     pub fn cursor(&self) -> &CursorState {
