@@ -17,7 +17,7 @@ impl MultiplexerMode {
 }
 
 pub struct MultiplexerApp {
-    views: Vec<Instance>,
+    instances: Vec<Instance>,
     mode: MultiplexerMode,
     active: usize,
 }
@@ -25,7 +25,7 @@ pub struct MultiplexerApp {
 impl MultiplexerApp {
     pub fn new() -> Self {
         Self {
-            views: Vec::new(),
+            instances: Vec::new(),
             mode: MultiplexerMode::Tabs,
             active: 0,
         }
@@ -33,35 +33,29 @@ impl MultiplexerApp {
 
     #[inline]
     pub fn len(&self) -> usize {
-        self.views.len()
+        self.instances.len()
     }
 
     #[inline]
     pub fn is_empty(&self) -> bool {
-        self.views.is_empty()
+        self.instances.is_empty()
     }
 
     #[inline]
-    pub fn push_viewer(&mut self, viewer: Instance) {
-        self.views.push(viewer);
+    pub fn push(&mut self, instance: Instance) {
+        self.instances.push(instance);
     }
 
-    pub fn close_active_viewer(&mut self) {
-        debug_assert!(self.active < self.views.len());
-        self.views.remove(self.active);
-        self.active = self.active.min(self.views.len().saturating_sub(1));
+    pub fn instances_mut(&mut self) -> &mut Vec<Instance> {
+        &mut self.instances
     }
 
-    pub fn viewer_mut(&mut self, idx: usize) -> &mut Instance {
-        &mut self.views[idx]
-    }
-
-    pub fn viewers_mut(&mut self) -> &mut Vec<Instance> {
-        &mut self.views
-    }
-
-    pub fn active(&self) -> usize {
+    pub fn active_index(&self) -> usize {
         self.active
+    }
+
+    pub fn move_active_index(&mut self, index: usize) {
+        self.active = index.min(self.instances.len().saturating_sub(1));
     }
 
     pub fn move_active(&mut self, direction: Direction) {
@@ -71,26 +65,34 @@ impl MultiplexerApp {
         })
     }
 
-    pub fn move_active_index(&mut self, index: usize) {
-        self.active = index.min(self.views.len().saturating_sub(1));
+    pub fn close_active(&mut self) {
+        debug_assert!(self.active < self.instances.len());
+        self.instances.remove(self.active);
+        self.active = self.active.min(self.instances.len().saturating_sub(1));
     }
 
-    pub fn active_viewer_mut(&mut self) -> Option<&mut Instance> {
-        debug_assert!(self.is_empty() || self.active < self.views.len());
-        if !self.views.is_empty() {
-            Some(self.viewer_mut(self.active))
-        } else {
-            None
-        }
+    pub fn active_mut(&mut self) -> Option<&mut Instance> {
+        debug_assert!(self.is_empty() || self.active < self.instances.len());
+        self.instances.get_mut(self.active)
     }
 
-    #[allow(dead_code)]
-    pub fn active_viewer_action<F>(&mut self, mut f: F)
+    pub fn demux_mut<F>(&mut self, linked: bool, f: F)
     where
         F: FnMut(&mut Instance),
     {
-        if let Some(viewer) = self.active_viewer_mut() {
-            f(viewer);
+        if linked {
+            self.instances.iter_mut().for_each(f)
+        } else {
+            self.active_action(f)
+        }
+    }
+
+    pub fn active_action<F>(&mut self, mut f: F)
+    where
+        F: FnMut(&mut Instance),
+    {
+        if let Some(instance) = self.active_mut() {
+            f(instance);
         }
     }
 
@@ -103,7 +105,7 @@ impl MultiplexerApp {
     }
 
     pub fn clear(&mut self) {
-        self.views.clear();
+        self.instances.clear();
         self.active = 0;
     }
 }

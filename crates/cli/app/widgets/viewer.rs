@@ -16,7 +16,7 @@ use regex::bytes::Regex;
 
 pub struct LineViewerWidget<'a> {
     pub(super) view_index: usize,
-    pub(super) viewer: &'a mut Instance,
+    pub(super) instance: &'a mut Instance,
     pub(super) show_selection: bool,
     pub(super) gutter: bool,
     pub(super) regex: Option<&'a Regex>,
@@ -43,18 +43,18 @@ bitflags! {
 
 impl LineViewerWidget<'_> {
     pub fn render(self, area: Rect, buf: &mut Buffer, handle: &mut MouseHandler) {
-        let left = self.viewer.viewport().left();
-        let search_color = self.viewer.color_selector().peek_color();
+        let left = self.instance.viewport().left();
+        let search_color = self.instance.color_selector().peek_color();
         let gutter_size = self
             .gutter
-            .then(|| ((self.viewer.visible_line_count() + 1).ilog10() as u16).max(4));
+            .then(|| ((self.instance.visible_line_count() + 1).ilog10() as u16).max(4));
 
         let mut itoa_buf = itoa::Buffer::new();
 
-        let cursor_state = self.viewer.cursor().state();
+        let cursor_state = self.instance.cursor().state();
 
         let view = self
-            .viewer
+            .instance
             .update_and_view(area.height as usize, area.width as usize);
 
         (area.y..area.bottom())

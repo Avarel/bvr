@@ -20,7 +20,7 @@ pub const STATUS_BAR_TEXT: Color = Color::Indexed(246);
 
 pub const COMMAND_BAR_SELECT: Color = Color::Indexed(69);
 
-pub const VIEWER_ACCENT: Color = Color::Indexed(75);
+pub const NORMAL_ACCENT: Color = Color::Indexed(75);
 pub const COMMAND_ACCENT: Color = Color::Indexed(48);
 pub const SELECT_ACCENT: Color = Color::Indexed(170);
 pub const FILTER_ACCENT: Color = Color::Indexed(178);

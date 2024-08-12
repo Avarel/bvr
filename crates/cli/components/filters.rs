@@ -57,14 +57,6 @@ impl Mask {
     }
 }
 
-#[derive(Clone)]
-pub struct Filter {
-    mask: Mask,
-    enabled: bool,
-    color: Color,
-    data: FilterSet,
-}
-
 #[derive(Clone, serde::Serialize, serde::Deserialize)]
 #[serde(tag = "type")]
 pub enum MaskExport {
@@ -79,6 +71,14 @@ pub struct FilterExport {
     mask: MaskExport,
     enabled: bool,
     color: String,
+}
+
+#[derive(Clone)]
+pub struct Filter {
+    mask: Mask,
+    enabled: bool,
+    color: Color,
+    data: FilterSet,
 }
 
 impl Filter {
@@ -100,7 +100,7 @@ impl Filter {
         }
     }
 
-    fn from_filter(filter: Mask, color: Color, repr: FilterSet) -> Self {
+    fn new(filter: Mask, color: Color, repr: FilterSet) -> Self {
         Self {
             mask: filter,
             enabled: true,
@@ -455,7 +455,7 @@ impl Compositor {
         self.filters.clear();
     }
 
-    pub fn selected_filters(&self) -> std::ops::Range<usize> {
+    pub fn selected_filter_indices(&self) -> std::ops::Range<usize> {
         match self.cursor.state() {
             Cursor::Singleton(i) => i..i + 1,
             Cursor::Selection(start, end, _) => start..end + 1,
@@ -490,7 +490,7 @@ impl Compositor {
     ) -> Result<(), regex::Error> {
         let (filter, regex) = Mask::build(pattern, literal)?;
 
-        self.filters.user_filters.push(Filter::from_filter(
+        self.filters.user_filters.push(Filter::new(
             filter,
             self.color_selector.next_color(),
             FilterSet::Search(LineSet::search(file.segment_iter().unwrap(), regex)),

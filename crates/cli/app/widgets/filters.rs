@@ -13,7 +13,7 @@ use std::sync::OnceLock;
 
 pub struct FilterViewerWidget<'a> {
     pub(super) view_index: usize,
-    pub(super) viewer: &'a mut Instance,
+    pub(super) instance: &'a mut Instance,
 }
 
 impl FilterViewerWidget<'_> {
@@ -23,10 +23,10 @@ impl FilterViewerWidget<'_> {
             .get_or_init(|| Block::new().style(Style::new().bg(colors::STATUS_BAR)))
             .render(area, buf);
 
-        let cursor_state = self.viewer.compositor_mut().cursor().state();
+        let cursor_state = self.instance.compositor_mut().cursor().state();
 
         let view = self
-            .viewer
+            .instance
             .compositor_mut()
             .update_and_filter_view(area.height as usize);
 

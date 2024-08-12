@@ -24,7 +24,7 @@ mod viewer;
 
 pub struct StatusWidget<'a> {
     input_mode: InputMode,
-    viewer: Option<&'a Instance>,
+    instance: Option<&'a Instance>,
     message: Option<&'a str>,
 }
 
@@ -43,7 +43,7 @@ impl<'a> Widget for StatusWidget<'a> {
             InputMode::Prompt(PromptMode::Search { escaped: true }) => {
                 (colors::FILTER_ACCENT, " FILTER (ESCAPED) ")
             }
-            InputMode::Normal => (colors::VIEWER_ACCENT, " NORMAL "),
+            InputMode::Normal => (colors::NORMAL_ACCENT, " NORMAL "),
             InputMode::Visual => (colors::SELECT_ACCENT, " VISUAL "),
             InputMode::Filter => (colors::FILTER_ACCENT, " FILTER "),
         };
@@ -53,8 +53,8 @@ impl<'a> Widget for StatusWidget<'a> {
         v.push(Span::from(mode_name).fg(colors::WHITE).bg(accent_color));
         v.push(Span::raw(" "));
 
-        if let Some(viewer) = &self.viewer {
-            v.push(Span::raw(viewer.name()).fg(colors::STATUS_BAR_TEXT));
+        if let Some(instance) = self.instance {
+            v.push(Span::raw(instance.name()).fg(colors::STATUS_BAR_TEXT));
         } else {
             v.push(Span::raw("Empty").fg(colors::STATUS_BAR_TEXT));
         }
@@ -62,15 +62,15 @@ impl<'a> Widget for StatusWidget<'a> {
 
         if let Some(message) = self.message {
             v.push(Span::raw(message));
-        } else if let Some(viewer) = &self.viewer {
-            let ln_cnt = viewer.file().line_count();
-            let ln_vis = viewer.visible_line_count();
+        } else if let Some(instance) = self.instance {
+            let ln_cnt = instance.file().line_count();
+            let ln_vis = instance.visible_line_count();
             v.push(Span::raw(format!("{} lines", ln_cnt)).fg(accent_color));
             if ln_vis < ln_cnt {
                 v.push(Span::raw(format!(" ({} visible)", ln_vis)).fg(colors::STATUS_BAR_TEXT));
             }
             v.push(Span::raw(" │ ").fg(accent_color));
-            v.push(Span::raw(viewer.name()).fg(accent_color));
+            v.push(Span::raw(instance.name()).fg(accent_color));
         } else {
             v.push(Span::raw(":open [file name]").fg(accent_color));
             v.push(Span::raw(" to view a file").fg(colors::STATUS_BAR_TEXT));
@@ -80,12 +80,12 @@ impl<'a> Widget for StatusWidget<'a> {
             .style(STATUS_BAR_STYLE)
             .render(area, buf);
 
-        if let Some(viewer) = self.viewer {
-            if viewer.is_following_output() {
+        if let Some(instance) = self.instance {
+            if instance.is_following_output() {
                 Paragraph::new(Span::raw("Follow  ").fg(colors::STATUS_BAR_TEXT))
             } else {
-                let bottom = viewer.viewport().bottom();
-                let ln_vis = viewer.visible_line_count();
+                let bottom = instance.viewport().bottom();
+                let ln_vis = instance.visible_line_count();
                 let percentage = if ln_vis == 0 {
                     1.0
                 } else {
@@ -93,8 +93,8 @@ impl<'a> Widget for StatusWidget<'a> {
                 }
                 .clamp(0.0, 1.0);
 
-                let row = viewer.viewport().top();
-                let col = viewer.viewport().left();
+                let row = instance.viewport().top();
+                let col = instance.viewport().left();
 
                 Paragraph::new(Line::from(vec![
                     Span::raw(format!("{}:{}", row + 1, col + 1)).fg(colors::STATUS_BAR_TEXT),
@@ -220,7 +220,7 @@ impl TabWidget<'_> {
 
 pub struct MultiplexerPane<'a> {
     view_index: usize,
-    viewer: &'a mut Instance,
+    instance: &'a mut Instance,
     show_filter_on_pane: bool,
     show_selection: bool,
     gutter: bool,
@@ -234,24 +234,24 @@ impl MultiplexerPane<'_> {
         area: &mut Rect,
         buf: &mut Buffer,
         view_index: usize,
-        viewer: &mut Instance,
+        instance: &mut Instance,
         handler: &mut MouseHandler,
     ) {
         let [view_chunk, filter_chunk] =
             MultiplexerWidget::split_bottom(*area, Self::FILTER_MAX_HEIGHT);
-        FilterViewerWidget { view_index, viewer }.render(filter_chunk, buf, handler);
+        FilterViewerWidget { view_index, instance }.render(filter_chunk, buf, handler);
         *area = view_chunk;
     }
 
     pub fn render(self, mut area: Rect, buf: &mut Buffer, handler: &mut MouseHandler) {
         if self.show_filter_on_pane {
-            Self::render_filter_pane(&mut area, buf, self.view_index, self.viewer, handler);
+            Self::render_filter_pane(&mut area, buf, self.view_index, self.instance, handler);
         }
 
         LineViewerWidget {
             view_index: self.view_index,
             show_selection: self.show_selection,
-            viewer: self.viewer,
+            instance: self.instance,
             gutter: self.gutter,
             regex: self.regex,
         }
@@ -297,7 +297,7 @@ impl MultiplexerWidget<'_> {
     }
 
     fn render_mux(&mut self, mut area: Rect, buf: &mut Buffer, handler: &mut MouseHandler) {
-        let active = self.mux.active();
+        let active = self.mux.active_index();
 
         let show_filter_on_pane = self.mode == InputMode::Filter && !self.linked_filters;
         let show_filter_on_mux = self.mode == InputMode::Filter && self.linked_filters;
@@ -307,7 +307,7 @@ impl MultiplexerWidget<'_> {
                 &mut area,
                 buf,
                 active,
-                self.mux.active_viewer_mut().unwrap(),
+                self.mux.active_mut().unwrap(),
                 handler,
             );
         }
@@ -315,15 +315,15 @@ impl MultiplexerWidget<'_> {
         let [tab_chunk, view_chunk] = Self::split_top(area, 1);
         let split_chunks = Self::split_horizontal(area, self.mux.len());
 
-        for (view_index, (chunk, viewer)) in split_chunks
+        for (view_index, (chunk, instance)) in split_chunks
             .iter()
             .map(|&chunk| tab_chunk.intersection(chunk))
-            .zip(self.mux.viewers_mut())
+            .zip(self.mux.instances_mut())
             .enumerate()
         {
             TabWidget {
                 view_index,
-                name: viewer.name(),
+                name: instance.name(),
                 active: active == view_index,
             }
             .render(chunk, buf, handler);
@@ -331,15 +331,15 @@ impl MultiplexerWidget<'_> {
 
         match self.mux.mode() {
             MultiplexerMode::Panes => {
-                for (view_index, (pane_chunk, viewer)) in split_chunks
+                for (view_index, (pane_chunk, instance)) in split_chunks
                     .iter()
                     .map(|&chunk| view_chunk.intersection(chunk))
-                    .zip(self.mux.viewers_mut())
+                    .zip(self.mux.instances_mut())
                     .enumerate()
                 {
                     MultiplexerPane {
                         view_index,
-                        viewer,
+                        instance,
                         show_filter_on_pane,
                         show_selection: self.mode == InputMode::Visual,
                         gutter: self.gutter,
@@ -349,12 +349,12 @@ impl MultiplexerWidget<'_> {
                 }
             }
             MultiplexerMode::Tabs => {
-                let viewer = self.mux.active_viewer_mut().unwrap();
+                let instance = self.mux.active_mut().unwrap();
                 let pane_chunk = view_chunk;
 
                 MultiplexerPane {
                     view_index: active,
-                    viewer,
+                    instance,
                     show_filter_on_pane,
                     show_selection: self.mode == InputMode::Visual,
                     gutter: self.gutter,
@@ -379,7 +379,7 @@ impl MultiplexerWidget<'_> {
 
         StatusWidget {
             input_mode: self.mode,
-            viewer: self.mux.active_viewer_mut().map(|v| &*v),
+            instance: self.mux.active_mut().map(|v| &*v),
             message: self.status.get_message_update().as_deref(),
         }
         .render(status_chunk, buf);

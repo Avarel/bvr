@@ -1,6 +1,6 @@
 use super::{
     cursor::{Cursor, CursorState, SelectionOrigin},
-    filters::{Compositor, Filter, FilterExport, FilterImportSet},
+    filters::{Compositor, Filter, FilterImportSet},
     viewer::{CachedLine, ViewCache},
     viewport::Viewport,
 };
@@ -236,7 +236,7 @@ impl Instance {
     }
 
     pub fn selected_filters(&self) -> std::ops::Range<usize> {
-        self.compositor.selected_filters()
+        self.compositor.selected_filter_indices()
     }
 
     pub fn clear_filters(&mut self) {

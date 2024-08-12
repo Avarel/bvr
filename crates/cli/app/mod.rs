@@ -85,15 +85,20 @@ struct RegexCache {
 pub struct App<'term> {
     term: Terminal<'term>,
     mode: InputMode,
+
     mux: MultiplexerApp,
     status: StatusApp,
     prompt: PromptApp,
+
     keybinds: Keybinding,
+
     clipboard: Option<Clipboard>,
     filter_data: FilterData,
-    gutter: bool,
+
     action_queue: VecDeque<Action>,
     regex_cache: Option<RegexCache>,
+
+    gutter: bool,
     mouse_capture: bool,
     linked_filters: bool,
 }
@@ -145,20 +150,20 @@ impl<'term> App<'term> {
                     return Ok(());
                 }
             };
-            let viewer = self.mux.active_viewer_mut().unwrap();
+            let instance = self.mux.active_mut().unwrap();
             match filter_sets.first() {
-                Some(export) => viewer.import_user_filters(export),
+                Some(export) => instance.import_user_filters(export),
                 None => {}
             }
         }
         if self.linked_filters {
-            if let Some(source) = self.mux.active_viewer_mut() {
+            if let Some(source) = self.mux.active_mut() {
                 let export = source.compositor_mut().filters().export();
                 let cursor = *source.compositor_mut().cursor();
 
-                let viewer = self.mux.viewers_mut().last_mut().unwrap();
-                viewer.import_user_filters(&export);
-                viewer.compositor_mut().set_cursor(cursor)
+                let instance = self.mux.instances_mut().last_mut().unwrap();
+                instance.import_user_filters(&export);
+                instance.compositor_mut().set_cursor(cursor)
             }
         }
 
@@ -171,8 +176,7 @@ impl<'term> App<'term> {
     }
 
     fn push_instance(&mut self, name: String, file: SegBuffer) {
-        let viewer = Instance::new(name, file);
-        self.mux.push_viewer(viewer);
+        self.mux.push(Instance::new(name, file));
     }
 
     fn enter_terminal(&mut self) -> Result<()> {
@@ -220,7 +224,7 @@ impl<'term> App<'term> {
         let result = self.event_loop();
 
         if self.filter_data.is_persistent().unwrap_or(false) {
-            if let Some(source) = self.mux.active_viewer_mut() {
+            if let Some(source) = self.mux.active_mut() {
                 let export = source.compositor_mut().filters().export();
 
                 if let Err(err) = self.filter_data.add_filter(export) {
@@ -272,20 +276,9 @@ impl<'term> App<'term> {
 
     fn get_target_view(&mut self, target_view: Option<usize>) -> Option<&mut Instance> {
         if let Some(index) = target_view {
-            self.mux.viewers_mut().get_mut(index)
+            self.mux.instances_mut().get_mut(index)
         } else {
-            self.mux.active_viewer_mut()
-        }
-    }
-
-    fn process_filter_action<F>(&mut self, mut f: F)
-    where
-        F: FnMut(&mut Instance),
-    {
-        if self.linked_filters {
-            self.mux.viewers_mut().iter_mut().for_each(f);
-        } else if let Some(viewer) = self.mux.active_viewer_mut() {
-            f(viewer);
+            self.mux.active_mut()
         }
     }
 
@@ -299,9 +292,9 @@ impl<'term> App<'term> {
                 self.mode = new_mode;
 
                 if new_mode == InputMode::Visual {
-                    if let Some(viewer) = self.mux.active_viewer_mut() {
-                        viewer.move_selected_into_view();
-                        viewer.set_follow_output(false);
+                    if let Some(instance) = self.mux.active_mut() {
+                        instance.move_selected_into_view();
+                        instance.set_follow_output(false);
                     }
                 }
             }
@@ -311,8 +304,8 @@ impl<'term> App<'term> {
                     delta,
                     target_view,
                 } => {
-                    if let Some(viewer) = self.get_target_view(target_view) {
-                        viewer.move_viewport_vertical(direction, delta)
+                    if let Some(instance) = self.get_target_view(target_view) {
+                        instance.move_viewport_vertical(direction, delta)
                     }
                 }
                 NormalAction::PanHorizontal {
@@ -320,13 +313,13 @@ impl<'term> App<'term> {
                     delta,
                     target_view,
                 } => {
-                    if let Some(viewer) = self.get_target_view(target_view) {
-                        viewer.move_viewport_horizontal(direction, delta)
+                    if let Some(instance) = self.get_target_view(target_view) {
+                        instance.move_viewport_horizontal(direction, delta)
                     }
                 }
                 NormalAction::FollowOutput => {
-                    if let Some(viewer) = self.mux.active_viewer_mut() {
-                        viewer.set_follow_output(true);
+                    if let Some(instance) = self.mux.active_mut() {
+                        instance.set_follow_output(true);
                     }
                 }
                 NormalAction::SwitchActiveIndex { target_view } => {
@@ -340,22 +333,22 @@ impl<'term> App<'term> {
                     select,
                     delta,
                 } => {
-                    if let Some(viewer) = self.mux.active_viewer_mut() {
-                        viewer.move_select(direction, select, delta);
-                        viewer.set_follow_output(false);
+                    if let Some(instance) = self.mux.active_mut() {
+                        instance.move_select(direction, select, delta);
+                        instance.set_follow_output(false);
                     }
                 }
                 VisualAction::ToggleSelectedLine => {
-                    if let Some(viewer) = self.mux.active_viewer_mut() {
-                        viewer.toggle_select_bookmarks();
+                    if let Some(instance) = self.mux.active_mut() {
+                        instance.toggle_select_bookmarks();
                     }
                 }
                 VisualAction::ToggleLine {
                     target_view,
                     line_number,
                 } => {
-                    if let Some(viewer) = self.mux.viewers_mut().get_mut(target_view) {
-                        viewer.toggle_bookmark_line_number(line_number)
+                    if let Some(instance) = self.mux.instances_mut().get_mut(target_view) {
+                        instance.toggle_bookmark_line_number(line_number)
                     }
                 }
             },
@@ -365,22 +358,22 @@ impl<'term> App<'term> {
                     select,
                     delta,
                 } => {
-                    self.process_filter_action(|viewer| {
-                        viewer
+                    self.mux.demux_mut(self.linked_filters, |instance| {
+                        instance
                             .compositor_mut()
                             .move_select(direction, select, delta)
                     });
                 }
                 actions::FilterAction::ToggleSelectedFilter => {
-                    self.process_filter_action(|viewer| {
-                        let selected_filters = viewer.selected_filters();
-                        viewer.toggle_filters(selected_filters);
+                    self.mux.demux_mut(self.linked_filters, |instance| {
+                        let selected_filters = instance.selected_filters();
+                        instance.toggle_filters(selected_filters);
                     });
                 }
                 actions::FilterAction::RemoveSelectedFilter => {
-                    self.process_filter_action(|viewer| {
-                        let selected_filters = viewer.selected_filters();
-                        viewer.remove_filters(selected_filters);
+                    self.mux.demux_mut(self.linked_filters, |instance| {
+                        let selected_filters = instance.selected_filters();
+                        instance.remove_filters(selected_filters);
                     });
                 }
                 actions::FilterAction::ToggleFilter {
@@ -391,8 +384,8 @@ impl<'term> App<'term> {
                         // TODO: handle this
                         return Ok(true);
                     }
-                    if let Some(viewer) = self.mux.viewers_mut().get_mut(target_view) {
-                        viewer.toggle_filter(filter_index)
+                    if let Some(instance) = self.mux.instances_mut().get_mut(target_view) {
+                        instance.toggle_filter(filter_index)
                     }
                 }
             },
@@ -450,14 +443,14 @@ impl<'term> App<'term> {
                 CommandAction::Complete => (),
             },
             Action::ExportFile(path) => {
-                if let Some(viewer) = self.mux.active_viewer_mut() {
+                if let Some(instance) = self.mux.active_mut() {
                     if let Err(err) = OpenOptions::new()
                         .create_new(true)
                         .write(true)
                         .truncate(true)
                         .open(&path)
                         .map_err(Error::from)
-                        .and_then(|mut file| viewer.write_bytes(&mut file))
+                        .and_then(|mut file| instance.write_bytes(&mut file))
                     {
                         self.status.msg(format!("{}: {err}", path.display()));
                     } else {
@@ -465,7 +458,7 @@ impl<'term> App<'term> {
                             .msg(format!("{}: export complete", path.display()));
                     }
                 } else {
-                    self.status.msg(String::from("No active viewer"));
+                    self.status.msg(String::from("No active instances"));
                 }
             }
         };
@@ -476,8 +469,8 @@ impl<'term> App<'term> {
     fn context(&mut self, s: &str) -> Result<Option<Cow<'static, str>>, std::env::VarError> {
         match s {
             "SEL" | "sel" => {
-                if let Some(viewer) = self.mux.active_viewer_mut() {
-                    match viewer.export_string() {
+                if let Some(instance) = self.mux.active_mut() {
+                    match instance.export_string() {
                         Ok(text) => Ok(Some(text.into())),
                         Err(err) => {
                             self.status.msg(format!("selection expansion: {err}"));
@@ -496,19 +489,19 @@ impl<'term> App<'term> {
         }
     }
 
-    fn replicate_filters_on_all_viewers(&mut self) {
-        if let Some(source) = self.mux.active_viewer_mut() {
+    fn replicate_filters_on_all_instances(&mut self) {
+        if let Some(source) = self.mux.active_mut() {
             let export = source.compositor_mut().filters().export();
             let cursor = *source.compositor_mut().cursor();
-            let active = self.mux.active();
+            let active = self.mux.active_index();
             self.mux
-                .viewers_mut()
+                .instances_mut()
                 .iter_mut()
                 .enumerate()
                 .filter(|(i, _)| *i != active)
-                .for_each(|(_, viewer)| {
-                    viewer.import_user_filters(&export);
-                    viewer.compositor_mut().set_cursor(cursor)
+                .for_each(|(_, instance)| {
+                    instance.import_user_filters(&export);
+                    instance.compositor_mut().set_cursor(cursor)
                 });
         }
     }
@@ -548,8 +541,8 @@ impl<'term> App<'term> {
 
         if pipe {
             let mut stdin = child.stdin.take().unwrap();
-            if let Some(viewer) = self.mux.active_viewer_mut() {
-                viewer.write_bytes(&mut stdin)?;
+            if let Some(instance) = self.mux.active_mut() {
+                instance.write_bytes(&mut stdin)?;
             }
         }
 
@@ -574,8 +567,8 @@ impl<'term> App<'term> {
 
     fn process_search(&mut self, pat: &str, escaped: bool) -> bool {
         let mut e = None;
-        self.process_filter_action(|viewer: &mut Instance| {
-            if let Err(err) = viewer.add_search_filter(pat, escaped) {
+        self.mux.demux_mut(self.linked_filters, |instance| {
+            if let Err(err) = instance.add_search_filter(pat, escaped) {
                 e.get_or_insert(err);
             };
         });
@@ -616,8 +609,8 @@ impl<'term> App<'term> {
                         .msg("pbcopy: clipboard not available".to_string());
                     return true;
                 };
-                if let Some(viewer) = self.mux.active_viewer_mut() {
-                    match viewer.export_string() {
+                if let Some(instance) = self.mux.active_mut() {
+                    match instance.export_string() {
                         Ok(text) => match clipboard.set_text(text) {
                             Ok(_) => {
                                 self.status.msg("pbcopy: copied to clipboard".to_string());
@@ -633,10 +626,10 @@ impl<'term> App<'term> {
                 }
             }
             Some("close" | "c") => {
-                if self.mux.active_viewer_mut().is_some() {
-                    self.mux.close_active_viewer()
+                if self.mux.active_mut().is_some() {
+                    self.mux.close_active()
                 } else {
-                    self.status.msg(String::from("No active viewer"));
+                    self.status.msg(String::from("No active instances"));
                 }
             }
             Some("gutter" | "g") => {
@@ -656,7 +649,7 @@ impl<'term> App<'term> {
                 Some("link") => {
                     self.linked_filters = !self.linked_filters;
                     if self.linked_filters {
-                        self.replicate_filters_on_all_viewers();
+                        self.replicate_filters_on_all_instances();
                     }
                     return true;
                 }
@@ -678,7 +671,7 @@ impl<'term> App<'term> {
                         .msg(format!("filter persist: persistence = {new_persistence}"));
                 }
                 Some("copy" | "c") => {
-                    let Some(source) = self.mux.active_viewer_mut() else {
+                    let Some(source) = self.mux.active_mut() else {
                         return true;
                     };
                     let export = source.compositor_mut().filters().export();
@@ -695,13 +688,13 @@ impl<'term> App<'term> {
                         return true;
                     };
                     let idx = idx.saturating_sub(1);
-                    if self.mux.active() == idx {
+                    if self.mux.active_index() == idx {
                         self.status.msg(String::from(
                             "filter export: cannot export to active instance",
                         ));
                         return true;
                     }
-                    let Some(target) = self.mux.viewers_mut().get_mut(idx) else {
+                    let Some(target) = self.mux.instances_mut().get_mut(idx) else {
                         self.status
                             .msg(format!("filter export {idx}: invalid index"));
                         return true;
@@ -710,7 +703,7 @@ impl<'term> App<'term> {
                     target.import_user_filters(&export);
                 }
                 Some("save") => {
-                    let Some(source) = self.mux.active_viewer_mut() else {
+                    let Some(source) = self.mux.active_mut() else {
                         return true;
                     };
                     let export = source.compositor_mut().filters().export();
@@ -733,11 +726,9 @@ impl<'term> App<'term> {
 
                     match filter_sets.first() {
                         Some(export) => {
-                            // Can get rid of this clone if process_filter_actions was part of mux
-                            let export = export.clone();
-                            self.process_filter_action(|viewer| {
-                                viewer.clear_filters();
-                                viewer.import_user_filters(&export);
+                            self.mux.demux_mut(self.linked_filters, |instance| {
+                                instance.clear_filters();
+                                instance.import_user_filters(&export);
                             });
                         }
                         None => {
@@ -754,18 +745,18 @@ impl<'term> App<'term> {
                     return self.process_search(&pat, true);
                 }
                 Some("clear") => {
-                    self.process_filter_action(|viewer| {
-                        viewer.clear_filters();
+                    self.mux.demux_mut(self.linked_filters, |instance| {
+                        instance.clear_filters();
                     });
                 }
                 Some("union" | "u" | "||" | "|") => {
-                    self.process_filter_action(|viewer| {
-                        viewer.set_composite_strategy(CompositeStrategy::Union);
+                    self.mux.demux_mut(self.linked_filters, |instance| {
+                        instance.set_composite_strategy(CompositeStrategy::Union);
                     });
                 }
                 Some("intersect" | "i" | "&&" | "&") => {
-                    self.process_filter_action(|viewer| {
-                        viewer.set_composite_strategy(CompositeStrategy::Intersection);
+                    self.mux.demux_mut(self.linked_filters, |instance| {
+                        instance.set_composite_strategy(CompositeStrategy::Intersection);
                     });
                 }
                 Some(cmd) => {
@@ -787,9 +778,9 @@ impl<'term> App<'term> {
             }
             Some(cmd) => {
                 if let Ok(line_number) = cmd.parse::<usize>() {
-                    if let Some(viewer) = self.mux.active_viewer_mut() {
-                        if let Some(idx) = viewer.nearest_index(line_number) {
-                            viewer.viewport_mut().jump_vertically_to(idx);
+                    if let Some(instance) = self.mux.active_mut() {
+                        if let Some(idx) = instance.nearest_index(line_number) {
+                            instance.viewport_mut().jump_vertically_to(idx);
                         }
                     }
                 } else {
