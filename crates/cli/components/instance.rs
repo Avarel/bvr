@@ -93,6 +93,12 @@ impl Instance {
         Ok(())
     }
 
+    pub fn edit_search_filter(&mut self, pattern: &str, literal: bool) -> Result<(), regex::Error> {
+        self.compositor.edit_selected_filter(&self.buf, pattern, literal)?;
+        self.invalidate_cache();
+        Ok(())
+    }
+
     pub fn name(&self) -> &str {
         &self.name
     }

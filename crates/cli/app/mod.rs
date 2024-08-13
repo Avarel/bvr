@@ -63,7 +63,7 @@ impl InputMode {
 pub enum PromptMode {
     Command,
     Shell { pipe: bool },
-    Search { escaped: bool },
+    Search { escaped: bool, edit: bool },
 }
 
 #[derive(Serialize, Deserialize, Clone, Copy)]
@@ -286,15 +286,40 @@ impl<'term> App<'term> {
         match action {
             Action::Exit => return Ok(false),
             Action::SwitchMode(new_mode) => {
-                if !self.mode.is_prompt_search() || !new_mode.is_prompt_search() {
-                    self.prompt.take();
-                }
+                let old_mode = self.mode;
                 self.mode = new_mode;
 
-                if new_mode == InputMode::Visual {
-                    if let Some(instance) = self.mux.active_mut() {
-                        instance.move_selected_into_view();
-                        instance.set_follow_output(false);
+                match new_mode {
+                    InputMode::Visual => {
+                        if let Some(instance) = self.mux.active_mut() {
+                            instance.move_selected_into_view();
+                            instance.set_follow_output(false);
+                        }
+                    }
+                    InputMode::Prompt(PromptMode::Search { edit: true, .. }) => {
+                        if let InputMode::Prompt(PromptMode::Search { edit: true, .. }) = old_mode {
+                            return Ok(true);
+                        }
+                        match self
+                            .mux
+                            .active_mut()
+                            .and_then(|instance| instance.compositor_mut().selected_filter())
+                            .and_then(|filter| filter.mask().regex())
+                        {
+                            Some(regex) => {
+                                self.prompt.take();
+                                self.prompt.enter_str(regex.as_str());
+                            }
+                            _ => {
+                                self.mode = old_mode;
+                                return Ok(true);
+                            }
+                        };
+                    }
+                    _ => {
+                        if !old_mode.is_prompt_search() || !new_mode.is_prompt_search() {
+                            self.prompt.take();
+                        }
                     }
                 }
             }
@@ -418,9 +443,9 @@ impl<'term> App<'term> {
                             let command = self.prompt.submit();
                             Ok(self.process_command(&command))
                         }
-                        InputMode::Prompt(PromptMode::Search { escaped }) => {
+                        InputMode::Prompt(PromptMode::Search { escaped, edit }) => {
                             let command = self.prompt.take();
-                            Ok(self.process_search(&command, escaped))
+                            Ok(self.process_search(&command, escaped, edit))
                         }
                         InputMode::Prompt(PromptMode::Shell { pipe }) => {
                             let command = self.prompt.take();
@@ -565,10 +590,15 @@ impl<'term> App<'term> {
         Ok(!terminate)
     }
 
-    fn process_search(&mut self, pat: &str, escaped: bool) -> bool {
+    fn process_search(&mut self, pat: &str, escaped: bool, edit: bool) -> bool {
         let mut e = None;
         self.mux.demux_mut(self.linked_filters, |instance| {
-            if let Err(err) = instance.add_search_filter(pat, escaped) {
+            let result = if edit {
+                instance.edit_search_filter(pat, escaped)
+            } else {
+                instance.add_search_filter(pat, escaped)
+            };
+            if let Err(err) = result {
                 e.get_or_insert(err);
             };
         });
@@ -738,11 +768,11 @@ impl<'term> App<'term> {
                 }
                 Some("regex" | "r") => {
                     let pat = parts.collect::<String>();
-                    return self.process_search(&pat, false);
+                    return self.process_search(&pat, false, false);
                 }
                 Some("literal" | "lit" | "l") => {
                     let pat = parts.collect::<String>();
-                    return self.process_search(&pat, true);
+                    return self.process_search(&pat, true, false);
                 }
                 Some("clear") => {
                     self.mux.demux_mut(self.linked_filters, |instance| {
@@ -798,7 +828,7 @@ impl<'term> App<'term> {
         let [mux_chunk, cmd_chunk] = MultiplexerWidget::split_bottom(f.area(), 1);
 
         match self.mode {
-            InputMode::Prompt(PromptMode::Search { escaped }) => {
+            InputMode::Prompt(PromptMode::Search { escaped, edit }) => {
                 let pattern = self.prompt.buf();
 
                 let pattern_mismatch = self

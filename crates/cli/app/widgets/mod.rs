@@ -37,12 +37,15 @@ impl<'a> Widget for StatusWidget<'a> {
         let (accent_color, mode_name) = match self.input_mode {
             InputMode::Prompt(PromptMode::Command) => (colors::COMMAND_ACCENT, " COMMAND "),
             InputMode::Prompt(PromptMode::Shell { .. }) => (colors::SHELL_ACCENT, " SHELL "),
-            InputMode::Prompt(PromptMode::Search { escaped: false }) => {
-                (colors::FILTER_ACCENT, " FILTER ")
-            }
-            InputMode::Prompt(PromptMode::Search { escaped: true }) => {
-                (colors::FILTER_ACCENT, " FILTER (ESCAPED) ")
-            }
+            InputMode::Prompt(PromptMode::Search { escaped, edit }) => (
+                colors::FILTER_ACCENT,
+                match (escaped, edit) {
+                    (true, true) => " EDIT FILTER (ESCAPED) ",
+                    (true, false) => " FILTER (ESCAPED) ",
+                    (false, true) => " EDIT FILTER ",
+                    (false, false) => " FILTER ",
+                },
+            ),
             InputMode::Normal => (colors::NORMAL_ACCENT, " NORMAL "),
             InputMode::Visual => (colors::SELECT_ACCENT, " VISUAL "),
             InputMode::Filter => (colors::FILTER_ACCENT, " FILTER "),
@@ -239,7 +242,11 @@ impl MultiplexerPane<'_> {
     ) {
         let [view_chunk, filter_chunk] =
             MultiplexerWidget::split_bottom(*area, Self::FILTER_MAX_HEIGHT);
-        FilterViewerWidget { view_index, instance }.render(filter_chunk, buf, handler);
+        FilterViewerWidget {
+            view_index,
+            instance,
+        }
+        .render(filter_chunk, buf, handler);
         *area = view_chunk;
     }
 

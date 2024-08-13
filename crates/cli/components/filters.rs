@@ -63,7 +63,9 @@ pub enum MaskExport {
     All,
     Bookmarks,
     #[serde(rename = "regex")]
-    Regex { regex: String },
+    Regex {
+        regex: String,
+    },
 }
 
 #[derive(Clone, serde::Serialize, serde::Deserialize)]
@@ -116,7 +118,7 @@ impl Filter {
                 Mask::Bookmarks => MaskExport::Bookmarks,
                 Mask::Regex(regex) => MaskExport::Regex {
                     regex: regex.to_string(),
-                }
+                },
             },
             enabled: self.enabled,
             color: self.color.to_string().to_ascii_lowercase(),
@@ -125,7 +127,9 @@ impl Filter {
 
     pub fn from_export(file: &SegBuffer, export: &FilterExport) -> Self {
         let mask = match export.mask {
-            MaskExport::All | MaskExport::Bookmarks => unreachable!("should have been processed before"),
+            MaskExport::All | MaskExport::Bookmarks => {
+                unreachable!("should have been processed before")
+            }
             MaskExport::Regex { ref regex } => Mask::Regex(regex_compile(regex).unwrap()),
         };
         Self {
@@ -315,6 +319,14 @@ impl Filters {
         self.iter().filter(|filter| filter.is_enabled())
     }
 
+    pub fn get(&self, index: usize) -> Option<&Filter> {
+        match index {
+            0 => Some(&self.all),
+            1 => Some(&self.bookmarks),
+            _ => self.user_filters.get(index - 2),
+        }
+    }
+
     pub fn get_mut(&mut self, index: usize) -> Option<&mut Filter> {
         match index {
             0 => Some(&mut self.all),
@@ -340,20 +352,20 @@ impl Filters {
     }
 
     pub fn export(&self) -> FilterExportSet {
-        self.iter()
-            .map(Filter::to_export)
-            .collect()
+        self.iter().map(Filter::to_export).collect()
     }
 
     pub fn import_user_filters(&mut self, file: &SegBuffer, imports: FilterImportSet) {
         self.user_filters.clear();
-        
+
         for filter in imports {
             // Special handling for All and Bookmarks, we want to just inherit their enablement state
             match filter.mask {
                 MaskExport::All => self.all.enabled = filter.enabled,
                 MaskExport::Bookmarks => self.bookmarks.enabled = filter.enabled,
-                MaskExport::Regex { .. } => self.user_filters.push(Filter::from_export(file, filter)),
+                MaskExport::Regex { .. } => {
+                    self.user_filters.push(Filter::from_export(file, filter))
+                }
             }
         }
     }
@@ -455,6 +467,20 @@ impl Compositor {
         self.filters.clear();
     }
 
+    pub fn selected_filter(&self) -> Option<&Filter> {
+        match self.cursor.state() {
+            Cursor::Singleton(i) => self.filters.get(i),
+            _ => None,
+        }
+    }
+
+    pub fn selected_filter_mut(&mut self) -> Option<&mut Filter> {
+        match self.cursor.state() {
+            Cursor::Singleton(i) => self.filters.get_mut(i),
+            _ => None,
+        }
+    }
+
     pub fn selected_filter_indices(&self) -> std::ops::Range<usize> {
         match self.cursor.state() {
             Cursor::Singleton(i) => i..i + 1,
@@ -488,13 +514,31 @@ impl Compositor {
         pattern: &str,
         literal: bool,
     ) -> Result<(), regex::Error> {
-        let (filter, regex) = Mask::build(pattern, literal)?;
+        let (mask, regex) = Mask::build(pattern, literal)?;
 
         self.filters.user_filters.push(Filter::new(
-            filter,
+            mask,
             self.color_selector.next_color(),
             FilterSet::Search(LineSet::search(file.segment_iter().unwrap(), regex)),
         ));
+        Ok(())
+    }
+
+    pub fn edit_selected_filter(
+        &mut self,
+        file: &SegBuffer,
+        pattern: &str,
+        literal: bool,
+    ) -> Result<(), regex::Error> {
+        let (mask, regex) = Mask::build(pattern, literal)?;
+
+        if let Some(filter) = self.selected_filter_mut() {
+            *filter = Filter::new(
+                mask,
+                filter.color,
+                FilterSet::Search(LineSet::search(file.segment_iter().unwrap(), regex)),
+            )
+        }
         Ok(())
     }
 

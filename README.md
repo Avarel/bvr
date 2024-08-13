@@ -39,6 +39,8 @@ a plethora of other features that I couldn't find in any other pager.
 | Feature              | Description                                                   | Progress       |
 | -------------------- | ------------------------------------------------------------- | -------------- |
 | Filter Presets       | Add preset filters upon startup.                              | In Development |
+| Filter Linking       | Synchronize filters across the opened files.                  | In Development |
+| Filter Editing       | Edit filters.                                                 | Basic          |
 | Piping Files         | View piped outputs of other programs, ie. `cat file \| bvr`   | Basic          |
 | Status Bar           | View current state of the pager.                              | Basic          |
 | Commands             | Use modal commands to interact with the pager.                | Basic          |
@@ -77,6 +79,8 @@ In this mode, you can enter commands to interact with the pager.
 | `:mux` <br>  `:m`                           | Toggle the multiplexer mode between windows or tabs.          |
 | `:mux tabs` `:mux split` <br> `:m t` `:m s` | Set the multiplexer to the respective mode.                   |
 | `:pb` `pbcopy`                              | Copy the output of the active filters to the clipboard.       |
+| `:filter persist`                           | Persist the filters on shutdown and launch.                   |
+| `:filter link`                              | Synchronize filters across opened files.                      |
 | `:filter regex <regex>` <br> `:f r <regex>` | Create a new filter searching for the regex.                  |
 | `:filter lit <lit>` <br> `:f l <regex>`     | Create a new filter searching for the literal.                |
 | `:filter clear` <br> `:f c`                 | Clear all filters.                                            |

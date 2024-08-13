@@ -109,6 +109,12 @@ impl Keybinding {
                             delta: ViewDelta::Page,
                         }))
                     }
+                    KeyCode::Char('/') => {
+                        Some(Action::SwitchMode(InputMode::Prompt(PromptMode::Search {
+                            escaped: false,
+                            edit: true
+                        })))
+                    }
                     KeyCode::Char(c @ ('u' | 'd')) => Some(Action::Filter(FilterAction::Move {
                         direction: Direction::back_if(c == 'u'),
                         select: key.modifiers.contains(KeyModifiers::SHIFT),
@@ -189,9 +195,10 @@ impl Keybinding {
                     KeyCode::Backspace => Some(Action::Command(CommandAction::Backspace)),
                     KeyCode::Char('r') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                         match prompt_mode {
-                            PromptMode::Search { escaped } => {
+                            PromptMode::Search { escaped, edit } => {
                                 Some(Action::SwitchMode(InputMode::Prompt(PromptMode::Search {
                                     escaped: !escaped,
+                                    edit
                                 })))
                             }
                             _ => None,
@@ -231,6 +238,7 @@ impl Keybinding {
                 KeyCode::Char('/') => {
                     Some(Action::SwitchMode(InputMode::Prompt(PromptMode::Search {
                         escaped: false,
+                        edit: false
                     })))
                 }
                 KeyCode::Char('!') => {
