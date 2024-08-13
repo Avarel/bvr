@@ -19,7 +19,7 @@ impl<Buf> SegmentRaw<Buf>
 where
     Buf: AsRef<[u8]>,
 {
-    pub const MAX_SIZE: u64 = 1 << 20;
+    pub const TODO_REMOVE_SIZE: u64 = 1 << 20;
 
     #[inline]
     pub fn start(&self) -> u64 {
@@ -39,17 +39,6 @@ where
     #[inline]
     pub fn translate_inner_data_range(&self, start: u64, end: u64) -> Range<u64> {
         self.translate_inner_data_index(start)..self.translate_inner_data_index(end)
-    }
-
-    #[inline]
-    pub fn id_of_data(start: u64) -> usize {
-        (start / Self::MAX_SIZE) as usize
-    }
-
-    #[inline]
-    pub fn data_range_of_id(id: usize) -> Range<u64> {
-        let start = id as u64 * Self::MAX_SIZE;
-        start..start + Self::MAX_SIZE
     }
 }
 
@@ -74,15 +63,15 @@ where
 }
 
 impl SegmentMut {
-    pub(crate) fn new(start: u64) -> Result<Self> {
+    pub(crate) fn new(start: u64, len: u64) -> Result<Self> {
         let data = memmap2::MmapOptions::new()
-            .len(Self::MAX_SIZE as usize)
+            .len(len as usize)
             .map_anon()?;
         #[cfg(unix)]
         data.advise(memmap2::Advice::Sequential)?;
         Ok(Self {
             data,
-            range: start..start + Self::MAX_SIZE,
+            range: start..start + len,
         })
     }
 
@@ -97,7 +86,7 @@ impl SegmentMut {
 impl Segment {
     pub(crate) fn map_file<F: Mmappable>(range: Range<u64>, file: &F) -> Result<Self> {
         let size = range.end - range.start;
-        debug_assert!(size <= Self::MAX_SIZE);
+        // debug_assert!(size <= Self::MAX_SIZE);
         let data = unsafe {
             memmap2::MmapOptions::new()
                 .offset(range.start)

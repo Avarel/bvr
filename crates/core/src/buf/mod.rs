@@ -22,7 +22,12 @@ pub struct SegBuffer {
     /// The [LineIndex] of this buffer.
     index: LineIndex,
     /// The internal representation of this buffer.
+    map: BufferMap,
+}
+
+struct BufferMap {
     repr: BufferRepr,
+    segment_size: u64,
 }
 
 struct StreamInner {
@@ -44,15 +49,26 @@ enum BufferRepr {
     Stream(RefCell<StreamInner>),
 }
 
-impl BufferRepr {
+impl BufferMap {
+    #[inline]
+    pub fn id_of_data(&self, start: u64) -> usize {
+        (start / self.segment_size) as usize
+    }
+
+    #[inline]
+    pub fn data_range_of_id(&self, id: usize) -> Range<u64> {
+        let start = id as u64 * self.segment_size;
+        start..start + self.segment_size
+    }
+
     fn fetch(&self, seg_id: usize) -> Option<Arc<Segment>> {
-        match self {
+        match &self.repr {
             BufferRepr::File {
                 file,
                 len,
                 segments,
             } => {
-                let range = Segment::data_range_of_id(seg_id);
+                let range = self.data_range_of_id(seg_id);
                 let range = range.start..range.end.min(*len);
                 Some(
                     segments
@@ -71,7 +87,13 @@ impl BufferRepr {
                 if let Some(rx) = pending_segs {
                     loop {
                         match rx.try_recv() {
-                            Ok(segment) => segments.push(Arc::new(segment)),
+                            Ok(segment) => {
+                                #[cfg(debug_assertions)]
+                                if let Some(first_segment) = segments.first() {
+                                    debug_assert_eq!(first_segment.len(), segment.len())
+                                }
+                                segments.push(Arc::new(segment))
+                            }
                             Err(TryRecvError::Empty) => break,
                             Err(TryRecvError::Disconnected) => {
                                 *pending_segs = None;
@@ -87,29 +109,37 @@ impl BufferRepr {
 }
 
 impl SegBuffer {
+    const SEGMENT_SIZE: u64 = 1 << 20;
+
     pub fn read_file(file: File, seg_count: NonZeroUsize, complete: bool) -> Result<Self> {
         let index = LineIndex::read_file(file.try_clone()?, complete)?;
 
         Ok(Self {
             index,
-            repr: BufferRepr::File {
-                len: file.metadata()?.len(),
-                file,
-                segments: RefCell::new(LruCache::new(seg_count)),
+            map: BufferMap {
+                repr: BufferRepr::File {
+                    len: file.metadata()?.len(),
+                    file,
+                    segments: RefCell::new(LruCache::new(seg_count)),
+                },
+                segment_size: Self::SEGMENT_SIZE,
             },
         })
     }
 
     pub fn read_stream(stream: BoxedStream, complete: bool) -> Result<Self> {
         let (sx, rx) = std::sync::mpsc::channel();
-        let index = LineIndex::read_stream(stream, sx, complete)?;
+        let index = LineIndex::read_stream(stream, sx, complete, Self::SEGMENT_SIZE)?;
 
         Ok(Self {
             index,
-            repr: BufferRepr::Stream(RefCell::new(StreamInner {
-                pending_segs: Some(rx),
-                segments: Vec::new(),
-            })),
+            map: BufferMap {
+                repr: BufferRepr::Stream(RefCell::new(StreamInner {
+                    pending_segs: Some(rx),
+                    segments: Vec::new(),
+                })),
+                segment_size: Self::SEGMENT_SIZE,
+            },
         })
     }
 
@@ -130,12 +160,12 @@ impl SegBuffer {
 
         let data_start = self.index.data_of_line(line_number)?;
         let data_end = self.index.data_of_line(line_number + 1)?;
-        let seg_start = Segment::id_of_data(data_start);
-        let seg_end = Segment::id_of_data(data_end);
+        let seg_start = self.map.id_of_data(data_start);
+        let seg_end = self.map.id_of_data(data_end);
 
         if seg_start == seg_end {
             // The data is in a single segment
-            let seg = self.repr.fetch(seg_start)?;
+            let seg = self.map.fetch(seg_start)?;
             let range = seg.translate_inner_data_range(data_start, data_end);
             Some(seg.get_bytes(range))
         } else {
@@ -144,15 +174,15 @@ impl SegBuffer {
             // the data from across the segments.
             let mut buf = Vec::with_capacity((data_end - data_start) as usize);
 
-            let seg_first = self.repr.fetch(seg_start)?;
-            let seg_last = self.repr.fetch(seg_end)?;
+            let seg_first = self.map.fetch(seg_start)?;
+            let seg_last = self.map.fetch(seg_end)?;
             let (start, end) = (
                 seg_first.translate_inner_data_index(data_start),
                 seg_last.translate_inner_data_index(data_end),
             );
             buf.extend_from_slice(&seg_first[start as usize..]);
             for seg_id in seg_start + 1..seg_end {
-                buf.extend_from_slice(&self.repr.fetch(seg_id)?);
+                buf.extend_from_slice(&self.map.fetch(seg_id)?);
             }
             buf.extend_from_slice(&seg_last[..end as usize]);
 
@@ -175,23 +205,29 @@ impl SegBuffer {
     }
 
     pub fn segment_iter(&self) -> Result<ContiguousSegmentIterator> {
-        match &self.repr {
+        match &self.map.repr {
             BufferRepr::File { file, len, .. } => Ok(ContiguousSegmentIterator::new(
                 self.index.clone(),
                 0..usize::MAX, // ..self.index.line_count() if nondynamic
-                BufferRepr::File {
-                    file: file.try_clone()?,
-                    len: *len,
-                    segments: RefCell::new(LruCache::new(NonZeroUsize::new(2).unwrap())),
+                BufferMap {
+                    repr: BufferRepr::File {
+                        file: file.try_clone()?,
+                        len: *len,
+                        segments: RefCell::new(LruCache::new(NonZeroUsize::new(2).unwrap())),
+                    },
+                    segment_size: self.map.segment_size,
                 },
             )),
             BufferRepr::Stream(inner) => Ok(ContiguousSegmentIterator::new(
                 self.index.clone(),
                 0..usize::MAX,
-                BufferRepr::Stream(RefCell::new(StreamInner {
-                    pending_segs: None,
-                    segments: inner.borrow().segments.clone(),
-                })),
+                BufferMap {
+                    repr: BufferRepr::Stream(RefCell::new(StreamInner {
+                        pending_segs: None,
+                        segments: inner.borrow().segments.clone(),
+                    })),
+                    segment_size: self.map.segment_size,
+                },
             )),
         }
     }
@@ -216,7 +252,7 @@ impl SegBuffer {
                     writer.write_all(line.as_bytes())?;
                 }
             }
-            None => match &mut self.repr {
+            None => match &mut self.map.repr {
                 BufferRepr::File { file, .. } => {
                     file.seek(std::io::SeekFrom::Start(0))?;
                     let mut output = output;
@@ -248,7 +284,7 @@ impl SegBuffer {
                     output.push_str(line.as_str());
                 }
             }
-            None => match &mut self.repr {
+            None => match &mut self.map.repr {
                 BufferRepr::File { file, .. } => {
                     file.seek(std::io::SeekFrom::Start(0))?;
                     file.read_to_string(output)?;
@@ -271,7 +307,7 @@ impl SegBuffer {
 
 pub struct ContiguousSegmentIterator {
     index: LineIndex,
-    repr: BufferRepr,
+    map: BufferMap,
     line_range: Range<usize>,
     // Intermediate buffer for the iterator to borrow from
     // for the case where the line crosses multiple segments
@@ -288,11 +324,11 @@ pub struct ContiguousSegment<'a> {
 }
 
 impl ContiguousSegmentIterator {
-    fn new(index: LineIndex, line_range: Range<usize>, repr: BufferRepr) -> Self {
+    fn new(index: LineIndex, line_range: Range<usize>, map: BufferMap) -> Self {
         Self {
             line_range,
             index,
-            repr,
+            map,
             imm_buf: Vec::new(),
             imm_seg: None,
         }
@@ -326,16 +362,16 @@ impl ContiguousSegmentIterator {
         let curr_line_data_start = self.index.data_of_line(curr_line)?;
         let curr_line_data_end = self.index.data_of_line(curr_line + 1)?;
 
-        let curr_line_seg_start = Segment::id_of_data(curr_line_data_start);
-        let curr_line_seg_end = Segment::id_of_data(curr_line_data_end);
+        let curr_line_seg_start = self.map.id_of_data(curr_line_data_start);
+        let curr_line_seg_end = self.map.id_of_data(curr_line_data_end);
 
         if curr_line_seg_end != curr_line_seg_start {
             self.imm_buf.clear();
             self.imm_buf
                 .reserve((curr_line_data_end - curr_line_data_start) as usize);
 
-            let seg_first = self.repr.fetch(curr_line_seg_start)?;
-            let seg_last = self.repr.fetch(curr_line_seg_end)?;
+            let seg_first = self.map.fetch(curr_line_seg_start)?;
+            let seg_last = self.map.fetch(curr_line_seg_end)?;
             let (start, end) = (
                 seg_first.translate_inner_data_index(curr_line_data_start),
                 seg_last.translate_inner_data_index(curr_line_data_end),
@@ -343,7 +379,7 @@ impl ContiguousSegmentIterator {
 
             self.imm_buf.extend_from_slice(&seg_first[start as usize..]);
             for seg_id in curr_line_seg_start + 1..curr_line_seg_end {
-                self.imm_buf.extend_from_slice(&self.repr.fetch(seg_id)?);
+                self.imm_buf.extend_from_slice(&self.map.fetch(seg_id)?);
             }
             self.imm_buf.extend_from_slice(&seg_last[..end as usize]);
 
@@ -354,8 +390,8 @@ impl ContiguousSegmentIterator {
                 data: &self.imm_buf,
             })
         } else {
-            let curr_seg_data_start = curr_line_seg_start as u64 * Segment::MAX_SIZE;
-            let curr_seg_data_end = curr_seg_data_start + Segment::MAX_SIZE;
+            let curr_seg_data_start = curr_line_seg_start as u64 * self.map.segment_size;
+            let curr_seg_data_end = curr_seg_data_start + self.map.segment_size;
 
             let line_end = self
                 .index
@@ -365,11 +401,11 @@ impl ContiguousSegmentIterator {
             let line_end_data_start = self.index.data_of_line(line_end)?;
 
             // this line should not cross multiple segments, else we would have caught in the first case
-            let segment = self.repr.fetch(curr_line_seg_start)?;
+            let segment = self.map.fetch(curr_line_seg_start)?;
             let range =
                 segment.translate_inner_data_range(curr_line_data_start, line_end_data_start);
-            assert!(line_end_data_start - curr_seg_data_start <= Segment::MAX_SIZE);
-            assert!(range.end <= Segment::MAX_SIZE);
+            assert!(line_end_data_start - curr_seg_data_start <= self.map.segment_size);
+            assert!(range.end <= self.map.segment_size);
 
             self.line_range.start = line_end;
             let segment = self.imm_seg.insert(segment);

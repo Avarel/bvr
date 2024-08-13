@@ -60,7 +60,7 @@ impl LineIndexRemote {
             let mut curr = 0;
 
             while curr < len {
-                let end = (curr + Segment::MAX_SIZE).min(len);
+                let end = (curr + SegmentMut::TODO_REMOVE_SIZE).min(len);
                 let (task, task_rx) = IndexingTask::new(&file, curr, end)?;
                 sx.send(task_rx).map_err(|_| Error::Internal)?;
 
@@ -92,13 +92,14 @@ impl LineIndexRemote {
         mut self,
         mut stream: BoxedStream,
         outgoing: Sender<Segment>,
+        segment_size: u64,
     ) -> Result<()> {
         let mut len = 0;
 
         self.buf.push(0);
 
         loop {
-            let mut segment = SegmentMut::new(len)?;
+            let mut segment = SegmentMut::new(len, segment_size)?;
 
             let mut buf_len = 0;
             loop {
@@ -173,7 +174,8 @@ impl LineIndex {
     pub fn read_stream(
         stream: BoxedStream,
         outgoing: Sender<Segment>,
-        complete: bool,
+        block_until_complete: bool,
+        segment_size: u64,
     ) -> Result<Self> {
         let (buf, writer) = CowVec::new();
         let completed = Arc::new(AtomicBool::new(false));
@@ -184,10 +186,10 @@ impl LineIndex {
                     buf: writer,
                     completed,
                 }
-                .index_stream(stream, outgoing)
+                .index_stream(stream, outgoing, segment_size)
             }
         };
-        if complete {
+        if block_until_complete {
             task()?;
         } else {
             std::thread::spawn(task);
