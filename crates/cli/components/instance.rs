@@ -94,7 +94,8 @@ impl Instance {
     }
 
     pub fn edit_search_filter(&mut self, pattern: &str, literal: bool) -> Result<(), regex::Error> {
-        self.compositor.edit_selected_filter(&self.buf, pattern, literal)?;
+        self.compositor
+            .edit_selected_filter(&self.buf, pattern, literal)?;
         self.invalidate_cache();
         Ok(())
     }
@@ -298,7 +299,9 @@ impl Instance {
     }
 
     pub fn import_user_filters(&mut self, filters: FilterImportSet) {
-        self.compositor.filters_mut().import_user_filters(&self.buf, filters);
+        self.compositor
+            .filters_mut()
+            .import_user_filters(&self.buf, filters);
         self.invalidate_cache();
     }
 }

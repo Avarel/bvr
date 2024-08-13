@@ -64,9 +64,7 @@ where
 
 impl SegmentMut {
     pub(crate) fn new(start: u64, len: u64) -> Result<Self> {
-        let data = memmap2::MmapOptions::new()
-            .len(len as usize)
-            .map_anon()?;
+        let data = memmap2::MmapOptions::new().len(len as usize).map_anon()?;
         #[cfg(unix)]
         data.advise(memmap2::Advice::Sequential)?;
         Ok(Self {

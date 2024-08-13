@@ -28,13 +28,11 @@ pub const FILTER_ACCENT: Color = Color::Indexed(178);
 pub const SHELL_ACCENT: Color = Color::Indexed(161);
 
 pub struct ColorSelector {
-    hue: f64
+    hue: f64,
 }
 
 impl ColorSelector {
-    pub const DEFAULT: Self = Self {
-        hue: 0.0
-    };
+    pub const DEFAULT: Self = Self { hue: 0.0 };
 
     pub fn reset(&mut self) {
         *self = Self::DEFAULT

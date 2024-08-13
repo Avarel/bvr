@@ -112,7 +112,7 @@ impl Keybinding {
                     KeyCode::Char('/') => {
                         Some(Action::SwitchMode(InputMode::Prompt(PromptMode::Search {
                             escaped: false,
-                            edit: true
+                            edit: true,
                         })))
                     }
                     KeyCode::Char(c @ ('u' | 'd')) => Some(Action::Filter(FilterAction::Move {
@@ -198,7 +198,7 @@ impl Keybinding {
                             PromptMode::Search { escaped, edit } => {
                                 Some(Action::SwitchMode(InputMode::Prompt(PromptMode::Search {
                                     escaped: !escaped,
-                                    edit
+                                    edit,
                                 })))
                             }
                             _ => None,
@@ -238,7 +238,7 @@ impl Keybinding {
                 KeyCode::Char('/') => {
                     Some(Action::SwitchMode(InputMode::Prompt(PromptMode::Search {
                         escaped: false,
-                        edit: false
+                        edit: false,
                     })))
                 }
                 KeyCode::Char('!') => {
