@@ -24,23 +24,23 @@ impl FilterData {
         }
     }
 
-    fn init(&self) {
-        self.state.get_or_init(|| {
-            self.path
-                .as_ref()
-                .and_then(|path| std::fs::File::open(path).ok())
-                .map(std::io::BufReader::new)
-                .and_then(|reader| serde_json::from_reader::<_, LoadedFilterData>(reader).ok())
-                .unwrap_or_else(LoadedFilterData::default)
-        });
+    fn load(&self) -> LoadedFilterData {
+        self.path
+            .as_ref()
+            .and_then(|path| std::fs::File::open(path).ok())
+            .map(std::io::BufReader::new)
+            .and_then(|reader| serde_json::from_reader::<_, LoadedFilterData>(reader).ok())
+            .unwrap_or_else(LoadedFilterData::default)
     }
 
     fn load_and_save<F>(&mut self, f: F) -> Result<()>
     where
         F: FnOnce(&mut LoadedFilterData),
     {
-        self.init();
-        let data = self.state.get_mut().unwrap();
+        // TODO: get rid of once OnceCell::get_mut_or_init stabilizes
+        self.state.get_or_init(|| self.load());
+        // Safety: get or init should not fail
+        let data = unsafe { self.state.get_mut().unwrap_unchecked() };
 
         f(data);
 
@@ -61,9 +61,7 @@ impl FilterData {
     where
         F: FnOnce(&'a LoadedFilterData) -> R,
     {
-        self.init();
-        let data = self.state.get().unwrap();
-        Ok(f(data))
+        Ok(f(self.state.get_or_init(|| self.load())))
     }
 
     pub fn set_persistent(&mut self, persistent: bool) -> Result<()> {
