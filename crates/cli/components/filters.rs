@@ -393,7 +393,7 @@ impl Compositor {
             cursor: CursorState::new(),
             filters: Filters::new(),
             strategy: CompositeStrategy::Union,
-            color_selector: ColorSelector::DEFAULT,
+            color_selector: ColorSelector::new(),
         }
     }
 

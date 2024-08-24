@@ -27,25 +27,52 @@ pub const FILTER_ACCENT: Color = Color::Indexed(178);
 
 pub const SHELL_ACCENT: Color = Color::Indexed(161);
 
-pub struct ColorSelector {
-    hue: f64,
+pub enum ColorSelector {
+    Color256 { index: u8 },
+    TrueColor { hue: f64 },
 }
 
 impl ColorSelector {
-    pub const DEFAULT: Self = Self { hue: 0.0 };
+    pub fn new() -> Self {
+        use supports_color::Stream;
+
+        if let Some(support) = supports_color::on(Stream::Stdout) {
+            if support.has_16m {
+                return Self::TrueColor { hue: 0.0 };
+            } else if support.has_256 {
+                return Self::Color256 { index: 0 };
+            }
+        }
+
+        panic!("Application requires at least 256-color support");
+    }
 
     pub fn reset(&mut self) {
-        *self = Self::DEFAULT
+        match self {
+            ColorSelector::Color256 { index } => *index = 0,
+            ColorSelector::TrueColor { hue } => *hue = 0.0,
+        }
     }
 
     pub fn peek_color(&self) -> Color {
-        Color::from_hsl(self.hue, 80.0, 50.0)
+        match self {
+            ColorSelector::Color256 { index } => Color::Indexed(index + 9),
+            ColorSelector::TrueColor { hue } => Color::from_hsl(*hue, 80.0, 50.0),
+        }
     }
 
     pub fn next_color(&mut self) -> Color {
         let color = self.peek_color();
-        self.hue += 208.3;
-        self.hue %= 360.0;
+        match self {
+            ColorSelector::Color256 { index } => {
+                *index += 27;
+                *index %= 230;
+            }
+            ColorSelector::TrueColor { hue } => {
+                *hue += 208.3;
+                *hue %= 360.0;
+            }
+        }
         color
     }
 }
