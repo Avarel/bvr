@@ -1,4 +1,4 @@
-use ratatui::style::Color;
+use ratatui::{palette::Hsl, style::Color};
 
 pub const WHITE: Color = Color::Indexed(255);
 pub const BLACK: Color = Color::Indexed(16);
@@ -29,7 +29,7 @@ pub const SHELL_ACCENT: Color = Color::Indexed(161);
 
 pub enum ColorSelector {
     Color256 { index: u8 },
-    TrueColor { hue: f64 },
+    TrueColor { hue: f32 },
 }
 
 impl ColorSelector {
@@ -57,7 +57,7 @@ impl ColorSelector {
     pub fn peek_color(&self) -> Color {
         match self {
             ColorSelector::Color256 { index } => Color::Indexed(index + 9),
-            ColorSelector::TrueColor { hue } => Color::from_hsl(*hue, 80.0, 50.0),
+            ColorSelector::TrueColor { hue } => Color::from_hsl(Hsl::new(*hue, 80.0, 50.0)),
         }
     }
 
