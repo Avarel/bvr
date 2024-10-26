@@ -1,7 +1,7 @@
 pub mod buf;
 
-#[doc(hidden)]
-pub mod collections;
+// #[doc(hidden)]
+// pub mod collections;
 mod cowvec;
 
 pub mod err;
