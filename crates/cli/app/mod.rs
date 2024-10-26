@@ -101,6 +101,7 @@ pub struct App<'term> {
     gutter: bool,
     mouse_capture: bool,
     linked_filters: bool,
+    refresh: bool,
 }
 
 impl Drop for App<'_> {
@@ -126,6 +127,7 @@ impl<'term> App<'term> {
             regex_cache: None,
             mouse_capture: true,
             linked_filters: false,
+            refresh: false,
         }
     }
 
@@ -243,6 +245,10 @@ impl<'term> App<'term> {
 
         loop {
             let cursor = self.ui(&mut mouse_handler);
+            if self.refresh {
+                self.term.clear()?;
+                self.refresh = false;
+            }
             self.term.draw(|f| {
                 if let Some(cursor) = cursor {
                     f.set_cursor_position(cursor);
@@ -626,6 +632,9 @@ impl<'term> App<'term> {
                     self.status.msg("mouse capture toggle failed".to_string());
                 }
                 return true;
+            }
+            Some("refresh") => {
+                self.refresh = true;
             }
             Some("open" | "o") => {
                 let path = parts.collect::<PathBuf>();
