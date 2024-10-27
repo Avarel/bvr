@@ -5,7 +5,7 @@ use super::{
     viewport::Viewport,
 };
 use crate::{
-    app::ViewDelta,
+    app::control::ViewDelta,
     colors::{self, ColorSelector},
     direction::Direction,
     regex_compile,

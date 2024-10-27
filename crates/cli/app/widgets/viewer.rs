@@ -1,7 +1,7 @@
 use super::super::{
     actions::{Action, NormalAction},
     mouse::MouseHandler,
-    ViewDelta,
+    control::ViewDelta,
 };
 use crate::{
     app::actions::VisualAction,

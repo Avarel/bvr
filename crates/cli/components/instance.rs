@@ -4,7 +4,7 @@ use super::{
     viewer::{CachedLine, ViewCache},
     viewport::Viewport,
 };
-use crate::{app::ViewDelta, colors::ColorSelector, direction::Direction};
+use crate::{app::control::ViewDelta, colors::ColorSelector, direction::Direction};
 use bvr_core::SegBuffer;
 use bvr_core::{matches::CompositeStrategy, Result};
 

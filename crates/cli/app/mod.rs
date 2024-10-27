@@ -1,3 +1,4 @@
+pub mod control;
 mod actions;
 mod keybinding;
 mod mouse;
@@ -8,10 +9,11 @@ use self::{
     keybinding::Keybinding,
     mouse::MouseHandler,
     widgets::{MultiplexerWidget, PromptWidget},
+    control::{InputMode, PromptMode}
 };
 use crate::{
     components::{
-        config::filter::FilterData,
+        config::filter::FilterConfigApp,
         instance::Instance,
         mux::{MultiplexerApp, MultiplexerMode},
         prompt::{self, PromptApp, PromptMovement},
@@ -30,7 +32,6 @@ use crossterm::terminal::{
     disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
 };
 use regex::bytes::Regex;
-use serde::{Deserialize, Serialize};
 use std::{
     borrow::Cow,
     collections::VecDeque,
@@ -42,39 +43,6 @@ use std::{
 
 pub type Backend<'a> = ratatui::backend::CrosstermBackend<std::io::StdoutLock<'a>>;
 pub type Terminal<'a> = ratatui::Terminal<Backend<'a>>;
-
-#[derive(PartialEq, Clone, Copy, Serialize, Deserialize)]
-#[serde(tag = "mode")]
-pub enum InputMode {
-    Prompt(PromptMode),
-    Normal,
-    Visual,
-    Filter,
-}
-
-impl InputMode {
-    pub fn is_prompt_search(&self) -> bool {
-        matches!(self, InputMode::Prompt(PromptMode::Search { .. }))
-    }
-}
-
-#[derive(PartialEq, Clone, Copy, Serialize, Deserialize)]
-#[serde(tag = "prompt")]
-pub enum PromptMode {
-    Command,
-    Shell { pipe: bool },
-    Search { escaped: bool, edit: bool },
-}
-
-#[derive(Serialize, Deserialize, Clone, Copy)]
-#[serde(tag = "delta")]
-pub enum ViewDelta {
-    Number(u16),
-    Page,
-    HalfPage,
-    Boundary,
-    Match,
-}
 
 struct RegexCache {
     pattern: String,
@@ -93,7 +61,7 @@ pub struct App<'term> {
     keybinds: Keybinding,
 
     clipboard: Option<Clipboard>,
-    filter_data: FilterData,
+    filter_config: FilterConfigApp,
 
     action_queue: VecDeque<Action>,
     regex_cache: Option<RegexCache>,
@@ -119,7 +87,7 @@ impl<'term> App<'term> {
             prompt: PromptApp::new(),
             mux: MultiplexerApp::new(),
             status: StatusApp::new(),
-            filter_data: FilterData::new(),
+            filter_config: FilterConfigApp::new(),
             keybinds: Keybinding::Hardcoded,
             clipboard: Clipboard::new().ok(),
             gutter: true,
@@ -132,7 +100,7 @@ impl<'term> App<'term> {
     }
 
     pub fn open_file(&mut self, path: &Path) -> Result<()> {
-        let load_filters = self.mux.is_empty() && self.filter_data.is_persistent().unwrap_or(false);
+        let load_filters = self.mux.is_empty() && self.filter_config.is_persistent();
 
         let file = std::fs::File::open(path)?;
         let name = path
@@ -145,7 +113,7 @@ impl<'term> App<'term> {
         );
 
         if load_filters {
-            let filter_set = match self.filter_data.get_persistent_filter() {
+            let filter_set = match self.filter_config.get_persistent_filter() {
                 Ok(filters) => filters,
                 Err(err) => {
                     self.status.msg(format!("filter persist/load: {err}"));
@@ -225,11 +193,11 @@ impl<'term> App<'term> {
         self.enter_terminal()?;
         let result = self.event_loop();
 
-        if self.filter_data.is_persistent().unwrap_or(false) {
+        if self.filter_config.is_persistent() {
             if let Some(source) = self.mux.active_mut() {
                 let export = source.compositor_mut().filters().export(None);
 
-                if let Err(err) = self.filter_data.set_persistent_filter(export) {
+                if let Err(err) = self.filter_config.set_persistent_filter(export) {
                     self.status.msg(format!("filter save: {err}"));
                 }
 
@@ -693,15 +661,9 @@ impl<'term> App<'term> {
                     return true;
                 }
                 Some("persist") => {
-                    let new_persistence = match self.filter_data.is_persistent() {
-                        Ok(persistence) => !persistence,
-                        Err(err) => {
-                            self.status.msg(format!("filter persist: {err}"));
-                            return true;
-                        }
-                    };
+                    let new_persistence = !self.filter_config.is_persistent();
 
-                    if let Err(err) = self.filter_data.set_persistent(new_persistence) {
+                    if let Err(err) = self.filter_config.set_persistent(new_persistence) {
                         self.status.msg(format!("filter persist: {err}"));
                         return true;
                     }
@@ -748,34 +710,24 @@ impl<'term> App<'term> {
                     let name: String = parts.collect::<String>();
                     let export = source.compositor_mut().filters().export(Some(name));
 
-                    if let Err(err) = self.filter_data.add_filter(export) {
+                    if let Err(err) = self.filter_config.add_filter(export) {
                         self.status.msg(format!("filter save: {err}"));
                     }
 
                     self.status.msg("filter save: saved filters".to_string());
                 }
 
-                Some("load") => {
-                    let filter_sets = match self.filter_data.filters() {
-                        Ok(filters) => filters,
-                        Err(err) => {
-                            self.status.msg(format!("filter save: {err}"));
-                            return true;
-                        }
-                    };
-
-                    match filter_sets.first() {
-                        Some(export) => {
-                            self.mux.demux_mut(self.linked_filters, |instance| {
-                                instance.clear_filters();
-                                instance.import_user_filters(&export);
-                            });
-                        }
-                        None => {
-                            self.status.msg("filter load: no saved filters".to_string());
-                        }
+                Some("load") => match self.filter_config.filters().first() {
+                    Some(export) => {
+                        self.mux.demux_mut(self.linked_filters, |instance| {
+                            instance.clear_filters();
+                            instance.import_user_filters(&export);
+                        });
                     }
-                }
+                    None => {
+                        self.status.msg("filter load: no saved filters".to_string());
+                    }
+                },
                 Some("regex" | "r") => {
                     let pat = parts.collect::<String>();
                     return self.process_search(&pat, false, false);

@@ -1,6 +1,6 @@
 use super::{
     actions::{Action, CommandAction, CommandJump, FilterAction, NormalAction, VisualAction},
-    InputMode, PromptMode, ViewDelta,
+    InputMode, PromptMode, control::ViewDelta,
 };
 use crate::direction::Direction;
 use crossterm::event::{Event, KeyCode, KeyEventKind, KeyModifiers};
