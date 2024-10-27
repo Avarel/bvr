@@ -1,6 +1,6 @@
 use super::{
     cursor::{Cursor, CursorState, SelectionOrigin},
-    filters::{Compositor, Filter, FilterImportSet},
+    filters::{Compositor, Filter, FilterExportSet},
     viewer::{CachedLine, ViewCache},
     viewport::Viewport,
 };
@@ -298,7 +298,7 @@ impl Instance {
         }
     }
 
-    pub fn import_user_filters(&mut self, filters: FilterImportSet) {
+    pub fn import_user_filters(&mut self, filters: &FilterExportSet) {
         self.compositor
             .filters_mut()
             .import_user_filters(&self.buf, filters);

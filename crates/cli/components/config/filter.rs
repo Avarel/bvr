@@ -8,9 +8,10 @@ pub struct FilterData {
     state: OnceCell<LoadedFilterData>,
 }
 
-#[derive(Clone, Serialize, Deserialize, Default)]
+#[derive(Serialize, Deserialize, Default)]
 struct LoadedFilterData {
     persistent: bool,
+    persistent_filter: Option<FilterExportSet>,
     filters: Vec<FilterExportSet>,
 }
 
@@ -72,6 +73,16 @@ impl FilterData {
 
     pub fn is_persistent(&self) -> Result<bool> {
         self.read(|data| data.persistent)
+    }
+
+    pub fn get_persistent_filter(&mut self) -> Result<Option<&FilterExportSet>> {
+        self.read(|data| data.persistent_filter.as_ref())
+    }
+
+    pub fn set_persistent_filter(&mut self, filter: FilterExportSet) -> Result<()> {
+        self.load_and_save(|data| {
+            data.persistent_filter.replace(filter);
+        })
     }
 
     pub fn filters(&self) -> Result<&[FilterExportSet]> {

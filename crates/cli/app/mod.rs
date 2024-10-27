@@ -145,7 +145,7 @@ impl<'term> App<'term> {
         );
 
         if load_filters {
-            let filter_sets = match self.filter_data.filters() {
+            let filter_set = match self.filter_data.get_persistent_filter() {
                 Ok(filters) => filters,
                 Err(err) => {
                     self.status.msg(format!("filter persist/load: {err}"));
@@ -153,14 +153,14 @@ impl<'term> App<'term> {
                 }
             };
             let instance = self.mux.active_mut().unwrap();
-            match filter_sets.first() {
+            match filter_set {
                 Some(export) => instance.import_user_filters(export),
                 None => {}
             }
         }
         if self.linked_filters {
             if let Some(source) = self.mux.active_mut() {
-                let export = source.compositor_mut().filters().export();
+                let export = source.compositor_mut().filters().export(None);
                 let cursor = *source.compositor_mut().cursor();
 
                 let instance = self.mux.instances_mut().last_mut().unwrap();
@@ -227,9 +227,9 @@ impl<'term> App<'term> {
 
         if self.filter_data.is_persistent().unwrap_or(false) {
             if let Some(source) = self.mux.active_mut() {
-                let export = source.compositor_mut().filters().export();
+                let export = source.compositor_mut().filters().export(None);
 
-                if let Err(err) = self.filter_data.add_filter(export) {
+                if let Err(err) = self.filter_data.set_persistent_filter(export) {
                     self.status.msg(format!("filter save: {err}"));
                 }
 
@@ -522,7 +522,7 @@ impl<'term> App<'term> {
 
     fn replicate_filters_on_all_instances(&mut self) {
         if let Some(source) = self.mux.active_mut() {
-            let export = source.compositor_mut().filters().export();
+            let export = source.compositor_mut().filters().export(None);
             let cursor = *source.compositor_mut().cursor();
             let active = self.mux.active_index();
             self.mux
@@ -713,7 +713,7 @@ impl<'term> App<'term> {
                     let Some(source) = self.mux.active_mut() else {
                         return true;
                     };
-                    let export = source.compositor_mut().filters().export();
+                    let export = source.compositor_mut().filters().export(None);
 
                     let Some(idx) = parts.next() else {
                         self.status
@@ -745,7 +745,8 @@ impl<'term> App<'term> {
                     let Some(source) = self.mux.active_mut() else {
                         return true;
                     };
-                    let export = source.compositor_mut().filters().export();
+                    let name: String = parts.collect::<String>();
+                    let export = source.compositor_mut().filters().export(Some(name));
 
                     if let Err(err) = self.filter_data.add_filter(export) {
                         self.status.msg(format!("filter save: {err}"));
@@ -837,7 +838,7 @@ impl<'term> App<'term> {
         let [mux_chunk, cmd_chunk] = MultiplexerWidget::split_bottom(f.area(), 1);
 
         match self.mode {
-            InputMode::Prompt(PromptMode::Search { escaped, edit }) => {
+            InputMode::Prompt(PromptMode::Search { escaped, .. }) => {
                 let pattern = self.prompt.buf();
 
                 let pattern_mismatch = self

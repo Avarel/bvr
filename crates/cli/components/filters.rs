@@ -14,8 +14,11 @@ use bvr_core::{matches::CompositeStrategy, LineSet, SegBuffer};
 use ratatui::style::Color;
 use regex::bytes::Regex;
 
-pub type FilterExportSet = Vec<FilterExport>;
-pub type FilterImportSet<'a> = &'a [FilterExport];
+#[derive(serde::Serialize, serde::Deserialize)]
+pub struct FilterExportSet {
+    name: Option<String>,
+    filters: Vec<FilterExport>
+}
 
 #[derive(Clone)]
 enum FilterSet {
@@ -351,14 +354,17 @@ impl Filters {
         }
     }
 
-    pub fn export(&self) -> FilterExportSet {
-        self.iter().map(Filter::to_export).collect()
+    pub fn export(&self, name: Option<String>) -> FilterExportSet {
+        FilterExportSet {
+            name,
+            filters: self.iter().map(Filter::to_export).collect()
+        }
     }
 
-    pub fn import_user_filters(&mut self, file: &SegBuffer, imports: FilterImportSet) {
+    pub fn import_user_filters(&mut self, file: &SegBuffer, import: &FilterExportSet) {
         self.user_filters.clear();
 
-        for filter in imports {
+        for filter in import.filters.iter() {
             // Special handling for All and Bookmarks, we want to just inherit their enablement state
             match filter.mask {
                 MaskExport::All => self.all.enabled = filter.enabled,

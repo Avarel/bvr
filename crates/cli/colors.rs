@@ -57,7 +57,7 @@ impl ColorSelector {
     pub fn peek_color(&self) -> Color {
         match self {
             ColorSelector::Color256 { index } => Color::Indexed(index + 9),
-            ColorSelector::TrueColor { hue } => Color::from_hsl(Hsl::new(*hue, 80.0, 50.0)),
+            ColorSelector::TrueColor { hue } => Color::from_hsl(Hsl::new(*hue,0.8, 0.5)),
         }
     }
 
