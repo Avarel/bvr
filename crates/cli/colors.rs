@@ -24,6 +24,7 @@ pub const NORMAL_ACCENT: Color = Color::Indexed(75);
 pub const COMMAND_ACCENT: Color = Color::Indexed(48);
 pub const SELECT_ACCENT: Color = Color::Indexed(170);
 pub const FILTER_ACCENT: Color = Color::Indexed(178);
+pub const CONFIG_ACCENT: Color = Color::Indexed(213);
 
 pub const SHELL_ACCENT: Color = Color::Indexed(161);
 
@@ -57,7 +58,7 @@ impl ColorSelector {
     pub fn peek_color(&self) -> Color {
         match self {
             ColorSelector::Color256 { index } => Color::Indexed(index + 9),
-            ColorSelector::TrueColor { hue } => Color::from_hsl(Hsl::new(*hue,0.8, 0.5)),
+            ColorSelector::TrueColor { hue } => Color::from_hsl(Hsl::new(*hue, 0.8, 0.5)),
         }
     }
 

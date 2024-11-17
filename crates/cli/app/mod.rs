@@ -1,15 +1,15 @@
-pub mod control;
 mod actions;
+pub mod control;
 mod keybinding;
 mod mouse;
 mod widgets;
 
 use self::{
     actions::{Action, CommandAction, NormalAction, VisualAction},
+    control::{InputMode, PromptMode},
     keybinding::Keybinding,
     mouse::MouseHandler,
     widgets::{MultiplexerWidget, PromptWidget},
-    control::{InputMode, PromptMode}
 };
 use crate::{
     components::{
@@ -365,13 +365,13 @@ impl<'term> App<'term> {
                 }
                 actions::FilterAction::ToggleSelectedFilter => {
                     self.mux.demux_mut(self.linked_filters, |instance| {
-                        let selected_filters = instance.selected_filters();
+                        let selected_filters = instance.compositor_mut().selected_filter_indices();
                         instance.toggle_filters(selected_filters);
                     });
                 }
                 actions::FilterAction::RemoveSelectedFilter => {
                     self.mux.demux_mut(self.linked_filters, |instance| {
-                        let selected_filters = instance.selected_filters();
+                        let selected_filters = instance.compositor_mut().selected_filter_indices();
                         instance.remove_filters(selected_filters);
                     });
                 }
@@ -385,6 +385,28 @@ impl<'term> App<'term> {
                     }
                     if let Some(instance) = self.mux.instances_mut().get_mut(target_view) {
                         instance.toggle_filter(filter_index)
+                    }
+                }
+            },
+            Action::Config(action) => match action {
+                actions::ConfigAction::Move {
+                    direction,
+                    select,
+                    delta,
+                } => self.filter_config.move_select(direction, select, delta),
+                actions::ConfigAction::LoadSelectedFilter => {
+                    let Some(export) = self.filter_config.selected_filter() else {
+                        return Ok(true);
+                    };
+
+                    self.mux.demux_mut(self.linked_filters, |target| {
+                        target.import_user_filters(&export);
+                    });
+                }
+                actions::ConfigAction::RemoveSelectedFilter => {
+                    let selected_filters = self.filter_config.selected_filter_indices();
+                    if let Err(err) = self.filter_config.remove_filters(selected_filters) {
+                        self.status.msg(format!("filter save remove: {err}"));
                     }
                 }
             },
@@ -414,20 +436,25 @@ impl<'term> App<'term> {
                 CommandAction::Submit => {
                     let result = match self.mode {
                         InputMode::Prompt(PromptMode::Command) => {
+                            self.mode = InputMode::Normal;
                             let command = self.prompt.submit();
                             Ok(self.process_command(&command))
                         }
                         InputMode::Prompt(PromptMode::Search { escaped, edit }) => {
+                            self.mode = InputMode::Normal;
                             let command = self.prompt.take();
                             Ok(self.process_search(&command, escaped, edit))
                         }
                         InputMode::Prompt(PromptMode::Shell { pipe }) => {
+                            self.mode = InputMode::Normal;
                             let command = self.prompt.take();
                             self.process_shell(&command, true, pipe)
                         }
-                        InputMode::Normal | InputMode::Visual | InputMode::Filter => unreachable!(),
+                        InputMode::Normal
+                        | InputMode::Visual
+                        | InputMode::Filter
+                        | InputMode::Config => unreachable!(),
                     };
-                    self.mode = InputMode::Normal;
                     return result;
                 }
                 CommandAction::History { direction } => {
@@ -707,7 +734,7 @@ impl<'term> App<'term> {
                     let Some(source) = self.mux.active_mut() else {
                         return true;
                     };
-                    let name: String = parts.collect::<String>();
+                    let name: String = parts.collect::<Vec<&str>>().join(" ");
                     let export = source.compositor_mut().filters().export(Some(name));
 
                     if let Err(err) = self.filter_config.add_filter(export) {
@@ -716,25 +743,8 @@ impl<'term> App<'term> {
 
                     self.status.msg("filter save: saved filters".to_string());
                 }
-
-                Some("load") => match self.filter_config.filters().first() {
-                    Some(export) => {
-                        self.mux.demux_mut(self.linked_filters, |instance| {
-                            instance.clear_filters();
-                            instance.import_user_filters(&export);
-                        });
-                    }
-                    None => {
-                        self.status.msg("filter load: no saved filters".to_string());
-                    }
-                },
-                Some("regex" | "r") => {
-                    let pat = parts.collect::<String>();
-                    return self.process_search(&pat, false, false);
-                }
-                Some("literal" | "lit" | "l") => {
-                    let pat = parts.collect::<String>();
-                    return self.process_search(&pat, true, false);
+                Some("load") => {
+                    self.mode = InputMode::Config;
                 }
                 Some("clear") => {
                     self.mux.demux_mut(self.linked_filters, |instance| {
@@ -814,7 +824,11 @@ impl<'term> App<'term> {
                     })
                 }
             }
-            InputMode::Prompt(_) | InputMode::Normal | InputMode::Visual | InputMode::Filter => {
+            InputMode::Prompt(_)
+            | InputMode::Normal
+            | InputMode::Visual
+            | InputMode::Filter
+            | InputMode::Config => {
                 self.regex_cache = None;
             }
         }
@@ -823,6 +837,7 @@ impl<'term> App<'term> {
             mux: &mut self.mux,
             status: &mut self.status,
             mode: self.mode,
+            config: &mut self.filter_config,
             gutter: self.gutter,
             linked_filters: self.linked_filters,
             regex: self

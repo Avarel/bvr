@@ -1,4 +1,12 @@
-use crate::{app::control::ViewDelta, components::{cursor::{Cursor, CursorState, SelectionOrigin}, filters::FilterExportSet, viewport::Viewport}, direction::Direction};
+use crate::{
+    app::control::ViewDelta,
+    components::{
+        cursor::{Cursor, CursorState, SelectionOrigin},
+        filters::FilterExportSet,
+        viewport::Viewport,
+    },
+    direction::Direction,
+};
 
 use super::{storage_dir_create, APP_ID, FILTER_FILE};
 use anyhow::Result;
@@ -40,19 +48,19 @@ impl FilterConfigApp {
             .unwrap_or_else(LoadedFilterData::default)
     }
 
-    fn load_and_save<F>(&mut self, f: F) -> Result<()>
+    fn load_read_save<F, R>(&mut self, f: F) -> Result<Option<R>>
     where
-        F: FnOnce(&mut LoadedFilterData),
+        F: FnOnce(&mut LoadedFilterData) -> R,
     {
         // TODO: get rid of once OnceCell::get_mut_or_init stabilizes
         self.state.get_or_init(|| self.load());
         // Safety: get or init should not fail
         let data = unsafe { self.state.get_mut().unwrap_unchecked() };
 
-        f(data);
+        let result = f(data);
 
         let Some(path) = self.path.as_ref() else {
-            return Ok(());
+            return Ok(None);
         };
         let file = std::fs::OpenOptions::new()
             .create(true)
@@ -61,7 +69,14 @@ impl FilterConfigApp {
             .open(path)?;
         let writer = std::io::BufWriter::new(file);
         serde_json::to_writer(writer, data)?;
-        Ok(())
+        Ok(Some(result))
+    }
+
+    fn load_and_save<F, R>(&mut self, f: F) -> Result<()>
+    where
+        F: FnOnce(&mut LoadedFilterData) -> R,
+    {
+        self.load_read_save(f).map(|_| ())
     }
 
     fn read<'a, F, R>(&'a self, f: F) -> Result<R>
@@ -97,7 +112,6 @@ impl FilterConfigApp {
 
     pub fn add_filter(&mut self, filter: FilterExportSet) -> Result<()> {
         self.load_and_save(|data| {
-            data.filters.clear(); // TODO: Get rid of this once UI is finalized
             data.filters.push(filter);
         })
     }
@@ -162,5 +176,18 @@ impl FilterConfigApp {
             Cursor::Singleton(i) => i..i + 1,
             Cursor::Selection(start, end, _) => start..end + 1,
         }
+    }
+
+    pub fn remove_filters(&mut self, mut range: std::ops::Range<usize>) -> Result<()> {
+        let len = self.load_read_save(|data| {
+            data.filters.drain(range);
+            data.filters.len()
+        })?;
+        self.cursor.clamp(len.unwrap_or(0).saturating_sub(1));
+        Ok(())
+    }
+
+    pub fn cursor(&self) -> &CursorState {
+        &self.cursor
     }
 }

@@ -1,6 +1,9 @@
 use super::{
-    actions::{Action, CommandAction, CommandJump, FilterAction, NormalAction, VisualAction},
-    InputMode, PromptMode, control::ViewDelta,
+    actions::{
+        Action, CommandAction, CommandJump, ConfigAction, FilterAction, NormalAction, VisualAction,
+    },
+    control::ViewDelta,
+    InputMode, PromptMode,
 };
 use crate::direction::Direction;
 use crossterm::event::{Event, KeyCode, KeyEventKind, KeyModifiers};
@@ -124,6 +127,36 @@ impl Keybinding {
                         Some(Action::Filter(FilterAction::ToggleSelectedFilter))
                     }
                     KeyCode::Backspace => Some(Action::Filter(FilterAction::RemoveSelectedFilter)),
+                    _ => None,
+                },
+                _ => None,
+            },
+            InputMode::Config => match event {
+                Event::Key(key) => match key.code {
+                    KeyCode::Up | KeyCode::Down => Some(Action::Config(ConfigAction::Move {
+                        direction: Direction::back_if(key.code == KeyCode::Up),
+                        select: key.modifiers.contains(KeyModifiers::SHIFT),
+                        delta: ViewDelta::Number(1),
+                    })),
+                    KeyCode::Home | KeyCode::End => Some(Action::Config(ConfigAction::Move {
+                        direction: Direction::back_if(key.code == KeyCode::Home),
+                        select: key.modifiers.contains(KeyModifiers::SHIFT),
+                        delta: ViewDelta::Boundary,
+                    })),
+                    KeyCode::PageUp | KeyCode::PageDown => {
+                        Some(Action::Config(ConfigAction::Move {
+                            direction: Direction::back_if(key.code == KeyCode::PageUp),
+                            select: key.modifiers.contains(KeyModifiers::SHIFT),
+                            delta: ViewDelta::Page,
+                        }))
+                    }
+                    KeyCode::Char(c @ ('u' | 'd')) => Some(Action::Config(ConfigAction::Move {
+                        direction: Direction::back_if(c == 'u'),
+                        select: key.modifiers.contains(KeyModifiers::SHIFT),
+                        delta: ViewDelta::HalfPage,
+                    })),
+                    KeyCode::Enter => Some(Action::Config(ConfigAction::LoadSelectedFilter)),
+                    KeyCode::Backspace => Some(Action::Config(ConfigAction::RemoveSelectedFilter)),
                     _ => None,
                 },
                 _ => None,

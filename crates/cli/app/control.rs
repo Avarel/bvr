@@ -1,4 +1,4 @@
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 
 #[derive(PartialEq, Clone, Copy, Serialize, Deserialize)]
 #[serde(tag = "mode")]
@@ -7,6 +7,7 @@ pub enum InputMode {
     Normal,
     Visual,
     Filter,
+    Config,
 }
 
 impl InputMode {

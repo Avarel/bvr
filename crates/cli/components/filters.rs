@@ -14,12 +14,6 @@ use bvr_core::{matches::CompositeStrategy, LineSet, SegBuffer};
 use ratatui::style::Color;
 use regex::bytes::Regex;
 
-#[derive(serde::Serialize, serde::Deserialize)]
-pub struct FilterExportSet {
-    name: Option<String>,
-    filters: Vec<FilterExport>
-}
-
 #[derive(Clone)]
 enum FilterSet {
     All,
@@ -60,6 +54,22 @@ impl Mask {
     }
 }
 
+#[derive(serde::Serialize, serde::Deserialize)]
+pub struct FilterExportSet {
+    name: Option<String>,
+    filters: Vec<FilterExport>,
+}
+
+impl FilterExportSet {
+    pub fn name(&self) -> Option<&str> {
+        self.name.as_deref()
+    }
+
+    pub fn filters(&self) -> &[FilterExport] {
+        self.filters.as_ref()
+    }
+}
+
 #[derive(Clone, serde::Serialize, serde::Deserialize)]
 #[serde(tag = "type")]
 pub enum MaskExport {
@@ -76,6 +86,23 @@ pub struct FilterExport {
     mask: MaskExport,
     enabled: bool,
     color: String,
+}
+impl FilterExport {
+    pub fn color(&self) -> Color {
+        ratatui::style::Color::from_str(&self.color).unwrap_or_default()
+    }
+
+    pub fn name(&self) -> &str {
+        match &self.mask {
+            MaskExport::All => "All",
+            MaskExport::Bookmarks => "Bookmarks",
+            MaskExport::Regex { regex } => regex.as_str(),
+        }
+    }
+
+    pub fn is_enabled(&self) -> bool {
+        self.enabled
+    }
 }
 
 #[derive(Clone)]
@@ -142,7 +169,7 @@ impl Filter {
             )),
             mask,
             enabled: export.enabled,
-            color: ratatui::style::Color::from_str(&export.color).unwrap(),
+            color: ratatui::style::Color::from_str(&export.color).unwrap_or_default(),
         }
     }
 
@@ -357,7 +384,7 @@ impl Filters {
     pub fn export(&self, name: Option<String>) -> FilterExportSet {
         FilterExportSet {
             name,
-            filters: self.iter().map(Filter::to_export).collect()
+            filters: self.iter().map(Filter::to_export).collect(),
         }
     }
 

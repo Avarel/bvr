@@ -242,10 +242,6 @@ impl Instance {
         }
     }
 
-    pub fn selected_filters(&self) -> std::ops::Range<usize> {
-        self.compositor.selected_filter_indices()
-    }
-
     pub fn clear_filters(&mut self) {
         self.compositor.clear_filters();
         self.invalidate_cache();

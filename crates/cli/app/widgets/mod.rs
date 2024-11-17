@@ -1,3 +1,7 @@
+mod config;
+mod filters;
+mod viewer;
+
 use super::{
     actions::{Action, NormalAction},
     mouse::MouseHandler,
@@ -7,6 +11,7 @@ use crate::{
     app::widgets::{filters::FilterViewerWidget, viewer::LineViewerWidget},
     colors,
     components::{
+        config::filter::FilterConfigApp,
         cursor::{Cursor, SelectionOrigin},
         instance::Instance,
         mux::{MultiplexerApp, MultiplexerMode},
@@ -14,13 +19,11 @@ use crate::{
         status::StatusApp,
     },
 };
+use config::ConfigViewerWidget;
 use crossterm::event::MouseEventKind;
 use ratatui::{prelude::*, widgets::*};
 use regex::bytes::Regex;
 use std::sync::OnceLock;
-
-mod filters;
-mod viewer;
 
 pub struct StatusWidget<'a> {
     input_mode: InputMode,
@@ -49,6 +52,7 @@ impl<'a> Widget for StatusWidget<'a> {
             InputMode::Normal => (colors::NORMAL_ACCENT, " NORMAL "),
             InputMode::Visual => (colors::SELECT_ACCENT, " VISUAL "),
             InputMode::Filter => (colors::FILTER_ACCENT, " FILTER "),
+            InputMode::Config => (colors::CONFIG_ACCENT, " CONFIG "),
         };
 
         let mut v = Vec::new();
@@ -233,6 +237,13 @@ pub struct MultiplexerPane<'a> {
 impl MultiplexerPane<'_> {
     const FILTER_MAX_HEIGHT: u16 = 10;
 
+    fn filter_area(area: &mut Rect, f: impl FnOnce(Rect)) {
+        let [view_chunk, filter_chunk] =
+            MultiplexerWidget::split_bottom(*area, Self::FILTER_MAX_HEIGHT);
+        f(filter_chunk);
+        *area = view_chunk;
+    }
+
     fn render_filter_pane(
         area: &mut Rect,
         buf: &mut Buffer,
@@ -240,14 +251,13 @@ impl MultiplexerPane<'_> {
         instance: &mut Instance,
         handler: &mut MouseHandler,
     ) {
-        let [view_chunk, filter_chunk] =
-            MultiplexerWidget::split_bottom(*area, Self::FILTER_MAX_HEIGHT);
-        FilterViewerWidget {
-            view_index,
-            instance,
-        }
-        .render(filter_chunk, buf, handler);
-        *area = view_chunk;
+        Self::filter_area(area, |area| {
+            FilterViewerWidget {
+                view_index,
+                instance,
+            }
+            .render(area, buf, handler);
+        });
     }
 
     pub fn render(self, mut area: Rect, buf: &mut Buffer, handler: &mut MouseHandler) {
@@ -269,6 +279,7 @@ impl MultiplexerPane<'_> {
 pub struct MultiplexerWidget<'a> {
     pub mux: &'a mut MultiplexerApp,
     pub status: &'a mut StatusApp,
+    pub config: &'a mut FilterConfigApp,
     pub mode: InputMode,
     pub gutter: bool,
     pub regex: Option<&'a Regex>,
@@ -317,6 +328,12 @@ impl MultiplexerWidget<'_> {
                 self.mux.active_mut().unwrap(),
                 handler,
             );
+        }
+
+        if self.mode == InputMode::Config {
+            MultiplexerPane::filter_area(&mut area, |area| {
+                ConfigViewerWidget { app: self.config }.render(area, buf, handler);
+            });
         }
 
         let [tab_chunk, view_chunk] = Self::split_top(area, 1);

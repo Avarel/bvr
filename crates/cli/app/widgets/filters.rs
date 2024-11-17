@@ -79,7 +79,7 @@ struct FilterLineWidget<'a> {
 }
 
 bitflags! {
-    pub struct FilterType: u8 {
+    struct FilterType: u8 {
         const None = 0;
         const Enabled = 1 << 0;
         const Origin = 1 << 1;

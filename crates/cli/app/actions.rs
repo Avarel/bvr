@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
-use super::{InputMode, control::ViewDelta};
+use super::{control::ViewDelta, InputMode};
 use crate::direction::Direction;
 
 #[derive(Serialize, Deserialize)]
@@ -13,6 +13,7 @@ pub enum Action {
     Normal(NormalAction),
     Visual(VisualAction),
     Filter(FilterAction),
+    Config(ConfigAction),
     ExportFile(PathBuf),
 }
 
@@ -65,6 +66,18 @@ pub enum FilterAction {
         target_view: usize,
         filter_index: usize,
     },
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(tag = "type")]
+pub enum ConfigAction {
+    Move {
+        direction: Direction,
+        select: bool,
+        delta: ViewDelta,
+    },
+    LoadSelectedFilter,
+    RemoveSelectedFilter,
 }
 
 #[derive(Serialize, Deserialize)]
