@@ -178,7 +178,7 @@ impl FilterConfigApp {
         }
     }
 
-    pub fn remove_filters(&mut self, mut range: std::ops::Range<usize>) -> Result<()> {
+    pub fn remove_filters(&mut self, range: std::ops::Range<usize>) -> Result<()> {
         let len = self.load_read_save(|data| {
             data.filters.drain(range);
             data.filters.len()
