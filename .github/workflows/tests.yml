@@ -54,7 +54,7 @@ jobs:
 
     steps:
       - name: Checkout sources
-        uses: actions/checkout@v3
+        uses: actions/checkout@main
 
       - name: Install ${{ matrix.rust }} toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -73,7 +73,7 @@ jobs:
 
       - name: Rust cache
         uses: Swatinem/rust-cache@v2
-      
+
       - name: Generate test files
         run: cargo run --package test-gen --release
 
