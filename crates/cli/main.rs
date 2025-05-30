@@ -26,11 +26,12 @@ fn main() -> Result<()> {
     let mut app = App::new(terminal);
 
     for path in args.files {
-        app.open_file(&path)?;
+        app.viewer_mut().open_file(&path)?;
     }
 
     if !std::io::stdin().is_terminal() {
-        app.open_stream(String::from("Pipe Stream"), Box::new(std::io::stdin()))?;
+        app.viewer_mut()
+            .open_stream(String::from("Pipe Stream"), Box::new(std::io::stdin()))?;
     }
 
     app.run_app()
