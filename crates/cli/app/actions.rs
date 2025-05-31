@@ -60,9 +60,13 @@ pub enum FilterAction {
         select: bool,
         delta: ViewDelta,
     },
+    Displace {
+        direction: Direction,
+        delta: ViewDelta,
+    },
     ToggleSelectedFilter,
     RemoveSelectedFilter,
-    ToggleFilter {
+    ToggleSpecificFilter {
         target_view: usize,
         filter_index: usize,
     },

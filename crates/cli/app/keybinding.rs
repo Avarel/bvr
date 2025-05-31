@@ -82,9 +82,9 @@ impl Keybinding {
                             target_view: None,
                         }))
                     }
-                    KeyCode::Char(c @ ('p' | 'n')) => {
+                    KeyCode::Char(c @ ('N' | 'n')) => {
                         Some(Action::Normal(NormalAction::PanVertical {
-                            direction: Direction::back_if(c == 'p'),
+                            direction: Direction::back_if(c == 'N'),
                             delta: ViewDelta::Match,
                             target_view: None,
                         }))
@@ -95,6 +95,10 @@ impl Keybinding {
             },
             InputMode::Filter => match event {
                 Event::Key(key) => match key.code {
+                    KeyCode::Char('w') | KeyCode::Char('s') => Some(Action::Filter(FilterAction::Displace {
+                        direction: Direction::back_if(key.code == KeyCode::Char('w')),
+                        delta: ViewDelta::Number(1),
+                    })),
                     KeyCode::Up | KeyCode::Down => Some(Action::Filter(FilterAction::Move {
                         direction: Direction::back_if(key.code == KeyCode::Up),
                         select: key.modifiers.contains(KeyModifiers::SHIFT),

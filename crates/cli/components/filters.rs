@@ -494,6 +494,63 @@ impl Compositor {
         self.viewport.jump_vertically_to(i);
     }
 
+    pub fn displace_filters(&mut self, range: std::ops::Range<usize>, dir: Direction, delta: ViewDelta) {
+        fn displace_range<T>(
+            vec: &mut Vec<T>,
+            range: std::ops::Range<usize>,
+            delta: usize,
+            direction: Direction,
+        ) {
+            let len = vec.len();
+            let start = range.start;
+            let end = range.end;
+            let range_len = end - start;
+
+            assert!(start < end && end <= len);
+
+            // Extract the elements to move
+            let moved: Vec<T> = vec.drain(start..end).collect();
+
+            // Compute clamped insertion index
+            let insert_at = match direction {
+                Direction::Next => (start + delta).min(len - range_len),
+                Direction::Back => start.saturating_sub(delta).max(0),
+            };
+
+            vec.splice(insert_at..insert_at, moved);
+        }
+
+        let delta = match delta {
+            ViewDelta::Number(n) => usize::from(n),
+            ViewDelta::Page => self.viewport.height(),
+            ViewDelta::HalfPage => self.viewport.height().div_ceil(2),
+            ViewDelta::Boundary => usize::MAX,
+            ViewDelta::Match => unimplemented!("there is no result jumping for filters"),
+        };
+
+        let Some(range) = Self::fixup_range(range) else {
+            return;
+        };
+        if range.is_empty() {
+            return;
+        }
+
+        displace_range(&mut self.filters.user_filters, range, delta, dir);
+
+        match dir {
+            Direction::Back => self.cursor.map(|i| i.saturating_sub(delta)),
+            Direction::Next => self.cursor.map(|i| i.saturating_add(delta)),
+        }
+        self.cursor.clamp(self.filters.len().saturating_sub(1));
+        self.cursor.map(|i| i.max(2));
+        // let i = match self.cursor.state() {
+        //     Cursor::Singleton(i)
+        //     | Cursor::Selection(i, _, SelectionOrigin::Left)
+        //     | Cursor::Selection(_, i, SelectionOrigin::Right) => i,
+        // };
+        // self.viewport.jump_vertically_to(i);
+    }
+
     pub fn clear_filters(&mut self) {
         self.cursor = CursorState::new();
         self.color_selector.reset();
@@ -527,16 +584,23 @@ impl Compositor {
         }
     }
 
-    pub fn remove_filters(&mut self, mut range: std::ops::Range<usize>) {
+    fn fixup_range(mut range: std::ops::Range<usize>) -> Option<std::ops::Range<usize>> {
         if range.start < 2 {
             if range.end < 2 {
-                return;
+                return None;
             }
             range.start = 2;
         }
         // fixup because the first 2 is pseudo
         range.start -= 2;
         range.end -= 2;
+        Some(range)
+    }
+
+    pub fn remove_filters(&mut self, range: std::ops::Range<usize>) {
+        let Some(range) = Self::fixup_range(range) else {
+            return;
+        };
         self.filters.user_filters.drain(range);
         self.cursor.clamp(self.filters.len().saturating_sub(1));
     }

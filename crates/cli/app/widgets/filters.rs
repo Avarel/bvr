@@ -126,7 +126,7 @@ impl FilterLineWidget<'_> {
         Paragraph::new(Line::from(v)).render(area, buf);
 
         handle.on_mouse(area, |event| match event.kind {
-            MouseEventKind::Down(_) => Some(Action::Filter(FilterAction::ToggleFilter {
+            MouseEventKind::Down(_) => Some(Action::Filter(FilterAction::ToggleSpecificFilter {
                 target_view: self.view_index,
                 filter_index: self.index,
             })),

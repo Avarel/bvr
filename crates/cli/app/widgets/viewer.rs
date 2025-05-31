@@ -166,7 +166,8 @@ impl ViewerLineWidget<'_> {
         let Some(line) = &self.line else {
             let ln = Paragraph::new("~")
                 .alignment(Alignment::Right)
-                .fg(colors::GUTTER_TEXT);
+                .fg(colors::GUTTER_TEXT)
+                .bg(colors::GUTTER_BG);
 
             ln.render(gutter_chunk, buf);
             return;

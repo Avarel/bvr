@@ -53,16 +53,20 @@ impl CursorState {
     }
 
     pub fn clamp(&mut self, bound: usize) {
-        self.state = match self.state {
-            Cursor::Singleton(i) => Cursor::Singleton(i.min(bound)),
-            Cursor::Selection(start, end, dir) => {
-                Cursor::new_range(start.min(bound), end.min(bound), dir)
-            }
-        }
+        self.map(|i| i.min(bound));
     }
 
     pub fn reset(&mut self) -> Self {
         std::mem::replace(self, Self::new())
+    }
+
+    pub fn map(&mut self, transform: impl Fn(usize) -> usize) {
+        self.state = match self.state {
+            Cursor::Singleton(i) => Cursor::Singleton(transform(i)),
+            Cursor::Selection(start, end, dir) => {
+                Cursor::new_range(transform(start), transform(end), dir)
+            }
+        };
     }
 
     pub fn back(&mut self, select: bool, transform: impl FnOnce(usize) -> usize) {

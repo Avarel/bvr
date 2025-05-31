@@ -116,12 +116,6 @@ impl FilterConfigApp {
         })
     }
 
-    pub fn remove_filter(&mut self, index: usize) -> Result<()> {
-        self.load_and_save(|data| {
-            data.filters.remove(index);
-        })
-    }
-
     pub fn update_and_filter_view(
         &mut self,
         viewport_height: usize,
@@ -157,6 +151,7 @@ impl FilterConfigApp {
         self.viewport.jump_vertically_to(i);
     }
 
+    #[allow(dead_code)]
     pub fn clear_filters(&mut self) -> Result<()> {
         self.cursor = CursorState::new();
         self.load_and_save(|data| {
@@ -185,6 +180,11 @@ impl FilterConfigApp {
         })?;
         self.cursor.clamp(len.unwrap_or(0).saturating_sub(1));
         Ok(())
+    }
+
+    #[allow(dead_code)]
+    pub fn remove_filter(&mut self, index: usize) -> Result<()> {
+        self.remove_filters(index..index + 1)
     }
 
     pub fn cursor(&self) -> &CursorState {

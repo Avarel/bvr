@@ -22,6 +22,7 @@ use crate::{
     direction::Direction,
     regex_compile,
 };
+use actions::{ConfigAction, FilterAction};
 use anyhow::Result;
 use arboard::Clipboard;
 use bvr_core::{buf::SegBuffer, err::Error, index::BoxedStream, matches::CompositeStrategy};
@@ -285,7 +286,7 @@ impl<'term> App<'term> {
                 }
             },
             Action::Filter(action) => match action {
-                actions::FilterAction::Move {
+                FilterAction::Move {
                     direction,
                     select,
                     delta,
@@ -298,25 +299,28 @@ impl<'term> App<'term> {
                                 .move_select(direction, select, delta)
                         });
                 }
-                actions::FilterAction::ToggleSelectedFilter => {
+                FilterAction::ToggleSelectedFilter => {
                     self.viewer
                         .mux
                         .demux_mut(self.viewer.linked_filters, |instance| {
-                            let selected_filters =
-                                instance.compositor_mut().selected_filter_indices();
-                            instance.toggle_filters(selected_filters);
+                            instance.toggle_selected_filters();
                         });
                 }
-                actions::FilterAction::RemoveSelectedFilter => {
+                FilterAction::RemoveSelectedFilter => {
                     self.viewer
                         .mux
                         .demux_mut(self.viewer.linked_filters, |instance| {
-                            let selected_filters =
-                                instance.compositor_mut().selected_filter_indices();
-                            instance.remove_filters(selected_filters);
+                            instance.remove_selected_filters();
                         });
                 }
-                actions::FilterAction::ToggleFilter {
+                FilterAction::Displace { direction, delta } => {
+                    self.viewer
+                        .mux
+                        .demux_mut(self.viewer.linked_filters, |instance| {
+                            instance.displace_selected_filters(direction, delta);
+                        });
+                }
+                FilterAction::ToggleSpecificFilter {
                     target_view,
                     filter_index,
                 } => {
@@ -330,7 +334,7 @@ impl<'term> App<'term> {
                 }
             },
             Action::Config(action) => match action {
-                actions::ConfigAction::Move {
+                ConfigAction::Move {
                     direction,
                     select,
                     delta,
@@ -338,7 +342,7 @@ impl<'term> App<'term> {
                     .viewer
                     .filter_config
                     .move_select(direction, select, delta),
-                actions::ConfigAction::LoadSelectedFilter => {
+                ConfigAction::LoadSelectedFilter => {
                     let Some(export) = self.viewer.filter_config.selected_filter() else {
                         return Ok(true);
                     };
@@ -349,7 +353,7 @@ impl<'term> App<'term> {
                             target.import_user_filters(&export);
                         });
                 }
-                actions::ConfigAction::RemoveSelectedFilter => {
+                ConfigAction::RemoveSelectedFilter => {
                     let selected_filters = self.viewer.filter_config.selected_filter_indices();
                     if let Err(err) = self.viewer.filter_config.remove_filters(selected_filters) {
                         self.viewer.status.msg(format!("filter save remove: {err}"));
@@ -528,6 +532,10 @@ impl<'term> App<'term> {
     }
 
     fn process_search(&mut self, pat: &str, escaped: bool, edit: bool) -> bool {
+        if pat.is_empty() {
+            return true;
+        }
+
         let mut e = None;
         self.viewer
             .mux

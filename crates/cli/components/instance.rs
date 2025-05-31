@@ -247,13 +247,18 @@ impl Instance {
         self.invalidate_cache();
     }
 
-    pub fn toggle_filters(&mut self, range: std::ops::Range<usize>) {
-        self.compositor.toggle_filters(range);
+    pub fn toggle_selected_filters(&mut self) {
+        self.compositor.toggle_filters(self.compositor.selected_filter_indices());
         self.invalidate_cache();
     }
 
-    pub fn remove_filters(&mut self, range: std::ops::Range<usize>) {
-        self.compositor.remove_filters(range);
+    pub fn remove_selected_filters(&mut self) {
+        self.compositor.remove_filters(self.compositor.selected_filter_indices());
+        self.invalidate_cache();
+    }
+
+    pub fn displace_selected_filters(&mut self, dir: Direction, delta: ViewDelta) {
+        self.compositor.displace_filters(self.compositor.selected_filter_indices(), dir, delta);
         self.invalidate_cache();
     }
 
