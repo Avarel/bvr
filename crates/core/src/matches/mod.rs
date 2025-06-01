@@ -36,7 +36,7 @@ impl LineMatchRemote {
                     buf_start =
                         segment.index.data_of_line(line_number + 1).unwrap() - segment.range.start;
                 }
-            } else if iter.index().is_complete() {
+            } else if iter.index().report().is_complete() {
                 break;
             } else {
                 std::hint::spin_loop()
@@ -162,7 +162,7 @@ impl LineSet {
     #[inline]
     pub fn is_complete(&self) -> bool {
         match self {
-            LineSet::All { buf } => buf.is_complete(),
+            LineSet::All { buf } => buf.report().is_complete(),
             LineSet::Dynamic { completed, .. } => {
                 completed.load(std::sync::atomic::Ordering::Relaxed)
             }

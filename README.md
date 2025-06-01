@@ -96,7 +96,7 @@ In this mode, you can select lines to bookmark.
 | Keybinding                             | Description                                      |
 | -------------------------------------- | ------------------------------------------------ |
 | `Up` and `Down`                        | Move the select cursor.                          |
-| `n` `p`                                | Select next/previous active match.               |
+| `n` `N`                                | Select next/previous active match.               |
 | `Shift` + `Up` and `Down`, `n` and `p` | Expand the select cursor into a selection range. |
 | `Space` and `Enter`                    | Toggle bookmark at current line.                 |
 

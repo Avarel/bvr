@@ -2,6 +2,7 @@ use crate::buf::segment::{Segment, SegmentMut};
 use crate::cowvec::{CowVec, CowVecWriter};
 use crate::err::{Error, Result};
 use std::fs::File;
+use std::sync::atomic::AtomicU32;
 use std::sync::mpsc::{Receiver, Sender};
 use std::sync::{atomic::AtomicBool, Arc};
 use std::thread::JoinHandle;
@@ -34,11 +35,43 @@ impl IndexingTask {
 /// Generalized type for streams passed into [LineIndex].
 pub type BoxedStream = Box<dyn std::io::Read + Send>;
 
+pub struct ProgressReport {
+    progress: Option<AtomicU32>,
+    completed: AtomicBool,
+}
+
+impl ProgressReport {
+    pub fn progress(&self) -> Option<f32> {
+        self.progress
+            .as_ref()
+            .map(|v| v.load(std::sync::atomic::Ordering::Relaxed))
+            .map(f32::from_bits)
+    }
+
+    pub fn is_complete(&self) -> bool {
+        self.completed.load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    fn store_progress(&self, val: f32) {
+        if let Some(progress) = self.progress.as_ref() {
+            progress.store(val.to_bits(), std::sync::atomic::Ordering::Relaxed);
+        }
+    }
+
+    fn complete(&self) {
+        if let Some(progress) = self.progress.as_ref() {
+            progress.store(1f32.to_bits(), std::sync::atomic::Ordering::Relaxed);
+        }
+        self.completed
+            .store(true, std::sync::atomic::Ordering::Relaxed);
+    }
+}
+
 /// A remote type that can be used to set off the indexing process of a
 /// file or a stream.
 struct LineIndexRemote {
     buf: CowVecWriter<u64>,
-    completed: Arc<AtomicBool>,
+    report: Arc<ProgressReport>,
 }
 
 impl LineIndexRemote {
@@ -56,20 +89,25 @@ impl LineIndexRemote {
         self.buf.push(0);
 
         // Indexing worker
-        let spawner: JoinHandle<Result<()>> = std::thread::spawn(move || {
-            let mut curr = 0;
+        let spawner: JoinHandle<Result<()>> = std::thread::spawn({
+            let report = self.report.clone();
+            move || {
+                let mut curr = 0;
 
-            while curr < len {
-                let end = (curr + SegmentMut::TODO_REMOVE_SIZE).min(len);
-                let (task, task_rx) = IndexingTask::new(&file, curr, end)?;
-                sx.send(task_rx).map_err(|_| Error::Internal)?;
+                while curr < len {
+                    let end = (curr + SegmentMut::TODO_REMOVE_SIZE).min(len);
+                    let (task, task_rx) = IndexingTask::new(&file, curr, end)?;
+                    sx.send(task_rx).map_err(|_| Error::Internal)?;
 
-                std::thread::spawn(|| task.compute());
+                    std::thread::spawn(|| task.compute());
 
-                curr = end;
+                    curr = end;
+
+                    report.store_progress(curr as f32 / len as f32);
+                }
+
+                Ok(())
             }
-
-            Ok(())
         });
 
         while let Ok(task_rx) = rx.recv() {
@@ -130,34 +168,36 @@ impl LineIndexRemote {
     }
 
     pub fn has_readers(&self) -> bool {
-        Arc::strong_count(&self.completed) > 1
+        Arc::strong_count(&self.report) > 1
     }
 }
 
 impl Drop for LineIndexRemote {
     fn drop(&mut self) {
-        self.completed
-            .store(true, std::sync::atomic::Ordering::Relaxed);
+        self.report.complete();
     }
 }
 
 #[derive(Clone)]
 pub struct LineIndex {
     buf: Arc<CowVec<u64>>,
-    completed: Arc<AtomicBool>,
+    report: Arc<ProgressReport>,
 }
 
 impl LineIndex {
     #[inline]
     pub fn read_file(file: File, complete: bool) -> Result<Self> {
         let (buf, writer) = CowVec::new();
-        let completed = Arc::new(AtomicBool::new(false));
+        let report = Arc::new(ProgressReport {
+            progress: Some(AtomicU32::new(0f32.to_bits())),
+            completed: AtomicBool::new(false),
+        });
         let task = {
-            let completed = completed.clone();
+            let report = report.clone();
             move || {
                 LineIndexRemote {
                     buf: writer,
-                    completed,
+                    report,
                 }
                 .index_file(file)
             }
@@ -167,7 +207,7 @@ impl LineIndex {
         } else {
             std::thread::spawn(task);
         }
-        Ok(Self { buf, completed })
+        Ok(Self { buf, report })
     }
 
     #[inline]
@@ -178,13 +218,16 @@ impl LineIndex {
         segment_size: u64,
     ) -> Result<Self> {
         let (buf, writer) = CowVec::new();
-        let completed = Arc::new(AtomicBool::new(false));
+        let report = Arc::new(ProgressReport {
+            progress: None,
+            completed: AtomicBool::new(false),
+        });
         let task = {
-            let completed = completed.clone();
+            let report = report.clone();
             move || {
                 LineIndexRemote {
                     buf: writer,
-                    completed,
+                    report,
                 }
                 .index_stream(stream, outgoing, segment_size)
             }
@@ -194,7 +237,11 @@ impl LineIndex {
         } else {
             std::thread::spawn(task);
         }
-        Ok(Self { buf, completed })
+        Ok(Self { buf, report })
+    }
+
+    pub fn report(&self) -> &ProgressReport {
+        &self.report
     }
 
     pub fn line_count(&self) -> usize {
@@ -230,10 +277,5 @@ impl LineIndex {
         }
 
         None
-    }
-
-    #[inline]
-    pub fn is_complete(&self) -> bool {
-        self.completed.load(std::sync::atomic::Ordering::Relaxed)
     }
 }
