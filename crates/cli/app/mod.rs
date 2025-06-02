@@ -24,13 +24,15 @@ use crate::{
 };
 use actions::{ConfigAction, FilterAction};
 use anyhow::Result;
-use arboard::Clipboard;
 use bvr_core::{buf::SegBuffer, err::Error, index::BoxedStream, matches::CompositeStrategy};
-use crossterm::event::{
-    self, DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture,
-};
 use crossterm::terminal::{
     disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
+};
+use crossterm::{
+    clipboard::CopyToClipboard,
+    event::{
+        self, DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture,
+    },
 };
 use regex::bytes::Regex;
 use std::{
@@ -57,7 +59,6 @@ pub struct App<'term> {
     viewer: Viewer,
 
     keybinds: Keybinding,
-    clipboard: Option<Clipboard>,
     action_queue: VecDeque<Action>,
 
     mouse_capture: bool,
@@ -77,7 +78,6 @@ impl<'term> App<'term> {
             term,
             viewer: Viewer::new(),
             keybinds: Keybinding::Hardcoded,
-            clipboard: Clipboard::new().ok(),
             action_queue: VecDeque::new(),
             mouse_capture: true,
             refresh: false,
@@ -586,24 +586,23 @@ impl<'term> App<'term> {
                 }
             }
             Some("pb" | "pbcopy") => {
-                let Some(clipboard) = self.clipboard.as_mut() else {
-                    self.viewer
-                        .status
-                        .msg("pbcopy: clipboard not available".to_string());
-                    return true;
-                };
                 if let Some(instance) = self.viewer.mux.active_mut() {
                     match instance.export_string() {
-                        Ok(text) => match clipboard.set_text(text) {
-                            Ok(_) => {
-                                self.viewer
-                                    .status
-                                    .msg("pbcopy: copied to clipboard".to_string());
-                            }
-                            Err(err) => {
-                                self.viewer.status.msg(format!("pbcopy: {err}"));
-                            }
-                        },
+                        Ok(text) => {
+                            match crossterm::execute!(
+                                self.term.backend_mut(),
+                                CopyToClipboard::to_clipboard_from(text)
+                            ) {
+                                Ok(_) => {
+                                    self.viewer
+                                        .status
+                                        .msg("pbcopy: copied to clipboard".to_string());
+                                }
+                                Err(err) => {
+                                    self.viewer.status.msg(format!("pbcopy: {err}"));
+                                }
+                            };
+                        }
                         Err(err) => {
                             self.viewer.status.msg(format!("pbcopy: {err}"));
                         }
