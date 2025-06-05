@@ -165,6 +165,7 @@ impl ViewCache {
                 line.color = filters
                     .iter()
                     .rev()
+                    .filter(|filter| !filter.is_bookmark())
                     .find(|filter| filter.has_line(line.line_number))
                     .map(|filter| filter.color())
                     .unwrap_or(Color::White);

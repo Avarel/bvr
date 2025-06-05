@@ -143,25 +143,30 @@ impl ViewerLineWidget<'_> {
         }
     }
 
-    fn split_line(&self, area: Rect) -> [Rect; 3] {
+    fn split_line(&self, area: Rect) -> (Option<Rect>, Option<Rect>, Rect) {
         const SPECIAL_SIZE: u16 = 3;
+
+        if self.gutter_size.is_none() && !self.show_selection {
+            return (None, None, area);
+        }
+
         let gutter_size = self.gutter_size.unwrap_or(0);
         let mut gutter_chunk = area;
         gutter_chunk.width = gutter_size;
 
-        let mut type_chunk = area;
-        type_chunk.x += gutter_size + 1;
-        type_chunk.width = 1;
+        let mut cursor_chunk = area;
+        cursor_chunk.x += gutter_size + 1;
+        cursor_chunk.width = 1;
 
         let mut data_chunk = area;
         data_chunk.x += gutter_size + SPECIAL_SIZE;
         data_chunk.width = data_chunk.width.saturating_sub(gutter_size + SPECIAL_SIZE);
 
-        [gutter_chunk, type_chunk, data_chunk]
+        (Some(gutter_chunk), Some(cursor_chunk), data_chunk)
     }
 
     pub fn render(self, area: Rect, buf: &mut Buffer, handle: &mut MouseHandler) {
-        let [gutter_chunk, type_chunk, data_chunk] = self.split_line(area);
+        let (gutter_chunk, cursor_chunk, data_chunk) = self.split_line(area);
 
         let Some(line) = &self.line else {
             let ln = Paragraph::new("~")
@@ -169,11 +174,13 @@ impl ViewerLineWidget<'_> {
                 .fg(colors::GUTTER_TEXT)
                 .bg(colors::GUTTER_BG);
 
-            ln.render(gutter_chunk, buf);
+            if let Some(gutter_chunk) = gutter_chunk {
+                ln.render(gutter_chunk, buf);
+            }
             return;
         };
 
-        if self.gutter_size.is_some() {
+        if let Some(gutter_chunk) = gutter_chunk {
             let ln_str = self.itoa_buf.format(line.line_number + 1);
             let ln = Paragraph::new(ln_str).alignment(Alignment::Right).fg(
                 if line.ty.contains(LineType::Bookmarked) {
@@ -186,7 +193,7 @@ impl ViewerLineWidget<'_> {
             ln.render(gutter_chunk, buf);
         }
 
-        if self.show_selection {
+        if let Some(type_chunk) = cursor_chunk {
             Paragraph::new(Self::gutter_selection(line))
                 .fg(colors::SELECT_ACCENT)
                 .render(type_chunk, buf);
@@ -199,7 +206,7 @@ impl ViewerLineWidget<'_> {
         let data = &chars.as_str()
             [..(data_chunk.width as usize).min(line.data.len().saturating_sub(self.start))];
 
-        if let Some(m) = self.regex.and_then(|r| r.find(data.as_bytes())) {
+        let mut para = if let Some(m) = self.regex.and_then(|r| r.find(data.as_bytes())) {
             let start = m.start();
             let end = m.end();
             let spans = vec![
@@ -211,8 +218,13 @@ impl ViewerLineWidget<'_> {
         } else {
             Paragraph::new(data)
         }
-        .fg(line.color)
-        .render(data_chunk, buf);
+        .fg(line.color);
+
+        if line.ty.contains(LineType::Bookmarked) {
+            para = para.bg(colors::SELECT_ACCENT);
+        }
+
+        para.render(data_chunk, buf);
 
         if let Some(line) = self.line {
             handle.on_mouse(area, |event| match event.kind {

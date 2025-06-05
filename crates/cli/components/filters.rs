@@ -229,6 +229,10 @@ impl Filter {
         }
     }
 
+    pub fn is_bookmark(&self) -> bool {
+        matches!(&self.data, FilterSet::Bookmarks(_))
+    }
+
     pub fn is_complete(&self) -> bool {
         match &self.data {
             FilterSet::All => true,
