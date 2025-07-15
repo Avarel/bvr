@@ -95,10 +95,12 @@ impl Keybinding {
             },
             InputMode::Filter => match event {
                 Event::Key(key) => match key.code {
-                    KeyCode::Char('w') | KeyCode::Char('s') => Some(Action::Filter(FilterAction::Displace {
-                        direction: Direction::back_if(key.code == KeyCode::Char('w')),
-                        delta: ViewDelta::Number(1),
-                    })),
+                    KeyCode::Char('w') | KeyCode::Char('s') => {
+                        Some(Action::Filter(FilterAction::Displace {
+                            direction: Direction::back_if(key.code == KeyCode::Char('w')),
+                            delta: ViewDelta::Number(1),
+                        }))
+                    }
                     KeyCode::Up | KeyCode::Down => Some(Action::Filter(FilterAction::Move {
                         direction: Direction::back_if(key.code == KeyCode::Up),
                         select: key.modifiers.contains(KeyModifiers::SHIFT),

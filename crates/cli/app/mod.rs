@@ -41,7 +41,7 @@ use std::{
     fs::OpenOptions,
     num::NonZeroUsize,
     path::{Path, PathBuf},
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 pub type Backend<'a> = ratatui::backend::CrosstermBackend<std::io::StdoutLock<'a>>;
@@ -152,17 +152,25 @@ impl<'term> App<'term> {
     fn event_loop(&mut self) -> Result<()> {
         let mut mouse_handler = MouseHandler::new();
 
+        let mut last_drawn: Option<Instant> = None;
         loop {
             if self.refresh {
                 self.term.clear()?;
                 self.refresh = false;
             }
-            self.term.draw(|f| {
-                let cursor = self.viewer.ui(f, &mut mouse_handler);
-                if let Some(cursor) = cursor {
-                    f.set_cursor_position(cursor);
-                }
-            })?;
+
+            if last_drawn
+                .map(|time| time.elapsed() > Duration::from_secs_f64(1.0 / 60.0))
+                .unwrap_or(true)
+            {
+                self.term.draw(|f| {
+                    let cursor = self.viewer.ui(f, &mut mouse_handler);
+                    if let Some(cursor) = cursor {
+                        f.set_cursor_position(cursor);
+                    }
+                })?;
+                last_drawn = Some(Instant::now());
+            }
 
             let action = match self.action_queue.pop_front() {
                 Some(action) => action,

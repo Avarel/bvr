@@ -248,17 +248,20 @@ impl Instance {
     }
 
     pub fn toggle_selected_filters(&mut self) {
-        self.compositor.toggle_filters(self.compositor.selected_filter_indices());
+        self.compositor
+            .toggle_filters(self.compositor.selected_filter_indices());
         self.invalidate_cache();
     }
 
     pub fn remove_selected_filters(&mut self) {
-        self.compositor.remove_filters(self.compositor.selected_filter_indices());
+        self.compositor
+            .remove_filters(self.compositor.selected_filter_indices());
         self.invalidate_cache();
     }
 
     pub fn displace_selected_filters(&mut self, dir: Direction, delta: ViewDelta) {
-        self.compositor.displace_filters(self.compositor.selected_filter_indices(), dir, delta);
+        self.compositor
+            .displace_filters(self.compositor.selected_filter_indices(), dir, delta);
         self.invalidate_cache();
     }
 

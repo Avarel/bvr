@@ -498,7 +498,12 @@ impl Compositor {
         self.viewport.jump_vertically_to(i);
     }
 
-    pub fn displace_filters(&mut self, range: std::ops::Range<usize>, dir: Direction, delta: ViewDelta) {
+    pub fn displace_filters(
+        &mut self,
+        range: std::ops::Range<usize>,
+        dir: Direction,
+        delta: ViewDelta,
+    ) {
         fn displace_range<T>(
             vec: &mut Vec<T>,
             range: std::ops::Range<usize>,
