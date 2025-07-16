@@ -159,17 +159,29 @@ impl<'term> App<'term> {
                 self.refresh = false;
             }
 
+            let mut render = |f: &mut ratatui::Frame| self.viewer.ui(f, &mut mouse_handler);
+
+            const MIN_REFRESH_DURATION: Duration = Duration::from_millis(16);
+            const MIN_POLL_DURATION: Duration = Duration::from_millis(32);
+
+            let now = Instant::now();
+
             if last_drawn
-                .map(|time| time.elapsed() > Duration::from_secs_f64(1.0 / 60.0))
+                .map(|last_drawn| now.duration_since(last_drawn) > MIN_REFRESH_DURATION)
                 .unwrap_or(true)
             {
                 self.term.draw(|f| {
-                    let cursor = self.viewer.ui(f, &mut mouse_handler);
+                    let cursor = render(f);
                     if let Some(cursor) = cursor {
                         f.set_cursor_position(cursor);
                     }
                 })?;
-                last_drawn = Some(Instant::now());
+                last_drawn = Some(now);
+            } else if self.mouse_capture {
+                // We render to capture mouse actions
+                render(&mut self.term.get_frame());
+                // But we avoid drawing so terminal won't look weird
+                self.term.current_buffer_mut().reset();
             }
 
             let action = match self.action_queue.pop_front() {
@@ -177,7 +189,7 @@ impl<'term> App<'term> {
                 None => match mouse_handler.extract() {
                     Some(action) => action,
                     None => {
-                        if !event::poll(Duration::from_secs_f64(1.0 / 30.0))? {
+                        if !event::poll(MIN_POLL_DURATION)? {
                             continue;
                         }
 
