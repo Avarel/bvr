@@ -184,22 +184,23 @@ impl<'term> App<'term> {
                 self.term.current_buffer_mut().reset();
             }
 
-            let action = match self.action_queue.pop_front() {
+            let action = match self
+                .action_queue
+                .pop_front()
+                .or_else(|| mouse_handler.extract())
+            {
                 Some(action) => action,
-                None => match mouse_handler.extract() {
-                    Some(action) => action,
-                    None => {
-                        if !event::poll(MIN_POLL_DURATION)? {
-                            continue;
-                        }
-
-                        let mut event = event::read()?;
-                        let key = self.keybinds.map_key(self.viewer.mode, &mut event);
-                        mouse_handler.publish_event(event);
-                        let Some(action) = key else { continue };
-                        action
+                None => {
+                    if !event::poll(MIN_POLL_DURATION)? {
+                        continue;
                     }
-                },
+
+                    let mut event = event::read()?;
+                    let key = self.keybinds.map_key(self.viewer.mode, &mut event);
+                    mouse_handler.publish_event(event);
+                    let Some(action) = key else { continue };
+                    action
+                }
             };
 
             if !self.process_action(action)? {
