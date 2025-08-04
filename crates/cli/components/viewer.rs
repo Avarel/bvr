@@ -26,7 +26,7 @@ pub struct ViewCache {
 }
 
 impl ViewCache {
-    pub(crate) fn new(composite: LineSet) -> Self {
+    pub fn new(composite: LineSet) -> Self {
         Self {
             composite,
             cache: VecDeque::new(),

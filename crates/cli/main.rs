@@ -4,10 +4,12 @@ mod components;
 mod direction;
 
 use anyhow::Result;
-use app::App;
+use app::State;
 use clap::Parser;
 use ratatui::{prelude::CrosstermBackend, Terminal};
 use std::{io::IsTerminal, path::PathBuf};
+
+use crate::app::App;
 
 #[derive(Parser, Debug)]
 #[command(author, version, about)]
@@ -21,20 +23,20 @@ fn main() -> Result<()> {
 
     let stdout = std::io::stdout().lock();
     let backend = CrosstermBackend::new(stdout);
-    let terminal = Terminal::new(backend)?;
 
-    let mut app = App::new(terminal);
+    let mut state = State::new();
 
     for path in args.files {
-        app.viewer_mut().open_file(&path)?;
+        state.viewer_mut().open_file(&path)?;
     }
 
     if !std::io::stdin().is_terminal() {
-        app.viewer_mut()
+        state.viewer_mut()
             .open_stream(String::from("Pipe Stream"), Box::new(std::io::stdin()))?;
     }
 
-    app.run_app()
+    let terminal = Terminal::new(backend)?;
+    App::new(state, terminal).run()
 }
 
 fn regex_compile(pattern: &str) -> std::result::Result<regex::bytes::Regex, regex::Error> {

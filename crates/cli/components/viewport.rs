@@ -44,7 +44,7 @@ impl Viewport {
     }
 
     #[inline(always)]
-    pub(crate) fn top(&self) -> usize {
+    pub fn top(&self) -> usize {
         self.top
     }
 
