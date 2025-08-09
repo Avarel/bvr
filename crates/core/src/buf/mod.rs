@@ -106,12 +106,13 @@ impl BufferMap {
             }
         }
     }
-}
 
+}
 impl SegBuffer {
     const SEGMENT_SIZE: u64 = 1 << 20;
 
     pub fn read_file(file: File, seg_count: NonZeroUsize, complete: bool) -> Result<Self> {
+        file.try_lock_shared()?;
         let index = LineIndex::read_file(file.try_clone()?, complete)?;
 
         Ok(Self {
@@ -353,7 +354,7 @@ impl ContiguousSegmentIterator {
     /// - `Some((&Idx, u64, &[u8]))`: A tuple containing the index, starting data
     ///                               position, and a slice of the buffer data.
     /// - `None`: If there are no more buffers available.
-    pub fn next(&mut self) -> Option<ContiguousSegment> {
+    pub fn next(&mut self) -> Option<ContiguousSegment<'_>> {
         if self.line_range.is_empty() {
             return None;
         }

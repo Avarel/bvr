@@ -31,7 +31,7 @@ impl StatusApp {
         }
     }
 
-    pub fn get_message_update(&mut self) -> Option<Cow<str>> {
+    pub fn get_message_update(&mut self) -> Option<Cow<'_, str>> {
         if let Some((time, dur)) = self.timestamp {
             if time.elapsed() > dur {
                 self.timestamp = None;

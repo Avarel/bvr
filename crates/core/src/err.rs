@@ -7,6 +7,9 @@ pub enum Error {
     #[error("i/o error {0}")]
     Io(#[from] std::io::Error),
 
+    #[error("could not non-exclusively lock the file for reading {0}")]
+    LockFailed(#[from] std::fs::TryLockError),
+
     /// An internal error occurred.
     #[error("internal error")]
     Internal,
