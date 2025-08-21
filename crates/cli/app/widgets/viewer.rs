@@ -199,12 +199,17 @@ impl ViewerLineWidget<'_> {
                 .render(type_chunk, buf);
         }
 
-        let mut chars = line.data.chars();
-        for _ in 0..self.start {
-            chars.next();
-        }
-        let data = &chars.as_str()
-            [..(data_chunk.width as usize).min(line.data.len().saturating_sub(self.start))];
+        let mut chars = line.data.char_indices();
+        let start = chars.nth(self.start).map(|(idx, _)| idx).unwrap_or(0);
+        let end = chars
+            .nth(data_chunk.width as usize)
+            .map(|(idx, _)| idx)
+            .unwrap_or(line.data.len());
+
+        let data = line
+            .data
+            .get(start..end)
+            .unwrap_or("Bad char boundary handling");
 
         let mut para = if let Some(m) = self.regex.and_then(|r| r.find(data.as_bytes())) {
             let start = m.start();
