@@ -121,7 +121,7 @@ where
     /// This operation is O(1) amortized.
     pub fn push(&mut self, elem: T) {
         let buf = self.target.buf.load();
-        let len = buf.len.load(Ordering::Acquire);
+        let len = buf.len.load(Ordering::Relaxed);
         let cap = buf.cap;
 
         let push_inner = move |buf: &RawBuf<T>| {
@@ -148,7 +148,7 @@ where
         // buffer every time.
 
         let buf = self.target.buf.load();
-        let len = buf.len.load(Ordering::Acquire);
+        let len = buf.len.load(Ordering::Relaxed);
 
         assert!(index <= len, "index out of bounds");
         let mut new_buf = if buf.cap == len {
@@ -179,7 +179,7 @@ where
     /// Does nothing if capacity is already sufficient.
     pub fn reserve(&mut self, additional: usize) {
         let buf = self.target.buf.load();
-        let len = buf.len.load(Ordering::Acquire);
+        let len = buf.len.load(Ordering::Relaxed);
         if len.saturating_add(additional) > buf.cap {
             self.grow(&buf, len, Some(buf.cap + additional));
         }
@@ -202,7 +202,7 @@ impl<T> Deref for CowVecWriter<T> {
         //         from it as long as the lifetime prevents the writer from
         //         growing reallocating the internal buffer.
         let buf = self.target.buf.load();
-        let len = buf.len.load(Ordering::SeqCst);
+        let len = buf.len.load(Ordering::Acquire);
         unsafe { std::slice::from_raw_parts(buf.as_ptr(), len) }
     }
 }
@@ -210,7 +210,7 @@ impl<T> Deref for CowVecWriter<T> {
 impl<T> Drop for CowVecWriter<T> {
     fn drop(&mut self) {
         // Mark the CowVec as completed when the writer is dropped
-        self.target.completed.store(true, Ordering::Release);
+        self.target.completed.store(true, Ordering::Relaxed);
     }
 }
 
@@ -281,7 +281,7 @@ impl<T> CowVec<T> {
     ///
     /// When this returns true, no more elements can be added to this vector.
     pub fn is_complete(&self) -> bool {
-        self.completed.load(Ordering::Acquire)
+        self.completed.load(Ordering::Relaxed)
     }
 
     #[inline(always)]
@@ -290,7 +290,7 @@ impl<T> CowVec<T> {
         F: FnOnce(&[T]) -> R,
     {
         let buf = self.buf.load();
-        let len = buf.len.load(Ordering::SeqCst);
+        let len = buf.len.load(Ordering::Acquire);
         cb(unsafe { std::slice::from_raw_parts(buf.as_ptr(), len) })
     }
 
@@ -301,7 +301,7 @@ impl<T> CowVec<T> {
     pub fn snapshot(&self) -> CowVecSnapshot<T> {
         let buf = self.buf.load_full();
         CowVecSnapshot {
-            len: buf.len.load(Ordering::SeqCst),
+            len: buf.len.load(Ordering::Acquire),
             buf,
         }
     }
@@ -395,6 +395,8 @@ impl<T> Deref for CowVecSnapshot<T> {
 #[cfg(test)]
 mod test {
     use super::CowVec;
+    use std::sync::Arc;
+    use std::time::Duration;
 
     #[test]
     fn test_miri_push_and_access() {
@@ -560,5 +562,430 @@ mod test {
 
         // CowVec created from Vec should be immediately completed
         assert!(arr.is_complete());
+    }
+
+    #[test]
+    fn test_completion_with_concurrent_readers() {
+        use std::sync::Barrier;
+        use std::thread;
+
+        let (arr, mut writer) = CowVec::<i32>::new();
+        let barrier = Arc::new(Barrier::new(2));
+
+        // Clone the vector for reader
+        let arr_clone = arr.clone();
+        let barrier_clone = barrier.clone();
+
+        // Reader thread
+        let handle = thread::spawn(move || {
+            barrier_clone.wait();
+
+            // Keep checking until we see completion
+            let mut saw_incomplete = false;
+            let mut saw_complete = false;
+
+            for _ in 0..1000 {
+                let is_complete = arr_clone.is_complete();
+                if !is_complete {
+                    saw_incomplete = true;
+                } else {
+                    saw_complete = true;
+                    break;
+                }
+                thread::sleep(Duration::from_micros(100));
+            }
+
+            (saw_incomplete, saw_complete)
+        });
+
+        // Writer thread (main)
+        barrier.wait();
+
+        // Add some elements
+        for i in 0..5 {
+            writer.push(i);
+            thread::sleep(Duration::from_millis(1));
+        }
+
+        // Ensure reader has time to see incomplete state
+        thread::sleep(Duration::from_millis(10));
+
+        // Drop writer
+        drop(writer);
+
+        let (saw_incomplete, saw_complete) = handle.join().unwrap();
+
+        // Reader should have seen both states
+        assert!(saw_incomplete, "Reader should have seen incomplete state");
+        assert!(saw_complete, "Reader should have seen complete state");
+        assert!(arr.is_complete(), "Final state should be complete");
+    }
+
+    #[test]
+    fn test_edge_case_empty_vector_completion() {
+        let (arr, writer) = CowVec::<u8>::new();
+
+        // Empty vector should not be complete while writer exists
+        assert!(!arr.is_complete());
+        assert_eq!(arr.len(), 0);
+        assert!(arr.is_empty());
+
+        drop(writer);
+
+        // Empty vector should be complete after writer is dropped
+        assert!(arr.is_complete());
+        assert_eq!(arr.len(), 0);
+        assert!(arr.is_empty());
+    }
+
+    #[test]
+    fn test_edge_case_single_element() {
+        let (arr, mut writer) = CowVec::new();
+
+        assert!(!arr.is_complete());
+        writer.push(42);
+        assert_eq!(arr.len(), 1);
+        assert_eq!(arr.get(0), Some(42));
+        assert!(!arr.is_complete());
+
+        drop(writer);
+
+        assert!(arr.is_complete());
+        assert_eq!(arr.len(), 1);
+        assert_eq!(arr.get(0), Some(42));
+    }
+
+    #[test]
+    fn test_completion_with_capacity_growth() {
+        let (arr, mut writer) = CowVec::with_capacity(2);
+
+        assert!(!arr.is_complete());
+
+        // Fill initial capacity
+        writer.push(1);
+        writer.push(2);
+        assert!(!arr.is_complete());
+
+        // Force reallocation
+        writer.push(3);
+        writer.push(4);
+        assert!(!arr.is_complete());
+
+        drop(writer);
+        assert!(arr.is_complete());
+        assert_eq!(arr.len(), 4);
+    }
+
+    #[test]
+    fn test_completion_status_across_clones() {
+        let (arr, writer) = CowVec::<i32>::new();
+        let clone1 = arr.clone();
+        let clone2 = arr.clone();
+
+        // All clones should show not complete
+        assert!(!arr.is_complete());
+        assert!(!clone1.is_complete());
+        assert!(!clone2.is_complete());
+
+        drop(writer);
+
+        // All clones should show complete
+        assert!(arr.is_complete());
+        assert!(clone1.is_complete());
+        assert!(clone2.is_complete());
+    }
+
+    #[test]
+    fn test_completion_with_insert_operations() {
+        let (arr, mut writer) = CowVec::new();
+
+        // Add some initial elements
+        for i in 0..5 {
+            writer.push(i * 10);
+        }
+        assert!(!arr.is_complete());
+
+        // Perform insert operations
+        writer.insert(2, 15);
+        writer.insert(0, -5);
+        assert!(!arr.is_complete());
+
+        let expected = [-5, 0, 10, 15, 20, 30, 40];
+        for (i, &expected) in expected.iter().enumerate() {
+            assert_eq!(arr.get(i), Some(expected));
+        }
+
+        drop(writer);
+        assert!(arr.is_complete());
+
+        // Data should still be accessible after completion
+        for (i, &expected) in expected.iter().enumerate() {
+            assert_eq!(arr.get(i), Some(expected));
+        }
+    }
+
+    #[test]
+    fn test_completion_stress_test() {
+        use std::thread;
+
+        // Test with many concurrent readers checking completion status
+        let (arr, mut writer) = CowVec::<usize>::new();
+        let mut handles = Vec::new();
+
+        // Spawn multiple reader threads
+        for thread_id in 0..10 {
+            let arr_clone = arr.clone();
+            let handle = thread::spawn(move || {
+                let mut completion_changes = 0;
+                let mut last_complete = arr_clone.is_complete();
+
+                for _ in 0..100 {
+                    let current_complete = arr_clone.is_complete();
+                    if current_complete != last_complete {
+                        completion_changes += 1;
+                        last_complete = current_complete;
+                    }
+                    thread::sleep(Duration::from_micros(100));
+                }
+
+                (thread_id, completion_changes, last_complete)
+            });
+            handles.push(handle);
+        }
+
+        // Writer adds elements then gets dropped
+        for i in 0..50 {
+            writer.push(i);
+            if i % 10 == 0 {
+                thread::sleep(Duration::from_millis(1));
+            }
+        }
+
+        thread::sleep(Duration::from_millis(5));
+        drop(writer);
+
+        // Wait for all readers and verify results
+        for handle in handles {
+            let (thread_id, changes, final_complete) = handle.join().unwrap();
+            assert!(final_complete, "Thread {} should see final completion", thread_id);
+            // Each thread should see at most one change (false -> true)
+            assert!(changes <= 1, "Thread {} saw {} completion changes", thread_id, changes);
+        }
+
+        assert!(arr.is_complete());
+        assert_eq!(arr.len(), 50);
+    }
+
+    #[test]
+    fn test_completion_with_small_types() {
+        let (arr, mut writer) = CowVec::<u8>::new();
+
+        assert!(!arr.is_complete());
+
+        // Push some small values
+        for i in 0..10 {
+            writer.push(i);
+        }
+
+        assert_eq!(arr.len(), 10);
+        assert!(!arr.is_complete());
+
+        drop(writer);
+
+        assert!(arr.is_complete());
+        assert_eq!(arr.len(), 10);
+    }
+
+    #[test]
+    fn test_completion_with_large_elements() {
+        #[derive(Copy, Clone, PartialEq, Debug)]
+        struct LargeStruct {
+            data: [u64; 16], // 128 bytes
+        }
+
+        let (arr, mut writer) = CowVec::<LargeStruct>::new();
+        let large_elem = LargeStruct { data: [42; 16] };
+
+        assert!(!arr.is_complete());
+
+        writer.push(large_elem);
+        assert_eq!(arr.len(), 1);
+        assert_eq!(arr.get(0), Some(large_elem));
+        assert!(!arr.is_complete());
+
+        drop(writer);
+
+        assert!(arr.is_complete());
+        assert_eq!(arr.get(0), Some(large_elem));
+    }
+
+    #[test]
+    fn test_completion_snapshot_consistency() {
+        let (arr, mut writer) = CowVec::new();
+
+        // Add some data
+        for i in 0..10 {
+            writer.push(i);
+        }
+
+        // Take snapshot before completion
+        let snapshot_before = arr.snapshot();
+        assert!(!arr.is_complete());
+
+        drop(writer);
+
+        // Take snapshot after completion
+        let snapshot_after = arr.snapshot();
+        assert!(arr.is_complete());
+
+        // Snapshots should have same data
+        assert_eq!(snapshot_before.len(), snapshot_after.len());
+        for i in 0..snapshot_before.len() {
+            assert_eq!(snapshot_before[i], snapshot_after[i]);
+        }
+    }
+
+    #[test]
+    fn test_completion_with_reserve_operations() {
+        let (arr, mut writer) = CowVec::new();
+
+        assert!(!arr.is_complete());
+
+        // Reserve capacity
+        writer.reserve(100);
+        assert!(!arr.is_complete());
+
+        // Add some elements
+        for i in 0..10 {
+            writer.push(i);
+        }
+        assert!(!arr.is_complete());
+
+        drop(writer);
+
+        assert!(arr.is_complete());
+        assert_eq!(arr.len(), 10);
+    }
+
+    #[test]
+    fn test_completion_rapid_drop_and_check() {
+        // Test rapid succession of drop and completion check
+        for _ in 0..100 {
+            let (arr, writer) = CowVec::<i32>::new();
+            assert!(!arr.is_complete());
+            drop(writer);
+            assert!(arr.is_complete());
+        }
+    }
+
+    #[test]
+    fn test_atomic_ordering_optimization() {
+        use std::thread;
+
+        // Test that relaxed ordering works correctly under high contention
+        let (arr, mut writer) = CowVec::<usize>::new();
+        let mut handles = Vec::new();
+
+        // Spawn many threads that rapidly check completion status
+        for thread_id in 0..20 {
+            let arr_clone = arr.clone();
+            let handle = thread::spawn(move || {
+                let mut check_count = 0;
+                let start = std::time::Instant::now();
+
+                // Rapidly check completion for 10ms
+                while start.elapsed() < Duration::from_millis(10) {
+                    let _ = arr_clone.is_complete();
+                    check_count += 1;
+                }
+
+                // Final check after writer should be dropped
+                thread::sleep(Duration::from_millis(5));
+                let final_complete = arr_clone.is_complete();
+
+                (thread_id, check_count, final_complete)
+            });
+            handles.push(handle);
+        }
+
+        // Writer does some work then gets dropped
+        for i in 0..10 {
+            writer.push(i);
+        }
+
+        // Small delay then drop
+        thread::sleep(Duration::from_millis(2));
+        drop(writer);
+
+        // Verify all threads eventually see completion
+        for handle in handles {
+            let (thread_id, check_count, final_complete) = handle.join().unwrap();
+            assert!(final_complete, "Thread {} should see completion", thread_id);
+            assert!(check_count > 0, "Thread {} should have performed checks", thread_id);
+        }
+
+        assert!(arr.is_complete());
+    }
+
+    #[test]
+    fn test_memory_ordering_under_contention() {
+        use std::thread;
+
+        // Test that optimized memory ordering works correctly under high contention
+        let (arr, mut writer) = CowVec::<usize>::new();
+        let mut handles = Vec::new();
+
+        // Spawn many reader threads that access data while writer is active
+        for thread_id in 0..10 {
+            let arr_clone = arr.clone();
+            let handle = thread::spawn(move || {
+                let mut successful_reads = 0;
+                let start = std::time::Instant::now();
+
+                // Continuously read data for 20ms
+                while start.elapsed() < Duration::from_millis(20) {
+                    let len = arr_clone.len();
+                    // Verify we can read all elements up to the observed length
+                    for i in 0..len {
+                        if let Some(value) = arr_clone.get(i) {
+                            // Verify data integrity: each element should equal its index
+                            assert_eq!(value, i, "Thread {} saw corrupted data at index {}", thread_id, i);
+                            successful_reads += 1;
+                        }
+                    }
+                }
+
+                (thread_id, successful_reads)
+            });
+            handles.push(handle);
+        }
+
+        // Writer rapidly adds elements
+        for i in 0..100 {
+            writer.push(i);
+            // Occasional yield to increase contention
+            if i % 20 == 0 {
+                thread::yield_now();
+            }
+        }
+
+        drop(writer);
+
+        // Verify all readers completed successfully
+        let mut total_reads = 0;
+        for handle in handles {
+            let (thread_id, reads) = handle.join().unwrap();
+            assert!(reads > 0, "Thread {} should have performed successful reads", thread_id);
+            total_reads += reads;
+        }
+
+        assert!(total_reads > 0);
+        assert!(arr.is_complete());
+        assert_eq!(arr.len(), 100);
+
+        // Final verification of data integrity
+        for i in 0..100 {
+            assert_eq!(arr.get(i), Some(i));
+        }
     }
 }
