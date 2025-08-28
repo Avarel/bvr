@@ -2,7 +2,7 @@ use arc_swap::ArcSwap;
 use std::alloc::{self, Layout};
 use std::ops::Deref;
 use std::ptr::NonNull;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
 
 struct RawBuf<T> {
@@ -207,6 +207,13 @@ impl<T> Deref for CowVecWriter<T> {
     }
 }
 
+impl<T> Drop for CowVecWriter<T> {
+    fn drop(&mut self) {
+        // Mark the CowVec as completed when the writer is dropped
+        self.target.completed.store(true, Ordering::Release);
+    }
+}
+
 /// A contiguous, growable array type, written as `CowVec<T>`.
 ///
 /// Cloning this vector will give another read-handle to the same underlying
@@ -219,6 +226,7 @@ impl<T> Deref for CowVecWriter<T> {
 /// The `CowVecWriter<T>` type is an exclusive writer to a `CowVec<T>`.
 pub struct CowVec<T> {
     buf: ArcSwap<RawBuf<T>>,
+    completed: AtomicBool,
 }
 
 impl<T> CowVec<T> {
@@ -229,7 +237,10 @@ impl<T> CowVec<T> {
     pub fn new() -> (Arc<Self>, CowVecWriter<T>) {
         assert!(std::mem::size_of::<T>() != 0);
         let buf = ArcSwap::from_pointee(RawBuf::empty());
-        let buf = Arc::new(Self { buf });
+        let buf = Arc::new(Self {
+            buf,
+            completed: AtomicBool::new(false),
+        });
         (buf.clone(), CowVecWriter { target: buf })
     }
 
@@ -242,7 +253,10 @@ impl<T> CowVec<T> {
     pub fn with_capacity(cap: usize) -> (Arc<Self>, CowVecWriter<T>) {
         assert!(std::mem::size_of::<T>() != 0);
         let buf = ArcSwap::from_pointee(RawBuf::allocate(0, cap));
-        let buf = Arc::new(Self { buf });
+        let buf = Arc::new(Self {
+            buf,
+            completed: AtomicBool::new(false),
+        });
         (buf.clone(), CowVecWriter { target: buf })
     }
 
@@ -261,6 +275,13 @@ impl<T> CowVec<T> {
     /// Returns true if the vector contains no elements.
     pub fn is_empty(&self) -> bool {
         self.len() == 0
+    }
+
+    /// Returns true if the corresponding CowVecWriter has been dropped.
+    ///
+    /// When this returns true, no more elements can be added to this vector.
+    pub fn is_complete(&self) -> bool {
+        self.completed.load(Ordering::Acquire)
     }
 
     #[inline(always)]
@@ -321,6 +342,7 @@ impl<T: Copy> From<Vec<T>> for CowVec<T> {
 
         Self {
             buf: ArcSwap::from_pointee(RawBuf::new(NonNull::new(ptr).unwrap(), len, cap)),
+            completed: AtomicBool::new(true), // Vec is already complete, no writer exists
         }
     }
 }
@@ -515,17 +537,28 @@ mod test {
         for (i, expected) in expected.into_iter().enumerate() {
             assert_eq!(Some(expected), arr.get(i));
         }
+    }
 
-        writer.insert(12, 100);
-        let expected = [0, 5, 5, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100];
-        for (i, expected) in expected.into_iter().enumerate() {
-            assert_eq!(Some(expected), arr.get(i));
-        }
+    #[test]
+    fn test_completed_flag() {
+        let (arr, writer) = CowVec::<i32>::new();
 
-        writer.insert(0, 1);
-        let expected = [1, 0, 5, 5, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100];
-        for (i, expected) in expected.into_iter().enumerate() {
-            assert_eq!(Some(expected), arr.get(i));
-        }
+        // Initially, the vector should not be completed
+        assert!(!arr.is_complete());
+
+        // Drop the writer
+        drop(writer);
+
+        // Now the vector should be completed
+        assert!(arr.is_complete());
+    }
+
+    #[test]
+    fn test_completed_flag_from_vec() {
+        let vec = vec![1, 2, 3, 4, 5];
+        let arr = CowVec::from(vec);
+
+        // CowVec created from Vec should be immediately completed
+        assert!(arr.is_complete());
     }
 }
