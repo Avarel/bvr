@@ -47,6 +47,12 @@ pub struct ProgressReport {
 }
 
 impl ProgressReport {
+    pub const PERCENT: Self = Self {
+        progress: Some(AtomicU32::new(0f32.to_bits())),
+    };
+
+    pub const NONE: Self = Self { progress: None };
+
     pub fn progress(&self) -> Option<f32> {
         self.progress
             .as_ref()
@@ -69,7 +75,7 @@ impl ProgressReport {
 
 /// A remote type that can be used to set off the indexing process of a
 /// file or a stream.
-struct LineIndexRemote {
+pub(crate) struct LineIndexRemote {
     buf: CowVecWriter<u64>,
     report: Arc<ProgressReport>,
 }
@@ -166,6 +172,11 @@ impl LineIndexRemote {
         self.buf.push(len);
         Ok(())
     }
+
+    #[cfg(test)]
+    pub(crate) fn push(&mut self, line_data: u64) {
+        self.buf.push(line_data);
+    }
 }
 
 impl Drop for LineIndexRemote {
@@ -181,57 +192,44 @@ pub struct LineIndex {
 }
 
 impl LineIndex {
-    #[inline]
-    pub fn read_file(file: File, complete: bool) -> Result<Self> {
+    pub(crate) fn new(report: ProgressReport) -> (Self, LineIndexRemote) {
         let (buf, writer) = CowVec::new();
-        let report = Arc::new(ProgressReport {
-            progress: Some(AtomicU32::new(0f32.to_bits())),
-        });
-        let task = {
+        let report = Arc::new(report);
+        let remote = {
             let report = report.clone();
-            move || {
-                LineIndexRemote {
-                    buf: writer,
-                    report,
-                }
-                .index_file(file)
+            LineIndexRemote {
+                buf: writer,
+                report,
             }
         };
+        (Self { buf, report }, remote)
+    }
+
+    pub fn read_file(file: File, complete: bool) -> Result<Self> {
+        let (index, remote) = Self::new(ProgressReport::PERCENT);
+        let task = move || remote.index_file(file);
         if complete {
             task()?;
         } else {
             std::thread::spawn(task);
         }
-        Ok(Self { buf, report })
+        Ok(index)
     }
 
-    #[inline]
     pub fn read_stream(
         stream: BoxedStream,
         outgoing: Sender<Segment>,
         block_until_complete: bool,
         segment_size: u64,
     ) -> Result<Self> {
-        let (buf, writer) = CowVec::new();
-        let report = Arc::new(ProgressReport {
-            progress: None,
-        });
-        let task = {
-            let report = report.clone();
-            move || {
-                LineIndexRemote {
-                    buf: writer,
-                    report,
-                }
-                .index_stream(stream, outgoing, segment_size)
-            }
-        };
+        let (index, remote) = Self::new(ProgressReport::NONE);
+        let task = move || remote.index_stream(stream, outgoing, segment_size);
         if block_until_complete {
             task()?;
         } else {
             std::thread::spawn(task);
         }
-        Ok(Self { buf, report })
+        Ok(index)
     }
 
     pub fn report(&self) -> &ProgressReport {

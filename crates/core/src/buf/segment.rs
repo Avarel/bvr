@@ -98,6 +98,13 @@ impl Segment {
         Ok(Self { data, range })
     }
 
+    #[cfg(test)]
+    pub(crate) fn from_bytes(start: u64, data: &[u8]) -> Self {
+        let mut seg_mut = SegmentMut::new(start, data.len() as u64).unwrap();
+        seg_mut.data.copy_from_slice(data);
+        seg_mut.into_read_only().unwrap()
+    }
+
     #[inline]
     pub fn get_line(self: &Arc<Self>, range: Range<u64>) -> SegStr {
         SegStr::from_bytes(self.get_bytes(range))
