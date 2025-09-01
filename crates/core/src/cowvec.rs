@@ -124,16 +124,16 @@ where
         let len = buf.len.load(Ordering::Relaxed);
         let cap = buf.cap;
 
-        let push_inner = move |buf: &RawBuf<T>| {
+        let push_inner = move |buf: &RawBuf<T>, len, elem| {
             unsafe { std::ptr::write(buf.ptr.as_ptr().add(len), elem) }
             buf.len.store(len + 1, Ordering::Release);
         };
 
         if len == cap {
             // Safety: If this runs, then buf will no longer be borrowed from
-            push_inner(&self.grow(&buf, len, None))
+            push_inner(&self.grow(&buf, len, None), len, elem)
         } else {
-            push_inner(&buf)
+            push_inner(&buf, len, elem)
         }
     }
 

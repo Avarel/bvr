@@ -106,8 +106,8 @@ impl BufferMap {
             }
         }
     }
-
 }
+
 impl SegBuffer {
     const SEGMENT_SIZE: u64 = 1 << 20;
 
@@ -394,11 +394,12 @@ impl ContiguousSegmentIterator {
             let curr_seg_data_start = curr_line_seg_start as u64 * self.map.segment_size;
             let curr_seg_data_end = curr_seg_data_start + self.map.segment_size;
 
-            let line_end = self
-                .index
-                .line_of_data(curr_seg_data_end)
-                .unwrap_or_else(|| self.index.line_count())
-                .min(self.line_range.end);
+            let line_end = match self.index.line_of_data(curr_seg_data_end) {
+                Some(value) => value,
+                None if self.index.report().is_complete() => self.index.line_count(),
+                None => return None,
+            }
+            .min(self.line_range.end);
             let line_end_data_start = self.index.data_of_line(line_end)?;
 
             // this line should not cross multiple segments, else we would have caught in the first case
