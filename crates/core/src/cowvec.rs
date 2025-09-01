@@ -307,7 +307,7 @@ impl<T> CowVec<T> {
     /// This refs/pins the current internal buffer. Users can read
     /// up to `len()` elements at the time of the snapshot.
     pub fn snapshot(&self) -> CowVecSnapshot<T> {
-        let buf = self.buf.load_full();
+        let buf = self.buf.load();
         CowVecSnapshot {
             len: buf.len.load(Ordering::Acquire),
             buf,
@@ -362,7 +362,7 @@ impl<T> std::fmt::Debug for CowVec<T> {
 }
 
 pub struct CowVecSnapshot<T> {
-    buf: Arc<RawBuf<T>>,
+    buf: arc_swap::Guard<Arc<RawBuf<T>>>,
     len: usize,
 }
 
