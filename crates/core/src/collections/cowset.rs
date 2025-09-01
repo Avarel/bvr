@@ -1,6 +1,8 @@
-use super::BTreeSet;
-use arc_swap::ArcSwap;
 use std::sync::Arc;
+
+use arc_swap::ArcSwap;
+
+use super::BTreeSet;
 
 pub struct SharedIndexedSet<T>
 where

@@ -1,12 +1,13 @@
 // Persistent B-tree index set implementation, specialized for Copy types.
 // Based on `indexset` crate.
 
+use std::cmp::Ordering;
+
+use super::ftree::FenwickTree;
+
 const DEFAULT_INNER_SIZE: usize = 1 << 10;
 const CUTOFF_RATIO: usize = 2;
 const DEFAULT_CUTOFF: usize = DEFAULT_INNER_SIZE / CUTOFF_RATIO;
-
-use super::ftree::FenwickTree;
-use std::cmp::Ordering;
 
 #[derive(Clone, Debug, PartialEq)]
 struct Node<T> {

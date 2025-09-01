@@ -1,9 +1,14 @@
+use std::{
+    alloc::{self, Layout},
+    ops::Deref,
+    ptr::NonNull,
+    sync::{
+        atomic::{AtomicBool, AtomicUsize, Ordering},
+        Arc,
+    },
+};
+
 use arc_swap::ArcSwap;
-use std::alloc::{self, Layout};
-use std::ops::Deref;
-use std::ptr::NonNull;
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-use std::sync::Arc;
 
 struct RawBuf<T> {
     ptr: NonNull<T>,

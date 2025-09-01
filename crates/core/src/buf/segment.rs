@@ -1,11 +1,13 @@
-use crate::Result;
-use memmap2::{Mmap, MmapMut};
 use std::{borrow::Cow, ops::Range, ptr::NonNull, sync::Arc};
 
 #[cfg(unix)]
 pub(crate) use std::os::fd::AsRawFd as Mmappable;
 #[cfg(windows)]
 pub(crate) use std::os::windows::io::AsRawHandle as Mmappable;
+
+use memmap2::{Mmap, MmapMut};
+
+use crate::Result;
 
 pub struct SegmentRaw<Buf> {
     range: Range<u64>,

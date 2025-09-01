@@ -1,10 +1,14 @@
-pub mod composite;
-
-use crate::buf::ContiguousSegmentIterator;
-use crate::cowvec::{CowVec, CowVecSnapshot, CowVecWriter};
-use crate::{LineIndex, Result};
-use regex::bytes::Regex;
 use std::sync::Arc;
+
+use regex::bytes::Regex;
+
+use crate::{
+    buf::ContiguousSegmentIterator,
+    cowvec::{CowVec, CowVecSnapshot, CowVecWriter},
+    LineIndex, Result,
+};
+
+pub mod composite;
 
 pub use composite::CompositeStrategy;
 
