@@ -191,6 +191,10 @@ where
         self.target.buf.store(ret.clone());
         ret
     }
+
+    pub fn has_readers(&self) -> bool {
+        Arc::strong_count(&self.target) > 1
+    }
 }
 
 impl<T> Deref for CowVecWriter<T> {
@@ -209,7 +213,6 @@ impl<T> Deref for CowVecWriter<T> {
 
 impl<T> Drop for CowVecWriter<T> {
     fn drop(&mut self) {
-        // Mark the CowVec as completed when the writer is dropped
         self.target.completed.store(true, Ordering::Relaxed);
     }
 }

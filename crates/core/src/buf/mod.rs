@@ -396,7 +396,7 @@ impl ContiguousSegmentIterator {
 
             let line_end = match self.index.line_of_data(curr_seg_data_end) {
                 Some(value) => value,
-                None if self.index.report().is_complete() => self.index.line_count(),
+                None if self.index.is_complete() => self.index.line_count(),
                 None => return None,
             }
             .min(self.line_range.end);

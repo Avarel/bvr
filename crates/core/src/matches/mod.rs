@@ -4,19 +4,18 @@ use crate::buf::ContiguousSegmentIterator;
 use crate::cowvec::{CowVec, CowVecSnapshot, CowVecWriter};
 use crate::{LineIndex, Result};
 use regex::bytes::Regex;
-use std::sync::{atomic::AtomicBool, Arc};
+use std::sync::Arc;
 
 pub use composite::CompositeStrategy;
 
 struct LineMatchRemote {
     buf: CowVecWriter<usize>,
-    completed: Arc<AtomicBool>,
 }
 
 impl LineMatchRemote {
     pub fn search(mut self, mut iter: ContiguousSegmentIterator, regex: Regex) -> Result<()> {
         loop {
-            if !self.has_readers() {
+            if !self.buf.has_readers() {
                 break;
             } else if let Some(segment) = iter.next() {
                 let mut buf_start = 0;
@@ -36,24 +35,13 @@ impl LineMatchRemote {
                     buf_start =
                         segment.index.data_of_line(line_number + 1).unwrap() - segment.range.start;
                 }
-            } else if iter.index().report().is_complete() {
+            } else if iter.index().is_complete() {
                 break;
             } else {
                 std::hint::spin_loop()
             }
         }
         Ok(())
-    }
-
-    pub fn has_readers(&self) -> bool {
-        Arc::strong_count(&self.completed) > 1
-    }
-}
-
-impl Drop for LineMatchRemote {
-    fn drop(&mut self) {
-        self.completed
-            .store(true, std::sync::atomic::Ordering::Relaxed);
     }
 }
 
@@ -64,7 +52,6 @@ pub enum LineSet {
     },
     Dynamic {
         buf: Arc<CowVec<usize>>,
-        completed: Arc<AtomicBool>,
         // Optimization field for composite filters
         // Minimum length of all filters combined
         min_len: usize,
@@ -76,7 +63,6 @@ impl LineSet {
     pub fn empty() -> Self {
         Self::Dynamic {
             buf: Arc::new(CowVec::empty()),
-            completed: Arc::new(AtomicBool::new(true)),
             min_len: 0,
         }
     }
@@ -92,22 +78,8 @@ impl LineSet {
     #[inline]
     pub fn search(iter: ContiguousSegmentIterator, regex: Regex) -> Self {
         let (buf, writer) = CowVec::new();
-        let complete = Arc::new(AtomicBool::new(false));
-        std::thread::spawn({
-            let complete = complete.clone();
-            move || {
-                LineMatchRemote {
-                    buf: writer,
-                    completed: complete,
-                }
-                .search(iter, regex)
-            }
-        });
-        Self::Dynamic {
-            buf,
-            completed: complete,
-            min_len: 0,
-        }
+        std::thread::spawn(move || LineMatchRemote { buf: writer }.search(iter, regex));
+        Self::Dynamic { buf, min_len: 0 }
     }
 
     #[inline]
@@ -125,28 +97,19 @@ impl LineSet {
                     CompositeStrategy::Union => filters.iter().map(|f| f.len()).max().unwrap(),
                 };
                 let (buf, writer) = CowVec::new();
-                let completed = Arc::new(AtomicBool::new(false));
-                let task = {
-                    let completed = completed.clone();
-                    move || {
-                        composite::LineCompositeRemote {
-                            buf: writer,
-                            completed,
-                            strategy,
-                        }
-                        .compose(filters)
+                let task = move || {
+                    composite::LineCompositeRemote {
+                        buf: writer,
+                        strategy,
                     }
+                    .compose(filters)
                 };
                 if complete {
                     task()?;
                 } else {
                     std::thread::spawn(task);
                 }
-                Ok(Self::Dynamic {
-                    buf,
-                    completed,
-                    min_len,
-                })
+                Ok(Self::Dynamic { buf, min_len })
             }
         }
     }
@@ -162,10 +125,8 @@ impl LineSet {
     #[inline]
     pub fn is_complete(&self) -> bool {
         match self {
-            LineSet::All { buf } => buf.report().is_complete(),
-            LineSet::Dynamic { completed, .. } => {
-                completed.load(std::sync::atomic::Ordering::Relaxed)
-            }
+            LineSet::All { buf } => buf.is_complete(),
+            LineSet::Dynamic { buf, .. } => buf.is_complete(),
         }
     }
 
@@ -278,7 +239,6 @@ impl From<Vec<usize>> for LineSet {
         Self::Dynamic {
             min_len: vec.len(),
             buf: Arc::new(CowVec::from(vec)),
-            completed: Arc::new(AtomicBool::new(true)),
         }
     }
 }

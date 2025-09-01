@@ -1,5 +1,4 @@
 use crate::{cowvec::CowVecWriter, LineSet, Result};
-use std::sync::{atomic::AtomicBool, Arc};
 
 struct QueueMatch {
     matches: LineSet,
@@ -105,7 +104,6 @@ pub enum CompositeStrategy {
 
 pub(super) struct LineCompositeRemote {
     pub(super) buf: CowVecWriter<usize>,
-    pub(super) completed: Arc<AtomicBool>,
     pub(super) strategy: CompositeStrategy,
 }
 
@@ -120,7 +118,7 @@ impl LineCompositeRemote {
         let mut queues = Queues::new(filters, self.strategy);
 
         while let Some(line_number) = queues.take_lowest() {
-            if !self.has_readers() {
+            if !self.buf.has_readers() {
                 break;
             }
 
@@ -133,17 +131,6 @@ impl LineCompositeRemote {
             self.buf.push(line_number);
         }
         Ok(())
-    }
-
-    pub fn has_readers(&self) -> bool {
-        Arc::strong_count(&self.completed) > 1
-    }
-}
-
-impl Drop for LineCompositeRemote {
-    fn drop(&mut self) {
-        self.completed
-            .store(true, std::sync::atomic::Ordering::Relaxed);
     }
 }
 

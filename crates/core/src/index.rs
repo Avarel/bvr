@@ -4,7 +4,7 @@ use crate::err::{Error, Result};
 use std::fs::File;
 use std::sync::atomic::AtomicU32;
 use std::sync::mpsc::{Receiver, Sender};
-use std::sync::{atomic::AtomicBool, Arc};
+use std::sync::Arc;
 use std::thread::JoinHandle;
 
 struct IndexingTask {
@@ -37,7 +37,6 @@ pub type BoxedStream = Box<dyn std::io::Read + Send>;
 
 pub struct ProgressReport {
     progress: Option<AtomicU32>,
-    completed: AtomicBool,
 }
 
 impl ProgressReport {
@@ -46,10 +45,6 @@ impl ProgressReport {
             .as_ref()
             .map(|v| v.load(std::sync::atomic::Ordering::Relaxed))
             .map(f32::from_bits)
-    }
-
-    pub fn is_complete(&self) -> bool {
-        self.completed.load(std::sync::atomic::Ordering::Relaxed)
     }
 
     fn store_progress(&self, val: f32) {
@@ -62,8 +57,6 @@ impl ProgressReport {
         if let Some(progress) = self.progress.as_ref() {
             progress.store(1f32.to_bits(), std::sync::atomic::Ordering::Relaxed);
         }
-        self.completed
-            .store(true, std::sync::atomic::Ordering::Relaxed);
     }
 }
 
@@ -111,7 +104,7 @@ impl LineIndexRemote {
         });
 
         while let Ok(task_rx) = rx.recv() {
-            if !self.has_readers() {
+            if !self.buf.has_readers() {
                 break;
             }
 
@@ -166,10 +159,6 @@ impl LineIndexRemote {
         self.buf.push(len);
         Ok(())
     }
-
-    pub fn has_readers(&self) -> bool {
-        Arc::strong_count(&self.report) > 1
-    }
 }
 
 impl Drop for LineIndexRemote {
@@ -190,7 +179,6 @@ impl LineIndex {
         let (buf, writer) = CowVec::new();
         let report = Arc::new(ProgressReport {
             progress: Some(AtomicU32::new(0f32.to_bits())),
-            completed: AtomicBool::new(false),
         });
         let task = {
             let report = report.clone();
@@ -220,7 +208,6 @@ impl LineIndex {
         let (buf, writer) = CowVec::new();
         let report = Arc::new(ProgressReport {
             progress: None,
-            completed: AtomicBool::new(false),
         });
         let task = {
             let report = report.clone();
@@ -277,5 +264,9 @@ impl LineIndex {
         }
 
         None
+    }
+
+    pub fn is_complete(&self) -> bool {
+        self.buf.is_complete()
     }
 }
