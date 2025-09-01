@@ -86,7 +86,6 @@ impl SegmentMut {
 impl Segment {
     pub(crate) fn map_file<F: Mmappable>(range: Range<u64>, file: &F) -> Result<Self> {
         let size = range.end - range.start;
-        // debug_assert!(size <= Self::MAX_SIZE);
         let data = unsafe {
             memmap2::MmapOptions::new()
                 .offset(range.start)

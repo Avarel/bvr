@@ -78,9 +78,9 @@ impl<'a> Widget for StatusWidget<'a> {
             }
             v.push(Span::raw(" │ ").fg(accent_color));
             v.push(Span::raw(instance.name()).fg(accent_color));
-            let report = instance.file().index().report();
-            if !report.is_complete() {
-                if let Some(progress) = report.progress() {
+            let index = instance.file().index();
+            if !index.is_complete() {
+                if let Some(progress) = index.report().progress() {
                     v.push(
                         Span::raw(format!(" ({:.0}% loaded)", progress * 100f32))
                             .fg(colors::STATUS_BAR_TEXT),

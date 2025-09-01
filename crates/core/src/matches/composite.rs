@@ -102,12 +102,12 @@ pub enum CompositeStrategy {
     Union,
 }
 
-pub(super) struct LineCompositeRemote {
-    pub(super) buf: CowVecWriter<usize>,
-    pub(super) strategy: CompositeStrategy,
+pub struct LineCompositeWriter {
+    pub buf: CowVecWriter<usize>,
+    pub strategy: CompositeStrategy,
 }
 
-impl LineCompositeRemote {
+impl LineCompositeWriter {
     pub fn compose(mut self, filters: Vec<LineSet>) -> Result<()> {
         let len = filters.iter().map(|filter| filter.len()).sum::<usize>();
         // Divide by 2 because there may be a lot of overlap, but hopefully this

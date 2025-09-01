@@ -75,12 +75,12 @@ impl ProgressReport {
 
 /// A remote type that can be used to set off the indexing process of a
 /// file or a stream.
-pub(crate) struct LineIndexRemote {
+pub(crate) struct LineIndexWriter {
     buf: CowVecWriter<u64>,
     report: Arc<ProgressReport>,
 }
 
-impl LineIndexRemote {
+impl LineIndexWriter {
     const BYTES_PER_LINE_HEURISTIC: u64 = 128;
 
     pub fn index_file(mut self, file: File) -> Result<()> {
@@ -179,7 +179,7 @@ impl LineIndexRemote {
     }
 }
 
-impl Drop for LineIndexRemote {
+impl Drop for LineIndexWriter {
     fn drop(&mut self) {
         self.report.complete();
     }
@@ -192,22 +192,22 @@ pub struct LineIndex {
 }
 
 impl LineIndex {
-    pub(crate) fn new(report: ProgressReport) -> (Self, LineIndexRemote) {
+    pub(crate) fn new(report: ProgressReport) -> (Self, LineIndexWriter) {
         let (buf, writer) = CowVec::new();
         let report = Arc::new(report);
-        let remote = {
+        let writer = {
             let report = report.clone();
-            LineIndexRemote {
+            LineIndexWriter {
                 buf: writer,
                 report,
             }
         };
-        (Self { buf, report }, remote)
+        (Self { buf, report }, writer)
     }
 
     pub fn read_file(file: File, complete: bool) -> Result<Self> {
-        let (index, remote) = Self::new(ProgressReport::PERCENT);
-        let task = move || remote.index_file(file);
+        let (index, writer) = Self::new(ProgressReport::PERCENT);
+        let task = move || writer.index_file(file);
         if complete {
             task()?;
         } else {
@@ -222,8 +222,8 @@ impl LineIndex {
         block_until_complete: bool,
         segment_size: u64,
     ) -> Result<Self> {
-        let (index, remote) = Self::new(ProgressReport::NONE);
-        let task = move || remote.index_stream(stream, outgoing, segment_size);
+        let (index, writer) = Self::new(ProgressReport::NONE);
+        let task = move || writer.index_stream(stream, outgoing, segment_size);
         if block_until_complete {
             task()?;
         } else {

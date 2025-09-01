@@ -12,11 +12,11 @@ pub mod composite;
 
 pub use composite::CompositeStrategy;
 
-struct LineMatchRemote {
+struct LineMatchWriter {
     buf: CowVecWriter<usize>,
 }
 
-impl LineMatchRemote {
+impl LineMatchWriter {
     pub fn search(mut self, mut iter: ContiguousSegmentIterator, regex: Regex) -> Result<()> {
         loop {
             if !self.buf.has_readers() {
@@ -82,7 +82,7 @@ impl LineSet {
     #[inline]
     pub fn search(iter: ContiguousSegmentIterator, regex: Regex) -> Self {
         let (buf, writer) = CowVec::new();
-        std::thread::spawn(move || LineMatchRemote { buf: writer }.search(iter, regex));
+        std::thread::spawn(move || LineMatchWriter { buf: writer }.search(iter, regex));
         Self::Dynamic { buf, min_len: 0 }
     }
 
@@ -102,7 +102,7 @@ impl LineSet {
                 };
                 let (buf, writer) = CowVec::new();
                 let task = move || {
-                    composite::LineCompositeRemote {
+                    composite::LineCompositeWriter {
                         buf: writer,
                         strategy,
                     }
