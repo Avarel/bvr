@@ -1,5 +1,5 @@
 use anyhow::Result;
-use rand::{distributions::Alphanumeric, rngs::SmallRng, Rng, SeedableRng};
+use rand::{distr::Alphanumeric, rngs::SmallRng, Rng, SeedableRng};
 use std::{
     fs::OpenOptions,
     io::BufWriter,
@@ -34,7 +34,7 @@ fn generate_log_file(
     let mut writer = BufWriter::new(file);
 
     for i in 0..lines {
-        let len = rng.gen_range(chars_per_line.clone());
+        let len = rng.random_range(chars_per_line.clone());
 
         let s = (&mut rng)
             .sample_iter(Alphanumeric)
