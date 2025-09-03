@@ -28,7 +28,7 @@ use crate::{
 };
 use actions::{ConfigAction, FilterAction};
 use anyhow::Result;
-use bvr_core::{err::Error, index::BoxedStream, matches::CompositeStrategy, SegBuffer};
+use bvr_core::{SegBuffer, err::Error, index::BoxedStream, matches::CompositeStrategy};
 use crossterm::{clipboard::CopyToClipboard, event};
 use regex::bytes::Regex;
 use std::{
@@ -570,6 +570,29 @@ impl App {
                 }
                 return true;
             }
+            Some("readlink" | "realpath" | "rl" | "rp") => {
+                if let Some(instance) = self.app.viewer.mux.active_mut() {
+                    if let Some(link) = instance.link() {
+                        let link = link.display();
+                        self.app
+                            .viewer
+                            .status
+                            .msg(format!("readlink: {}", link));
+                        crossterm::execute!(
+                            self.term.backend_mut(),
+                            CopyToClipboard::to_clipboard_from(link.to_string())
+                        )
+                        .ok();
+                    } else {
+                        self.app.viewer.status.msg("readlink: no link".to_string());
+                    }
+                } else {
+                    self.app
+                        .viewer
+                        .status
+                        .msg(String::from("No active instances"));
+                }
+            }
             Some("refresh") => {
                 self.refresh = true;
             }
@@ -813,8 +836,8 @@ impl Viewer {
         }
     }
 
-    fn push_instance(&mut self, name: String, file: SegBuffer) {
-        self.mux.push(Instance::new(name, file));
+    fn push_instance(&mut self, name: String, link: Option<PathBuf>, file: SegBuffer) {
+        self.mux.push(Instance::new(name, link, file));
     }
 
     pub fn open_file(&mut self, path: &Path) -> Result<()> {
@@ -826,12 +849,15 @@ impl Viewer {
             return Err(anyhow::anyhow!("Not a file"));
         }
 
+        let link = std::fs::canonicalize(path).ok();
+
         let name = path
             .file_name()
             .map(|str| str.to_string_lossy().into_owned())
             .unwrap_or_else(|| String::from("Unnamed File"));
         self.push_instance(
             name,
+            link,
             SegBuffer::read_file(file, NonZeroUsize::new(25).unwrap(), false)?,
         );
 
@@ -864,7 +890,7 @@ impl Viewer {
     }
 
     pub fn open_stream(&mut self, name: String, stream: BoxedStream) -> Result<()> {
-        self.push_instance(name, SegBuffer::read_stream(stream, false)?);
+        self.push_instance(name, None, SegBuffer::read_stream(stream, false)?);
         Ok(())
     }
 

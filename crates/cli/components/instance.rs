@@ -1,3 +1,5 @@
+use std::path::{Path, PathBuf};
+
 use super::{
     cursor::{Cursor, CursorState, SelectionOrigin},
     filters::{Compositor, Filter, FilterExportSet},
@@ -10,6 +12,7 @@ use bvr_core::{matches::CompositeStrategy, Result};
 
 pub struct Instance {
     name: String,
+    link: Option<PathBuf>,
     buf: SegBuffer,
     cursor: CursorState,
     compositor: Compositor,
@@ -17,10 +20,11 @@ pub struct Instance {
 }
 
 impl Instance {
-    pub fn new(name: String, buf: SegBuffer) -> Self {
+    pub fn new(name: String, link: Option<PathBuf>, buf: SegBuffer) -> Self {
         let mut compositor = Compositor::new(&buf);
         let composite = compositor.create_composite();
         Self {
+            link,
             view: ViewCache::new(composite),
             compositor: Compositor::new(&buf),
             name,
@@ -307,5 +311,9 @@ impl Instance {
             .filters_mut()
             .import_user_filters(&self.buf, filters);
         self.invalidate_cache();
+    }
+
+    pub fn link(&self) -> Option<&Path> {
+        self.link.as_deref()
     }
 }
