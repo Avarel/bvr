@@ -30,6 +30,7 @@ use actions::{ConfigAction, FilterAction};
 use anyhow::Result;
 use bvr_core::{SegBuffer, err::Error, index::BoxedStream, matches::CompositeStrategy};
 use crossterm::{clipboard::CopyToClipboard, event};
+use ratatui::widgets::{Clear, Widget};
 use regex::bytes::Regex;
 use std::{
     borrow::Cow,
@@ -132,17 +133,14 @@ impl App {
                 .or_else(|| mouse_handler.extract())
             {
                 Some(action) => action,
-                None => {
-                    if !event::poll(MIN_POLL_DURATION)? {
-                        continue;
-                    }
-
+                None if event::poll(MIN_POLL_DURATION)? => {
                     let mut event = event::read()?;
                     let key = self.app.keybinds.map_key(self.app.viewer.mode, &mut event);
                     mouse_handler.publish_event(event);
                     let Some(action) = key else { continue };
                     action
                 }
+                None => continue,
             };
 
             if !self.process_action(action)? {
@@ -574,10 +572,7 @@ impl App {
                 if let Some(instance) = self.app.viewer.mux.active_mut() {
                     if let Some(link) = instance.link() {
                         let link = link.display();
-                        self.app
-                            .viewer
-                            .status
-                            .msg(format!("readlink: {}", link));
+                        self.app.viewer.status.msg(format!("readlink: {}", link));
                         crossterm::execute!(
                             self.term.backend_mut(),
                             CopyToClipboard::to_clipboard_from(link.to_string())

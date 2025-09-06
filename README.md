@@ -79,6 +79,7 @@ In this mode, you can enter commands to interact with the pager.
 | `:mux` <br>  `:m`                           | Toggle the multiplexer mode between windows or tabs.          |
 | `:mux tabs` `:mux split` <br> `:m t` `:m s` | Set the multiplexer to the respective mode.                   |
 | `:pb` `pbcopy`                              | Copy the output of the active filters to the clipboard.       |
+| `:realpath` `:rp` <br> `:readlink` `:rl`    | Go to the specific line number (or nearest if not available). |
 | `:filter persist`                           | Persist the filters on shutdown and launch.                   |
 | `:filter link`                              | Synchronize filters across opened files.                      |
 | `:filter regex <regex>` <br> `:f r <regex>` | Create a new filter searching for the regex.                  |
