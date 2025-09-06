@@ -41,6 +41,7 @@ itoa = "1.0"
 bitflags = "2.4"
 lru = "0.16"
 supports-color = "3.0.0"
+unicode-width = "0.2"
 
 # Shell usage
 shellexpand = "3.1"

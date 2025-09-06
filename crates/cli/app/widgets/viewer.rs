@@ -10,7 +10,6 @@ use crate::{
     direction::Direction,
 };
 use bitflags::bitflags;
-use bvr_core::SegStr;
 use crossterm::event::MouseEventKind;
 use ratatui::prelude::*;
 use regex::bytes::Regex;
@@ -25,7 +24,7 @@ pub struct LineViewerWidget<'a> {
 
 struct LineRenderData<'a> {
     line_number: usize,
-    data: &'a SegStr,
+    data: &'a str,
     color: Color,
     ty: LineType,
 }
@@ -200,17 +199,17 @@ impl ViewerLineWidget<'_> {
                 .render(type_chunk, buf);
         }
 
-        let mut chars = line.data.char_indices();
-        let start = chars.nth(self.start).map(|(idx, _)| idx).unwrap_or(0);
-        let end = chars
-            .nth(data_chunk.width as usize)
-            .map(|(idx, _)| idx)
-            .unwrap_or(line.data.len());
+        let data = {
+            let data = line.data;
+            let mut chars = data.char_indices();
+            let start = chars.nth(self.start).map(|(idx, _)| idx).unwrap_or(0);
+            let end = chars
+                .nth(data_chunk.width as usize)
+                .map(|(idx, _)| idx)
+                .unwrap_or(data.len());
 
-        let data = line
-            .data
-            .get(start..end)
-            .unwrap_or("Bad char boundary handling");
+            data.get(start..end).unwrap_or("Bad char boundary handling")
+        };
 
         let mut line_widget = if let Some(m) = self.regex.and_then(|r| r.find(data.as_bytes())) {
             let start = m.start();

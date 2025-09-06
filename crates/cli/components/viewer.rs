@@ -1,5 +1,5 @@
 use super::{filters::Compositor, viewport::Viewport};
-use bvr_core::{LineSet, SegBuffer, SegStr};
+use bvr_core::{LineSet, SegBuffer};
 use ratatui::style::Color;
 use std::collections::VecDeque;
 
@@ -7,7 +7,7 @@ use std::collections::VecDeque;
 pub struct CachedLine {
     pub index: usize,
     pub line_number: usize,
-    pub data: SegStr,
+    pub data: String,
     pub color: Color,
     pub bookmarked: bool,
 }
@@ -71,10 +71,12 @@ impl ViewCache {
             todo!("push empty line");
         };
 
+        let data = crate::text::normalize_width(&data);
+
         self.cache.push_front(CachedLine {
             index,
             line_number,
-            data,
+            data: data.into_owned(),
             color: Color::Reset,
             bookmarked: false,
         });
@@ -89,10 +91,12 @@ impl ViewCache {
             return false;
         };
 
+        let data = crate::text::normalize_width(&data);
+
         self.cache.push_back(CachedLine {
             index,
             line_number,
-            data,
+            data: data.into_owned(),
             color: Color::Reset,
             bookmarked: false,
         });

@@ -128,6 +128,7 @@ dependencies = [
  "shellexpand",
  "shlex",
  "supports-color",
+ "unicode-width 0.2.0",
 ]
 
 [[package]]

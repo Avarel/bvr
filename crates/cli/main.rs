@@ -2,6 +2,7 @@ mod app;
 mod colors;
 mod components;
 mod direction;
+mod text;
 
 use anyhow::Result;
 use app::State;
