@@ -202,7 +202,7 @@ impl ViewerLineWidget<'_> {
         let data = {
             let data = line.data;
             let mut chars = data.char_indices();
-            let start = chars.nth(self.start).map(|(idx, _)| idx).unwrap_or(0);
+            let start = chars.nth(self.start).map(|(idx, _)| idx).unwrap_or(data.len());
             let end = chars
                 .nth(data_chunk.width as usize)
                 .map(|(idx, _)| idx)

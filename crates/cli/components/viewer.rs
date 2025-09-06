@@ -67,11 +67,11 @@ impl ViewCache {
             return;
         };
 
-        let Some(data) = buf.get_line(line_number) else {
+        let Some(data) = buf.get_bytes(line_number) else {
             todo!("push empty line");
         };
 
-        let data = crate::text::normalize_width(&data);
+        let data = crate::text::lossy_normalize_width(&data);
 
         self.cache.push_front(CachedLine {
             index,
@@ -87,11 +87,11 @@ impl ViewCache {
             return false;
         };
 
-        let Some(data) = buf.get_line(line_number) else {
+        let Some(data) = buf.get_bytes(line_number) else {
             return false;
         };
 
-        let data = crate::text::normalize_width(&data);
+        let data = crate::text::lossy_normalize_width(&data);
 
         self.cache.push_back(CachedLine {
             index,
