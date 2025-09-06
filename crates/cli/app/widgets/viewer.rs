@@ -47,7 +47,7 @@ impl LineViewerWidget<'_> {
         let search_color = self.instance.color_selector().peek_color();
         let gutter_size = self
             .gutter
-            .then(|| (self.instance.visible_line_count().max(1).ilog10() as u16 + 1).max(4));
+            .then(|| (self.instance.total_line_count().max(1).ilog10() as u16 + 1).max(4));
 
         let mut itoa_buf = itoa::Buffer::new();
 

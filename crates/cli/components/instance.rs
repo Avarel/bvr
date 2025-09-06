@@ -57,6 +57,10 @@ impl Instance {
         self.view.composite().len()
     }
 
+    pub fn total_line_count(&self) -> usize {
+        self.buf.line_count()
+    }
+
     pub fn compositor_mut(&mut self) -> &mut Compositor {
         &mut self.compositor
     }
