@@ -55,9 +55,9 @@ impl<'a> Widget for StatusWidget<'a> {
             InputMode::Config => (colors::CONFIG_ACCENT, " CONFIG "),
         };
 
-        let mut v = Vec::new();
+        let mut v = Vec::with_capacity(16);
 
-        v.push(Span::from(mode_name).fg(colors::WHITE).bg(accent_color));
+        v.push(Span::raw(mode_name).fg(colors::WHITE).bg(accent_color));
         v.push(Span::raw(" "));
 
         if let Some(instance) = self.instance {
@@ -146,7 +146,7 @@ impl PromptWidget<'_> {
         let InputMode::Prompt(mode) = self.mode else {
             static WIDGET_BLOCK: OnceLock<Block> = OnceLock::new();
             WIDGET_BLOCK
-                .get_or_init(|| Block::new().style(Style::new().bg(colors::BG)))
+                .get_or_init(|| Block::new().bg(colors::BG))
                 .render(area, buf);
             return;
         };
@@ -180,7 +180,7 @@ impl PromptWidget<'_> {
 
                 static HIGHLIGHT_BLOCK: OnceLock<Block> = OnceLock::new();
                 HIGHLIGHT_BLOCK
-                    .get_or_init(|| Block::new().style(Style::new().bg(colors::COMMAND_BAR_SELECT)))
+                    .get_or_init(|| Block::new().bg(colors::COMMAND_BAR_SELECT))
                     .render(span_area, buf);
             }
             _ => {}
@@ -298,7 +298,7 @@ pub struct MultiplexerWidget<'a> {
 impl MultiplexerWidget<'_> {
     fn split_horizontal(area: Rect, len: usize) -> std::rc::Rc<[Rect]> {
         let constraints = vec![Constraint::Ratio(1, len as u32); len];
-        Layout::new(ratatui::prelude::Direction::Horizontal, constraints).split(area)
+        Layout::new(Direction::Horizontal, constraints).split(area)
     }
 
     fn split_top(area: Rect, top_height: u16) -> [Rect; 2] {
@@ -406,7 +406,7 @@ impl MultiplexerWidget<'_> {
         } else {
             const BG_BLOCK: OnceLock<Block> = OnceLock::new();
             BG_BLOCK
-                .get_or_init(|| Block::new().style(Style::new().bg(colors::BG)))
+                .get_or_init(|| Block::new().bg(colors::BG))
                 .render(mux_chunk, buf);
         }
 

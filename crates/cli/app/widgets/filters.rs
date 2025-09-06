@@ -4,7 +4,7 @@ use super::super::{
 };
 use crate::{
     colors,
-    components::{cursor::Cursor, filters::Mask, instance::Instance},
+    components::{cursor::Cursor, filters::Filter, instance::Instance},
 };
 use bitflags::bitflags;
 use crossterm::event::MouseEventKind;
@@ -20,7 +20,7 @@ impl FilterViewerWidget<'_> {
     pub fn render(self, area: Rect, buf: &mut Buffer, handle: &mut MouseHandler) {
         static WIDGET_BLOCK: OnceLock<Block> = OnceLock::new();
         WIDGET_BLOCK
-            .get_or_init(|| Block::new().style(Style::new().bg(colors::STATUS_BAR)))
+            .get_or_init(|| Block::new().bg(colors::STATUS_BAR))
             .render(area, buf);
 
         let cursor_state = self.instance.compositor_mut().cursor().state();
@@ -36,9 +36,7 @@ impl FilterViewerWidget<'_> {
                 FilterLineWidget {
                     view_index: self.view_index,
                     index,
-                    name: filter.mask(),
-                    color: filter.color(),
-                    len: filter.len(),
+                    filter,
                     ty: match cursor_state {
                         Cursor::Singleton(i) => {
                             if index == i {
@@ -72,9 +70,7 @@ impl FilterViewerWidget<'_> {
 struct FilterLineWidget<'a> {
     view_index: usize,
     index: usize,
-    name: &'a Mask,
-    color: Color,
-    len: Option<usize>,
+    filter: &'a Filter,
     ty: FilterType,
 }
 
@@ -107,20 +103,26 @@ impl FilterLineWidget<'_> {
     }
 
     pub fn render(self, area: Rect, buf: &mut Buffer, handle: &mut MouseHandler) {
+        let color = self.filter.color();
+
         let mut v = vec![
-            Span::from(self.gutter_selection()).fg(colors::FILTER_ACCENT),
-            Span::from(if self.ty.contains(FilterType::Enabled) {
+            Span::raw(self.gutter_selection()).fg(colors::FILTER_ACCENT),
+            Span::raw(if self.ty.contains(FilterType::Enabled) {
                 " ● "
             } else {
                 " ◯ "
             })
-            .fg(self.color),
+            .fg(color),
         ];
 
-        v.push(Span::raw(self.name.name()).fg(self.color));
+        v.push(Span::raw(self.filter.mask().name()).fg(color));
 
-        if let Some(len) = self.len {
-            v.push(Span::from(format!(" {}", len)).fg(colors::TEXT_INACTIVE));
+        if let Some(len) = self.filter.len() {
+            v.push(Span::raw(format!(" {}", len)).fg(colors::TEXT_INACTIVE));
+        }
+
+        if !self.filter.is_complete() {
+            v.push(Span::raw(" (searching)").fg(colors::TEXT_INACTIVE));
         }
 
         Line::from(v).render(area, buf);

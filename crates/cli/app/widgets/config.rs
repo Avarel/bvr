@@ -32,7 +32,7 @@ impl ConfigViewerWidget<'_> {
         {
             static WIDGET_BLOCK: OnceLock<Block> = OnceLock::new();
             WIDGET_BLOCK
-                .get_or_init(|| Block::new().style(Style::new().bg(colors::STATUS_BAR)))
+                .get_or_init(|| Block::new().bg(colors::STATUS_BAR))
                 .render(left_chunk, buf);
 
             let cursor_state = self.app.cursor().state();
@@ -75,7 +75,7 @@ impl ConfigViewerWidget<'_> {
         if let Some(filter) = self.app.selected_filter() {
             static WIDGET_BLOCK: OnceLock<Block> = OnceLock::new();
             WIDGET_BLOCK
-                .get_or_init(|| Block::new().style(Style::new().bg(colors::BLACK)))
+                .get_or_init(|| Block::new().bg(colors::BLACK))
                 .render(right_chunk, buf);
 
             (right_chunk.y..right_chunk.bottom())
@@ -129,7 +129,7 @@ impl ConfigLineWidget<'_> {
     }
 
     pub fn render(self, area: Rect, buf: &mut Buffer, _: &mut MouseHandler) {
-        let mut v = vec![Span::from(self.gutter_selection()).fg(colors::CONFIG_ACCENT)];
+        let mut v = vec![Span::raw(self.gutter_selection()).fg(colors::CONFIG_ACCENT)];
 
         v.push(Span::raw(self.name.unwrap_or("Untitled Filter Set")).fg(colors::WHITE));
 
@@ -146,7 +146,7 @@ struct FilterLineWidget<'a> {
 impl FilterLineWidget<'_> {
     pub fn render(self, area: Rect, buf: &mut Buffer, _: &mut MouseHandler) {
         let spans = vec![
-            Span::from(if self.enabled { " ● " } else { " ◯ " }).fg(self.color),
+            Span::raw(if self.enabled { " ● " } else { " ◯ " }).fg(self.color),
             Span::raw(self.name).fg(self.color),
         ];
         Line::from(spans).render(area, buf);
