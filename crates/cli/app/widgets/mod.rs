@@ -92,13 +92,13 @@ impl<'a> Widget for StatusWidget<'a> {
             v.push(Span::raw(" to view a file").fg(colors::STATUS_BAR_TEXT));
         }
 
-        Paragraph::new(Line::from(v))
+        Line::from(v)
             .style(STATUS_BAR_STYLE)
             .render(area, buf);
 
         if let Some(instance) = self.instance {
             if instance.is_following_output() {
-                Paragraph::new(Span::raw("Follow  ").fg(colors::STATUS_BAR_TEXT))
+                Line::raw("Follow  ").fg(colors::STATUS_BAR_TEXT)
             } else {
                 let bottom = instance.viewport().bottom();
                 let ln_vis = instance.visible_line_count();
@@ -112,11 +112,11 @@ impl<'a> Widget for StatusWidget<'a> {
                 let row = instance.viewport().top();
                 let col = instance.viewport().left();
 
-                Paragraph::new(Line::from(vec![
+                Line::from(vec![
                     Span::raw(format!("{}:{}", row + 1, col + 1)).fg(colors::STATUS_BAR_TEXT),
                     Span::raw(format!("  {:.0}%  ", percentage * 100.0))
                         .fg(colors::STATUS_BAR_TEXT),
-                ]))
+                ])
             }
             .alignment(Alignment::Right)
             .render(area, buf)
@@ -205,14 +205,14 @@ pub struct TabWidget<'a> {
 
 impl TabWidget<'_> {
     fn render(self, area: Rect, buf: &mut Buffer, handle: &mut MouseHandler) {
-        Paragraph::new(Line::from(vec![
+        Line::from(vec![
             if self.active {
-                Span::from("▍ ").fg(colors::TAB_SIDE_ACTIVE)
+                Span::raw("▍ ").fg(colors::TAB_SIDE_ACTIVE)
             } else {
-                Span::from("▏ ").fg(colors::TAB_SIDE_INACTIVE)
+                Span::raw("▏ ").fg(colors::TAB_SIDE_INACTIVE)
             },
-            Span::from(self.name),
-        ]))
+            Span::raw(self.name),
+        ])
         .bg(if self.active {
             colors::TAB_ACTIVE
         } else {

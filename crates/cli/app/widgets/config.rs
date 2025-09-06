@@ -133,7 +133,7 @@ impl ConfigLineWidget<'_> {
 
         v.push(Span::raw(self.name.unwrap_or("Untitled Filter Set")).fg(colors::WHITE));
 
-        Paragraph::new(Line::from(v)).render(area, buf);
+        Line::from(v).render(area, buf);
     }
 }
 
@@ -149,6 +149,6 @@ impl FilterLineWidget<'_> {
             Span::from(if self.enabled { " ● " } else { " ◯ " }).fg(self.color),
             Span::raw(self.name).fg(self.color),
         ];
-        Paragraph::new(Line::from(spans)).render(area, buf);
+        Line::from(spans).render(area, buf);
     }
 }

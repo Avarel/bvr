@@ -30,7 +30,6 @@ use actions::{ConfigAction, FilterAction};
 use anyhow::Result;
 use bvr_core::{SegBuffer, err::Error, index::BoxedStream, matches::CompositeStrategy};
 use crossterm::{clipboard::CopyToClipboard, event};
-use ratatui::widgets::{Clear, Widget};
 use regex::bytes::Regex;
 use std::{
     borrow::Cow,

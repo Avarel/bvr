@@ -123,7 +123,7 @@ impl FilterLineWidget<'_> {
             v.push(Span::from(format!(" {}", len)).fg(colors::TEXT_INACTIVE));
         }
 
-        Paragraph::new(Line::from(v)).render(area, buf);
+        Line::from(v).render(area, buf);
 
         handle.on_mouse(area, |event| match event.kind {
             MouseEventKind::Down(_) => Some(Action::Filter(FilterAction::ToggleSpecificFilter {

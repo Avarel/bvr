@@ -10,8 +10,9 @@ use crate::{
     direction::Direction,
 };
 use bitflags::bitflags;
+use bvr_core::SegStr;
 use crossterm::event::MouseEventKind;
-use ratatui::{prelude::*, widgets::*};
+use ratatui::prelude::*;
 use regex::bytes::Regex;
 
 pub struct LineViewerWidget<'a> {
@@ -24,7 +25,7 @@ pub struct LineViewerWidget<'a> {
 
 struct LineRenderData<'a> {
     line_number: usize,
-    data: &'a str,
+    data: &'a SegStr,
     color: Color,
     ty: LineType,
 }
@@ -64,9 +65,9 @@ impl LineViewerWidget<'_> {
                     view_index: self.view_index,
                     start: left,
                     search_color,
-                    line: line.map(|line| LineRenderData {
+                    line_data: line.map(|line| LineRenderData {
                         line_number: line.line_number,
-                        data: line.data.as_str(),
+                        data: &line.data,
                         color: line.color,
                         ty: match cursor_state {
                             Cursor::Singleton(i) => {
@@ -116,7 +117,7 @@ impl LineViewerWidget<'_> {
 
 struct ViewerLineWidget<'a> {
     view_index: usize,
-    line: Option<LineRenderData<'a>>,
+    line_data: Option<LineRenderData<'a>>,
 
     search_color: Color,
     itoa_buf: &'a mut itoa::Buffer,
@@ -168,8 +169,8 @@ impl ViewerLineWidget<'_> {
     pub fn render(self, area: Rect, buf: &mut Buffer, handle: &mut MouseHandler) {
         let (gutter_chunk, cursor_chunk, data_chunk) = self.split_line(area);
 
-        let Some(line) = &self.line else {
-            let ln = Paragraph::new("~")
+        let Some(line) = &self.line_data else {
+            let ln = Line::raw("~")
                 .alignment(Alignment::Right)
                 .fg(colors::GUTTER_TEXT)
                 .bg(colors::GUTTER_BG);
@@ -182,7 +183,7 @@ impl ViewerLineWidget<'_> {
 
         if let Some(gutter_chunk) = gutter_chunk {
             let ln_str = self.itoa_buf.format(line.line_number + 1);
-            let ln = Paragraph::new(ln_str).alignment(Alignment::Right).fg(
+            let ln = Line::raw(ln_str).alignment(Alignment::Right).fg(
                 if line.ty.contains(LineType::Bookmarked) {
                     colors::SELECT_ACCENT
                 } else {
@@ -194,7 +195,7 @@ impl ViewerLineWidget<'_> {
         }
 
         if let Some(type_chunk) = cursor_chunk {
-            Paragraph::new(Self::gutter_selection(line))
+            Span::raw(Self::gutter_selection(line))
                 .fg(colors::SELECT_ACCENT)
                 .render(type_chunk, buf);
         }
@@ -211,7 +212,7 @@ impl ViewerLineWidget<'_> {
             .get(start..end)
             .unwrap_or("Bad char boundary handling");
 
-        let mut para = if let Some(m) = self.regex.and_then(|r| r.find(data.as_bytes())) {
+        let mut line_widget = if let Some(m) = self.regex.and_then(|r| r.find(data.as_bytes())) {
             let start = m.start();
             let end = m.end();
             let spans = vec![
@@ -219,19 +220,19 @@ impl ViewerLineWidget<'_> {
                 Span::raw(&data[start..end]).bg(self.search_color),
                 Span::raw(&data[end..]),
             ];
-            Paragraph::new(Line::from(spans))
+            Line::from(spans)
         } else {
-            Paragraph::new(data)
-        }
-        .fg(line.color);
+            Line::raw(data)
+        };
 
+        line_widget.style.fg = Some(line.color);
         if line.ty.contains(LineType::Bookmarked) {
-            para = para.bg(colors::SELECT_ACCENT);
+            line_widget.style.bg = Some(colors::SELECT_ACCENT);
         }
 
-        para.render(data_chunk, buf);
+        line_widget.render(data_chunk, buf);
 
-        if let Some(line) = self.line {
+        if let Some(line) = self.line_data {
             handle.on_mouse(area, |event| match event.kind {
                 MouseEventKind::Down(_) => Some(Action::Visual(VisualAction::ToggleLine {
                     line_number: line.line_number,
