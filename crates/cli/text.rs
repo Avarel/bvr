@@ -1,18 +1,19 @@
 use std::borrow::Cow;
-use unicode_width::UnicodeWidthChar;
+use unicode_segmentation::UnicodeSegmentation;
+use unicode_width::{UnicodeWidthStr};
 
 fn needs_normalization(input: &str) -> bool {
     let mut needs_normalization = false;
 
-    for ch in input.chars() {
-        match ch {
-            '\t' => {
+    for grapheme in input.graphemes(true) {
+        match grapheme {
+            "\t" => {
                 needs_normalization = true;
                 break;
             }
-            ch => {
-                let char_width = ch.width().unwrap_or(0);
-                if char_width != 1 {
+            _ => {
+                let width = grapheme.width();
+                if width != 1 {
                     needs_normalization = true;
                     break;
                 }
@@ -26,14 +27,14 @@ fn needs_normalization(input: &str) -> bool {
 const REPLACEMENT: char = '\u{FFFD}';
 
 fn extend_with_normalized_chars(res: &mut String, input: &str) {
-    for ch in input.chars() {
-        match ch {
-            '\t' => {
+    for grapheme in input.graphemes(true) {
+        match grapheme {
+            "\t" => {
                 // Replace tab with 4 spaces
                 res.push_str("    ");
             }
-            ch => {
-                let char_width = ch.width().unwrap_or(0);
+            _ => {
+                let char_width = grapheme.width();
                 match char_width {
                     0 => {
                         // Zero-width character - skip it
@@ -41,7 +42,7 @@ fn extend_with_normalized_chars(res: &mut String, input: &str) {
                     }
                     1 => {
                         // Single-width character - keep as is
-                        res.push(ch);
+                        res.push_str(grapheme);
                     }
                     _ => {
                         // Multi-width character - replace with replacement characters

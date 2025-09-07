@@ -13,6 +13,7 @@ use bitflags::bitflags;
 use crossterm::event::MouseEventKind;
 use ratatui::prelude::*;
 use regex::bytes::Regex;
+use unicode_segmentation::UnicodeSegmentation;
 
 pub struct LineViewerWidget<'a> {
     pub(super) view_index: usize,
@@ -201,7 +202,7 @@ impl ViewerLineWidget<'_> {
 
         let data = {
             let data = line.data;
-            let mut chars = data.char_indices();
+            let mut chars = data.grapheme_indices(true);
             let start = chars.nth(self.start).map(|(idx, _)| idx).unwrap_or(data.len());
             let end = chars
                 .nth(data_chunk.width as usize)
