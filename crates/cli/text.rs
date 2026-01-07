@@ -1,6 +1,6 @@
 use std::borrow::Cow;
 use unicode_segmentation::UnicodeSegmentation;
-use unicode_width::{UnicodeWidthStr};
+use unicode_width::UnicodeWidthChar;
 
 fn needs_normalization(input: &str) -> bool {
     let mut needs_normalization = false;
@@ -12,9 +12,14 @@ fn needs_normalization(input: &str) -> bool {
                 break;
             }
             _ => {
-                let width = grapheme.width();
-                if width != 1 {
-                    needs_normalization = true;
+                for ch in grapheme.chars() {
+                    let char_width = ch.width().unwrap_or(0);
+                    if char_width != 1 {
+                        needs_normalization = true;
+                        break;
+                    }
+                }
+                if needs_normalization {
                     break;
                 }
             }
@@ -34,20 +39,23 @@ fn extend_with_normalized_chars(res: &mut String, input: &str) {
                 res.push_str("    ");
             }
             _ => {
-                let char_width = grapheme.width();
-                match char_width {
-                    0 => {
-                        // Zero-width character - skip it
-                        continue;
-                    }
-                    1 => {
-                        // Single-width character - keep as is
-                        res.push_str(grapheme);
-                    }
-                    _ => {
-                        // Multi-width character - replace with replacement characters
-                        for _ in 0..char_width {
-                            res.push(REPLACEMENT);
+                // Process each character in the grapheme individually
+                for ch in grapheme.chars() {
+                    let char_width = ch.width().unwrap_or(0);
+                    match char_width {
+                        0 => {
+                            // Zero-width character - skip it
+                            continue;
+                        }
+                        1 => {
+                            // Single-width character - keep as is
+                            res.push(ch);
+                        }
+                        _ => {
+                            // Multi-width character - replace with replacement characters
+                            for _ in 0..char_width {
+                                res.push(REPLACEMENT);
+                            }
                         }
                     }
                 }
