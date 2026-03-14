@@ -1,5 +1,5 @@
 use anyhow::Result;
-use rand::{distr::Distribution, rngs::SmallRng, Rng, SeedableRng};
+use rand::{Rng, RngExt, SeedableRng, distr::Distribution, rngs::SmallRng};
 use std::{
     fs::OpenOptions,
     io::BufWriter,
