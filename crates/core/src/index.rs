@@ -83,8 +83,8 @@ type IndexType = u32;
 /// A remote type that can be used to set off the indexing process of a
 /// file or a stream.
 pub(crate) struct LineIndexWriter {
-    overflow: CowVecWriter<(usize, usize)>,
-    buf: CowVecWriter<IndexType>,
+    upper: CowVecWriter<(usize, usize)>,
+    lower: CowVecWriter<IndexType>,
     report: Arc<ProgressReport>,
     old_upper: usize,
 }
@@ -99,9 +99,9 @@ impl LineIndexWriter {
         let len = file.metadata()?.len();
         let file = file.try_clone()?;
 
-        self.buf
+        self.lower
             .reserve((len / Self::BYTES_PER_LINE_HEURISTIC) as usize);
-        self.buf.push(0);
+        self.lower.push(0);
 
         // Indexing worker
         let spawner: JoinHandle<Result<()>> = std::thread::spawn({
@@ -126,7 +126,7 @@ impl LineIndexWriter {
         });
 
         while let Ok(task_rx) = rx.recv() {
-            if !self.buf.has_readers() {
+            if !self.lower.has_readers() {
                 break;
             }
 
@@ -146,11 +146,11 @@ impl LineIndexWriter {
         let lower = line_data as IndexType;
 
         if upper > self.old_upper {
-            self.overflow.push((self.buf.len(), upper - self.old_upper));
+            self.upper.push((self.lower.len(), upper));
             self.old_upper = upper;
         }
 
-        self.buf.push(lower);
+        self.lower.push(lower);
     }
 
     pub fn index_stream(
@@ -161,7 +161,7 @@ impl LineIndexWriter {
     ) -> Result<()> {
         let mut len = 0;
 
-        self.buf.push(0);
+        self.lower.push(0);
 
         loop {
             let mut segment = SegmentMut::new(len, segment_size)?;
@@ -210,29 +210,29 @@ pub struct LineIndex {
     //
     // This allows us to compress the line index by storing only the lower bits of the
     // index in buf, and storing the upper bits in overflow only when necessary.
-    overflow: Arc<CowVec<(usize, usize)>>,
-    buf: Arc<CowVec<IndexType>>,
+    upper: Arc<CowVec<(usize, usize)>>,
+    lower: Arc<CowVec<IndexType>>,
     report: Arc<ProgressReport>,
 }
 
 impl LineIndex {
     pub(crate) fn new(report: ProgressReport) -> (Self, LineIndexWriter) {
-        let (overflow, writer_overflow) = CowVec::new();
-        let (buf, writer) = CowVec::new();
+        let (upper, writer_overflow) = CowVec::new();
+        let (lower, writer) = CowVec::new();
         let report = Arc::new(report);
         let writer = {
             let report = report.clone();
             LineIndexWriter {
-                buf: writer,
-                overflow: writer_overflow,
+                lower: writer,
+                upper: writer_overflow,
                 report,
                 old_upper: 0,
             }
         };
         (
             Self {
-                buf,
-                overflow: overflow,
+                lower,
+                upper,
                 report,
             },
             writer,
@@ -271,30 +271,52 @@ impl LineIndex {
     }
 
     pub fn line_count(&self) -> usize {
-        self.buf.len().saturating_sub(1)
+        self.lower.len().saturating_sub(1)
     }
 
-    pub fn adjustment_of_line(&self, line_number: usize) -> u64 {
-        let upper_bits = self
-            .overflow
-            .snapshot()
-            .iter()
-            .take_while(|(i, _)| line_number >= *i)
-            .map(|(_, diff)| diff)
-            .sum::<usize>() as u64;
+    pub fn upper_bits(&self, line_number: usize) -> u64 {
+        // Find first entry where key >= index
+        let upper_bits = {
+            let key = line_number;
+            let buf = self.upper.snapshot();
+            let mut size = buf.len();
+            let mut left = 0;
+            let mut right = size;
+            while left < right {
+                let mid = left + size / 2;
+
+                // mid must be less than size
+                let &(i, _) = unsafe { buf.get_unchecked(mid) };
+
+                if i <= key {
+                    left = mid + 1;
+                } else if i > key {
+                    right = mid;
+                }
+
+                size = right - left;
+            }
+
+            if left > 0 {
+                buf.get(left - 1).map(|(_, diff)| diff as u64).unwrap_or(0)
+            } else {
+                0
+            }
+        };
 
         upper_bits << IndexType::BITS as u64
     }
 
     pub fn data_of_line(&self, line_number: usize) -> Option<u64> {
-        self.buf
+        // Get the lower bits from buf and add the upper bits from overflow.
+        self.lower
             .get(line_number)
-            .map(|i| i as u64 + self.adjustment_of_line(line_number))
+            .map(|lower_bits| lower_bits as u64 + self.upper_bits(line_number))
     }
 
     pub fn line_of_data(&self, key: u64) -> Option<usize> {
         // Safety: this code was pulled from Vec::binary_search_by
-        let buf = self.buf.snapshot();
+        let buf = self.lower.snapshot();
         let mut size = buf.len().saturating_sub(1);
         let mut left = 0;
         let mut right = size;
@@ -320,6 +342,6 @@ impl LineIndex {
     }
 
     pub fn is_complete(&self) -> bool {
-        self.buf.is_complete()
+        self.lower.is_complete()
     }
 }
