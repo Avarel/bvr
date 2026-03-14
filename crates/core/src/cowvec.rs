@@ -324,12 +324,6 @@ where
     pub fn get(&self, index: usize) -> Option<T> {
         self.read(|slice| slice.get(index).copied())
     }
-
-    /// Returns the element at the given index.
-    #[allow(dead_code)]
-    pub unsafe fn get_unchecked(&self, index: usize) -> T {
-        self.get(index).unwrap_unchecked()
-    }
 }
 
 #[macro_export]
@@ -374,11 +368,6 @@ where
     /// Returns the element at the given index, or `None` if out of bounds.
     pub fn get(&self, index: usize) -> Option<T> {
         self.deref().get(index).copied()
-    }
-
-    /// Returns the element at the given index.
-    pub unsafe fn get_unchecked(&self, index: usize) -> T {
-        self.get(index).unwrap_unchecked()
     }
 
     /// Extracts a slice containing the entire vector.

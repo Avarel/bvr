@@ -73,11 +73,20 @@ impl ProgressReport {
     }
 }
 
+// Debug builds use a smaller index type to make it easier to catch issues.
+#[cfg(debug_assertions)]
+type IndexType = u16;
+
+#[cfg(not(debug_assertions))]
+type IndexType = u32;
+
 /// A remote type that can be used to set off the indexing process of a
 /// file or a stream.
 pub(crate) struct LineIndexWriter {
-    buf: CowVecWriter<u64>,
+    overflow: CowVecWriter<(usize, usize)>,
+    buf: CowVecWriter<IndexType>,
     report: Arc<ProgressReport>,
+    old_upper: usize,
 }
 
 impl LineIndexWriter {
@@ -122,14 +131,26 @@ impl LineIndexWriter {
             }
 
             while let Ok(line_data) = task_rx.recv() {
-                self.buf.push(line_data);
+                self.push(line_data);
             }
         }
 
         spawner.join().map_err(|_| Error::Internal)??;
-        self.buf.push(len);
+        self.push(len);
 
         Ok(())
+    }
+
+    pub fn push(&mut self, line_data: u64) {
+        let upper = (line_data >> IndexType::BITS) as usize;
+        let lower = line_data as IndexType;
+
+        if upper > self.old_upper {
+            self.overflow.push((self.buf.len(), upper - self.old_upper));
+            self.old_upper = upper;
+        }
+
+        self.buf.push(lower);
     }
 
     pub fn index_stream(
@@ -155,7 +176,7 @@ impl LineIndexWriter {
 
             for i in memchr::memchr_iter(b'\n', &segment) {
                 let line_data = len + i as u64;
-                self.buf.push(line_data + 1);
+                self.push(line_data + 1);
             }
 
             outgoing
@@ -169,13 +190,8 @@ impl LineIndexWriter {
             len += buf_len as u64;
         }
 
-        self.buf.push(len);
+        self.push(len);
         Ok(())
-    }
-
-    #[cfg(test)]
-    pub(crate) fn push(&mut self, line_data: u64) {
-        self.buf.push(line_data);
     }
 }
 
@@ -187,22 +203,40 @@ impl Drop for LineIndexWriter {
 
 #[derive(Clone)]
 pub struct LineIndex {
-    buf: Arc<CowVec<u64>>,
+    // This stores the indices of buf where the first index represents an index in buf
+    // that overflows, and the second index represents how many times it overflows.
+    // For example, if overflow[0] = (1000, 2), then buf[1000] represents a number
+    // that is 2 * IndexType::MAX larger than the value stored in buf[1000].
+    //
+    // This allows us to compress the line index by storing only the lower bits of the
+    // index in buf, and storing the upper bits in overflow only when necessary.
+    overflow: Arc<CowVec<(usize, usize)>>,
+    buf: Arc<CowVec<IndexType>>,
     report: Arc<ProgressReport>,
 }
 
 impl LineIndex {
     pub(crate) fn new(report: ProgressReport) -> (Self, LineIndexWriter) {
+        let (overflow, writer_overflow) = CowVec::new();
         let (buf, writer) = CowVec::new();
         let report = Arc::new(report);
         let writer = {
             let report = report.clone();
             LineIndexWriter {
                 buf: writer,
+                overflow: writer_overflow,
                 report,
+                old_upper: 0,
             }
         };
-        (Self { buf, report }, writer)
+        (
+            Self {
+                buf,
+                overflow: overflow,
+                report,
+            },
+            writer,
+        )
     }
 
     pub fn read_file(file: File, complete: bool) -> Result<Self> {
@@ -240,8 +274,22 @@ impl LineIndex {
         self.buf.len().saturating_sub(1)
     }
 
+    pub fn adjustment_of_line(&self, line_number: usize) -> u64 {
+        let upper_bits = self
+            .overflow
+            .snapshot()
+            .iter()
+            .take_while(|(i, _)| line_number >= *i)
+            .map(|(_, diff)| diff)
+            .sum::<usize>() as u64;
+
+        upper_bits << IndexType::BITS as u64
+    }
+
     pub fn data_of_line(&self, line_number: usize) -> Option<u64> {
-        self.buf.get(line_number)
+        self.buf
+            .get(line_number)
+            .map(|i| i as u64 + self.adjustment_of_line(line_number))
     }
 
     pub fn line_of_data(&self, key: u64) -> Option<usize> {
@@ -254,8 +302,8 @@ impl LineIndex {
             let mid = left + size / 2;
 
             // mid must be less than size, which is self.line_index.len() - 1
-            let start = unsafe { buf.get_unchecked(mid) };
-            let end = unsafe { buf.get_unchecked(mid + 1) };
+            let start = unsafe { self.data_of_line(mid).unwrap_unchecked() };
+            let end = unsafe { self.data_of_line(mid + 1).unwrap_unchecked() };
 
             if end <= key {
                 left = mid + 1;
