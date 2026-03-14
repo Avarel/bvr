@@ -75,7 +75,7 @@ impl ProgressReport {
 
 // Debug builds use a smaller index type to make it easier to catch issues.
 #[cfg(debug_assertions)]
-type IndexType = u16;
+type IndexType = u8;
 
 #[cfg(not(debug_assertions))]
 type IndexType = u32;
@@ -276,29 +276,27 @@ impl LineIndex {
 
     pub fn upper_bits(&self, line_number: usize) -> u64 {
         // Find first entry where key >= index
-        let upper_bits = {
-            let key = line_number;
+        let upper_bits = 'binary_search: {
             let buf = self.upper.snapshot();
+
             let mut size = buf.len();
-            let mut left = 0;
-            let mut right = size;
-            while left < right {
-                let mid = left + size / 2;
+            if size == 0 {
+                break 'binary_search 0;
+            }
+            let mut base = 0usize;
 
-                // mid must be less than size
+            // Based on std::slice::binary_search_by, specialized for the container
+            while size > 1 {
+                let half = size / 2;
+                let mid = base + half;
                 let &(i, _) = unsafe { buf.get_unchecked(mid) };
-
-                if i <= key {
-                    left = mid + 1;
-                } else if i > key {
-                    right = mid;
-                }
-
-                size = right - left;
+                base = std::hint::select_unpredictable(i > line_number, base, mid);
+                size -= half;
             }
 
-            if left > 0 {
-                buf.get(left - 1).map(|(_, diff)| diff as u64).unwrap_or(0)
+            let &(i, diff) = unsafe { buf.get_unchecked(base) };
+            if i <= line_number {
+                diff as u64
             } else {
                 0
             }
@@ -315,30 +313,27 @@ impl LineIndex {
     }
 
     pub fn line_of_data(&self, key: u64) -> Option<usize> {
-        // Safety: this code was pulled from Vec::binary_search_by
         let buf = self.lower.snapshot();
         let mut size = buf.len().saturating_sub(1);
-        let mut left = 0;
-        let mut right = size;
-        while left < right {
-            let mid = left + size / 2;
-
-            // mid must be less than size, which is self.line_index.len() - 1
-            let start = unsafe { self.data_of_line(mid).unwrap_unchecked() };
-            let end = unsafe { self.data_of_line(mid + 1).unwrap_unchecked() };
-
-            if end <= key {
-                left = mid + 1;
-            } else if start > key {
-                right = mid;
-            } else {
-                return Some(mid);
-            }
-
-            size = right - left;
+        if size == 0 {
+            return None;
         }
 
-        None
+        // Based on std::slice::binary_search_by, specialized for the container
+        // Find last line where data_of_line(line) <= key
+        let mut base = 0;
+        while size > 1 {
+            let half = size / 2;
+            let mid = base + half;
+            let start = unsafe { self.data_of_line(mid).unwrap_unchecked() };
+            base = std::hint::select_unpredictable(start > key, base, mid);
+            size -= half;
+        }
+
+        // Verify the candidate is a valid match
+        let start = unsafe { self.data_of_line(base).unwrap_unchecked() };
+        let end = unsafe { self.data_of_line(base + 1).unwrap_unchecked() };
+        (start <= key && key < end).then_some(base)
     }
 
     pub fn is_complete(&self) -> bool {
