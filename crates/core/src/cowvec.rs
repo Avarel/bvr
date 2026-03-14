@@ -139,6 +139,10 @@ where
         buf.len.store(len + 1, Ordering::Release);
     }
 
+    pub fn len(&self) -> usize {
+        self.target.buf.load().len.load(Ordering::Acquire)
+    }
+
     /// Inserts an element at the given index, shifting all elements after it to the right.
     ///
     /// This operation is O(n) where n is the number of elements to the right of the index.
