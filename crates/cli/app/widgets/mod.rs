@@ -404,7 +404,7 @@ impl MultiplexerWidget<'_> {
         if !self.mux.is_empty() {
             self.render_mux(mux_chunk, buf, handler);
         } else {
-            const BG_BLOCK: OnceLock<Block> = OnceLock::new();
+            static BG_BLOCK: OnceLock<Block> = OnceLock::new();
             BG_BLOCK
                 .get_or_init(|| Block::new().bg(colors::BG))
                 .render(mux_chunk, buf);

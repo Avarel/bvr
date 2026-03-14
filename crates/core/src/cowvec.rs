@@ -129,17 +129,14 @@ where
         let len = buf.len.load(Ordering::Relaxed);
         let cap = buf.cap;
 
-        let push_inner = move |buf: &RawBuf<T>, len, elem| {
-            unsafe { std::ptr::write(buf.ptr.as_ptr().add(len), elem) }
-            buf.len.store(len + 1, Ordering::Release);
+        let buf = if len == cap {
+            &self.grow(&buf, len, None)
+        } else {
+            &buf
         };
 
-        if len == cap {
-            // Safety: If this runs, then buf will no longer be borrowed from
-            push_inner(&self.grow(&buf, len, None), len, elem)
-        } else {
-            push_inner(&buf, len, elem)
-        }
+        unsafe { std::ptr::write(buf.ptr.as_ptr().add(len), elem) }
+        buf.len.store(len + 1, Ordering::Release);
     }
 
     /// Inserts an element at the given index, shifting all elements after it to the right.
