@@ -32,7 +32,7 @@ impl IndexingTask {
         let mut curr_upper = 0;
         let mut lowers = Vec::new();
         for i in memchr::memchr_iter(b'\n', &self.segment) {
-            let line_data = self.segment.start() + i as u64;
+            let line_data = self.segment.start() + i as u64 + 1;
             let upper = (line_data >> IndexType::BITS) as usize;
             let lower = line_data as IndexType;
 
