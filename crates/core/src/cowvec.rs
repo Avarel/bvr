@@ -139,6 +139,24 @@ where
         buf.len.store(len + 1, Ordering::Release);
     }
 
+    /// Appends all elements from a slice to the back of this collection.
+    pub fn extend_from_slice(&mut self, elems: &[T]) {
+        let buf = self.target.buf.load();
+        let len = buf.len.load(Ordering::Relaxed);
+        let cap = buf.cap;
+
+        let buf = if len + elems.len() > cap {
+            &self.grow(&buf, len, Some((len + elems.len()).max(cap * 2)))
+        } else {
+            &buf
+        };
+
+        unsafe {
+            std::ptr::copy_nonoverlapping(elems.as_ptr(), buf.ptr.as_ptr().add(len), elems.len());
+        }
+        buf.len.store(len + elems.len(), Ordering::Release);
+    }
+
     pub fn len(&self) -> usize {
         self.target.buf.load().len.load(Ordering::Acquire)
     }

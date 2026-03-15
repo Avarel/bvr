@@ -16,22 +16,42 @@ use crate::{
 
 struct IndexingTask {
     /// This is the sender side of the channel that receives byte indexes of `\n`.
-    sx: Sender<u64>,
+    sx: Sender<(usize, Vec<IndexType>)>,
     segment: Segment,
 }
 
 impl IndexingTask {
     #[inline]
-    fn new(file: &File, start: u64, end: u64) -> Result<(Self, Receiver<u64>)> {
+    fn new(file: &File, start: u64, end: u64) -> Result<(Self, Receiver<(usize, Vec<IndexType>)>)> {
         let segment = Segment::map_file(start..end, file)?;
         let (sx, rx) = std::sync::mpsc::channel();
         Ok((Self { sx, segment }, rx))
     }
 
     fn compute(self) -> Result<()> {
+        let mut curr_upper = 0;
+        let mut lowers = Vec::new();
         for i in memchr::memchr_iter(b'\n', &self.segment) {
+            let line_data = self.segment.start() + i as u64;
+            let upper = (line_data >> IndexType::BITS) as usize;
+            let lower = line_data as IndexType;
+
+            if upper > curr_upper {
+                if !lowers.is_empty() {
+                    self.sx
+                        .send((curr_upper, std::mem::take(&mut lowers)))
+                        .map_err(|_| Error::Internal)?;
+                }
+
+                curr_upper = upper;
+            }
+
+            lowers.push(lower);
+        }
+
+        if !lowers.is_empty() {
             self.sx
-                .send(self.segment.start() + i as u64 + 1)
+                .send((curr_upper, lowers))
                 .map_err(|_| Error::Internal)?;
         }
 
@@ -86,7 +106,7 @@ pub(crate) struct LineIndexWriter {
     upper: CowVecWriter<(usize, usize)>,
     lower: CowVecWriter<IndexType>,
     report: Arc<ProgressReport>,
-    old_upper: usize,
+    curr_upper: usize,
 }
 
 impl LineIndexWriter {
@@ -130,8 +150,12 @@ impl LineIndexWriter {
                 break;
             }
 
-            while let Ok(line_data) = task_rx.recv() {
-                self.push(line_data);
+            while let Ok((upper, lowers)) = task_rx.recv() {
+                if upper > self.curr_upper {
+                    self.upper.push((self.lower.len(), upper));
+                    self.curr_upper = upper;
+                }
+                self.lower.extend_from_slice(&lowers);
             }
         }
 
@@ -145,9 +169,9 @@ impl LineIndexWriter {
         let upper = (line_data >> IndexType::BITS) as usize;
         let lower = line_data as IndexType;
 
-        if upper > self.old_upper {
+        if upper > self.curr_upper {
             self.upper.push((self.lower.len(), upper));
-            self.old_upper = upper;
+            self.curr_upper = upper;
         }
 
         self.lower.push(lower);
@@ -226,7 +250,7 @@ impl LineIndex {
                 lower: writer,
                 upper: writer_overflow,
                 report,
-                old_upper: 0,
+                curr_upper: 0,
             }
         };
         (
