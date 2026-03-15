@@ -42,7 +42,7 @@ impl LineMatchWriter {
             } else if iter.index().is_complete() {
                 break;
             } else {
-                std::hint::spin_loop()
+                std::thread::park_timeout(std::time::Duration::from_millis(100));
             }
         }
         Ok(())

@@ -13,8 +13,7 @@ impl QueueMatch {
 
     fn peek(&self) -> Option<usize> {
         while !self.is_ready() {
-            // Opportunistically spin while we wait for the queue to be ready
-            std::hint::spin_loop();
+            std::thread::park_timeout(std::time::Duration::from_millis(100));
         }
         self.matches.get(self.index)
     }
