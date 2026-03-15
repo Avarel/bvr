@@ -290,10 +290,16 @@ impl App {
                     filter_index,
                 } => {
                     if self.app.viewer.linked_filters {
-                        // TODO: handle this
-                        return Ok(true);
-                    }
-                    if let Some(instance) = self.app.viewer.mux.instances_mut().get_mut(target_view)
+                        self.app
+                            .viewer
+                            .mux
+                            .instances_mut()
+                            .iter_mut()
+                            .for_each(|instance| {
+                                instance.toggle_filter(filter_index);
+                            });
+                    } else if let Some(instance) =
+                        self.app.viewer.mux.instances_mut().get_mut(target_view)
                     {
                         instance.toggle_filter(filter_index)
                     }
