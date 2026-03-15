@@ -112,7 +112,7 @@ pub(crate) struct LineIndexWriter {
 impl LineIndexWriter {
     const BYTES_PER_LINE_HEURISTIC: u64 = 128;
 
-    pub fn index_file(mut self, file: File) -> Result<()> {
+    pub fn index_file(mut self, file: File, segment_size: u64) -> Result<()> {
         // Build index
         let (sx, rx) = std::sync::mpsc::sync_channel(4);
 
@@ -130,7 +130,7 @@ impl LineIndexWriter {
                 let mut curr = 0;
 
                 while curr < len {
-                    let end = (curr + SegmentMut::TODO_REMOVE_SIZE).min(len);
+                    let end = (curr + segment_size).min(len);
                     let (task, task_rx) = IndexingTask::new(&file, curr, end)?;
                     sx.send(task_rx).map_err(|_| Error::Internal)?;
 
@@ -263,9 +263,9 @@ impl LineIndex {
         )
     }
 
-    pub fn read_file(file: File, complete: bool) -> Result<Self> {
+    pub fn read_file(file: File, complete: bool, segment_size: u64) -> Result<Self> {
         let (index, writer) = Self::new(ProgressReport::PERCENT);
-        let task = move || writer.index_file(file);
+        let task = move || writer.index_file(file, segment_size);
         if complete {
             task()?;
         } else {

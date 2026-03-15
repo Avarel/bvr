@@ -120,7 +120,7 @@ impl SegBuffer {
 
     pub fn read_file(file: File, seg_count: NonZeroUsize, complete: bool) -> Result<Self> {
         file.try_lock_shared()?;
-        let index = LineIndex::read_file(file.try_clone()?, complete)?;
+        let index = LineIndex::read_file(file.try_clone()?, complete, Self::SEGMENT_SIZE)?;
 
         Ok(Self {
             index,

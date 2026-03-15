@@ -21,8 +21,6 @@ impl<Buf> SegmentRaw<Buf>
 where
     Buf: AsRef<[u8]>,
 {
-    pub const TODO_REMOVE_SIZE: u64 = 1 << 20;
-
     #[inline]
     pub fn start(&self) -> u64 {
         self.range.start
